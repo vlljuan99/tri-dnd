@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { tacticalMapRepository } from '../repositories/TestTacticalMapRepository.js';
 import { useTokenMovement } from './useTokenMovement.js';
 
-export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) {
+export function useTacticalMap(campaignId, { user, role, characters = [], enabled = true } = {}) {
   const repository = useMemo(() => tacticalMapRepository, []);
   const [map, setMap] = useState(null);
   const [loading, setLoading] = useState(Boolean(enabled));
@@ -20,7 +20,7 @@ export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) 
     setSaveError('');
 
     repository
-      .getMapByCampaignId(campaignId, { user, role })
+      .getMapByCampaignId(campaignId, { user, role, characters })
       .then((loadedMap) => {
         if (!cancelled) setMap(loadedMap);
       })
@@ -34,7 +34,7 @@ export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) 
     return () => {
       cancelled = true;
     };
-  }, [campaignId, enabled, repository, role, user]);
+  }, [campaignId, characters, enabled, repository, role, user]);
 
   const movement = useTokenMovement({
     map,

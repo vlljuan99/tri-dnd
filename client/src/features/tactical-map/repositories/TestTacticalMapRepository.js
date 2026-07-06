@@ -57,12 +57,29 @@ function applySavedPositions(map) {
   };
 }
 
+// Los tokens de jugador aún son datos de prueba (ver comentario de la clase),
+// pero cuando representan a un personaje real, su icono sale de la ficha.
+function applyCharacterAvatars(map, characters) {
+  const avatarByUserId = new Map(
+    characters.filter((c) => c.avatarUrl).map((c) => [c.user_id, c.avatarUrl])
+  );
+  if (avatarByUserId.size === 0) return map;
+  return {
+    ...map,
+    tokens: map.tokens.map((token) =>
+      token.ownerUserId && avatarByUserId.has(token.ownerUserId)
+        ? { ...token, imageUrl: avatarByUserId.get(token.ownerUserId) }
+        : token
+    ),
+  };
+}
+
 /**
  * Adaptador temporal hasta que exista modelo persistente de mapas en backend.
  * La página consume este repositorio como contrato reemplazable por API.
  */
 export class TestTacticalMapRepository {
-  async getMapByCampaignId(campaignId, { user } = {}) {
+  async getMapByCampaignId(campaignId, { user, characters = [] } = {}) {
     const base = createTestTacticalMap({ campaignId, user });
     const remote = await api(`/campaigns/${campaignId}/mapa`).catch(() => null);
     const merged = remote?.map
@@ -75,7 +92,7 @@ export class TestTacticalMapRepository {
           backgroundUrl: remote.map.backgroundUrl || undefined,
         }
       : base;
-    return applySavedPositions(merged);
+    return applyCharacterAvatars(applySavedPositions(merged), characters);
   }
 
   async uploadBackgroundImage(campaignId, file) {

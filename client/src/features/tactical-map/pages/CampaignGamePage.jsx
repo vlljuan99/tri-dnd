@@ -10,6 +10,7 @@ export default function CampaignGamePage() {
   const campaignId = Number(id);
   const user = useAuth((state) => state.user);
   const [campaign, setCampaign] = useState(null);
+  const [characters, setCharacters] = useState([]);
   const [campaignError, setCampaignError] = useState('');
   const [campaignLoading, setCampaignLoading] = useState(true);
 
@@ -19,8 +20,11 @@ export default function CampaignGamePage() {
     setCampaignError('');
 
     api(`/campaigns/${campaignId}`)
-      .then(({ campaign: loadedCampaign }) => {
-        if (!cancelled) setCampaign(loadedCampaign);
+      .then(({ campaign: loadedCampaign, characters: loadedCharacters }) => {
+        if (!cancelled) {
+          setCampaign(loadedCampaign);
+          setCharacters(loadedCharacters || []);
+        }
       })
       .catch((error) => {
         if (!cancelled) setCampaignError(error.message || 'No se pudo cargar la campaña.');
@@ -49,6 +53,7 @@ export default function CampaignGamePage() {
   } = useTacticalMap(campaignId, {
     user,
     role: campaign?.role,
+    characters,
     enabled: Boolean(campaign),
   });
 

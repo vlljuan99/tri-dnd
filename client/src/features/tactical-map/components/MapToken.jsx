@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import SelectionIndicator from './SelectionIndicator.jsx';
+import TokenIcon from './TokenIcon.jsx';
 import TokenLabel from './TokenLabel.jsx';
 
 function tokenShapeSegments(type) {
@@ -41,6 +42,7 @@ export default function MapToken({ token, selected, movable, saving, onSelect })
         <cylinderGeometry args={[token.size * 0.48, token.size * 0.48, 0.035, segments]} />
         <meshBasicMaterial color={movable ? '#f1c96a' : '#3a332c'} transparent opacity={movable ? 0.9 : 0.72} />
       </mesh>
+      <TokenIcon imageUrl={token.imageUrl} radius={token.size * 0.4} />
       {saving && (
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
           <ringGeometry args={[token.size * 0.53, token.size * 0.61, 24]} />

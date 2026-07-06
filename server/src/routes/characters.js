@@ -1,6 +1,11 @@
-import { Router } from 'express';
+import { Router, raw as expressRaw } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
+import { AVATAR_UPLOADS_DIR } from '../config.js';
+import { extensionForMimeType } from '../utils/uploads.js';
+import { generateAvatarImage } from '../services/avatarImageGeneration.js';
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -60,6 +65,67 @@ charactersRouter.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Personaje no encontrado' });
   res.json({ character: serialize(row), editable: row.user_id === req.user.id });
+});
+
+// Subida de una foto propia como icono del personaje. Se envía como binario
+// crudo (no JSON) para no limitar el body-parser global de la API.
+charactersRouter.patch(
+  '/:id/avatar',
+  expressRaw({ type: () => true, limit: '8mb' }),
+  (req, res) => {
+    const row = getOwned(req, res);
+    if (!row) return;
+
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.startsWith('image/')) {
+      return res.status(400).json({ error: 'El archivo debe ser una imagen' });
+    }
+    const buffer = req.body;
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      return res.status(400).json({ error: 'No se recibió ninguna imagen' });
+    }
+
+    const filename = `character-${row.id}-${Date.now()}${extensionForMimeType(contentType)}`;
+    fs.writeFileSync(path.join(AVATAR_UPLOADS_DIR, filename), buffer);
+    const avatarUrl = `/uploads/avatars/${filename}`;
+
+    db.prepare("UPDATE characters SET avatar_path = ?, updated_at = datetime('now') WHERE id = ?").run(
+      avatarUrl,
+      row.id
+    );
+    res.json({ character: serialize(db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id)) });
+  }
+);
+
+charactersRouter.delete('/:id/avatar', (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+  db.prepare("UPDATE characters SET avatar_path = NULL, updated_at = datetime('now') WHERE id = ?").run(row.id);
+  res.json({ character: serialize(db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id)) });
+});
+
+charactersRouter.post('/:id/avatar/generar', async (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+
+  const { prompt, provider } = req.body ?? {};
+  const cleanPrompt = typeof prompt === 'string' ? prompt.trim().slice(0, 400) : '';
+  if (!cleanPrompt) return res.status(400).json({ error: 'Describe el aspecto de tu personaje' });
+
+  try {
+    const generated = await generateAvatarImage(provider, cleanPrompt);
+    const filename = `character-${row.id}-${Date.now()}.png`;
+    fs.writeFileSync(path.join(AVATAR_UPLOADS_DIR, filename), generated.buffer);
+    const avatarUrl = `/uploads/avatars/${filename}`;
+
+    db.prepare("UPDATE characters SET avatar_path = ?, updated_at = datetime('now') WHERE id = ?").run(
+      avatarUrl,
+      row.id
+    );
+    res.json({ character: serialize(db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id)) });
+  } catch (error) {
+    res.status(502).json({ error: error.message || 'No se pudo generar el icono' });
+  }
 });
 
 const UPDATABLE = {

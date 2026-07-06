@@ -6,6 +6,7 @@ import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { MAP_UPLOADS_DIR } from '../config.js';
 import { generateMapImage } from '../services/mapImageGeneration.js';
+import { extensionForMimeType } from '../utils/uploads.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -24,12 +25,6 @@ function getMapTable(campaignId) {
   return db
     .prepare('SELECT map_name, map_background_url, map_width, map_height, map_grid_size FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
-}
-
-function extensionForMimeType(mimeType) {
-  if (mimeType?.includes('webp')) return '.webp';
-  if (mimeType?.includes('jpeg') || mimeType?.includes('jpg')) return '.jpg';
-  return '.png';
 }
 
 // Código de invitación legible, sin caracteres ambiguos (0/O, 1/I/L)
@@ -129,7 +124,7 @@ campaignsRouter.get('/:id', (req, res) => {
     .all(row.id);
   const characters = db
     .prepare(
-      `SELECT id, user_id, name, class_index, race_index, level, hp_current, hp_max, ac
+      `SELECT id, user_id, name, class_index, race_index, level, hp_current, hp_max, ac, avatar_path AS avatarUrl
        FROM characters WHERE campaign_id = ?`
     )
     .all(row.id);
