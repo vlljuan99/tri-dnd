@@ -81,6 +81,12 @@ export default function MesaPage() {
       <header className="flex items-center justify-between gap-4 border-b border-gold/20 bg-night-900 px-4 py-2">
         <div className="flex items-center gap-3">
           <Link to="/" className="font-display text-sm text-gold/70 hover:text-gold">← Hub</Link>
+          <Link
+            to={`/campanas/${campaignId}/tablero`}
+            className="rounded-sm border border-gold/25 px-2 py-1 font-display text-xs uppercase tracking-widest text-gold/80 hover:border-gold hover:text-gold"
+          >
+            Tablero
+          </Link>
           <h1 className="font-display text-xl tracking-wide text-gold">{room.campaignName || 'Mesa de juego'}</h1>
           {room.isLive && (
             <span className="flex items-center gap-1.5 rounded-sm border border-ember/60 px-2 py-0.5 text-xs text-ember">
