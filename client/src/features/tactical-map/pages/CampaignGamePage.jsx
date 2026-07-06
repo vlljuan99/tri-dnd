@@ -34,7 +34,19 @@ export default function CampaignGamePage() {
     };
   }, [campaignId]);
 
-  const { map, loading: mapLoading, loadError, saveError, savingTokenId, moveToken } = useTacticalMap(campaignId, {
+  const {
+    map,
+    loading: mapLoading,
+    loadError,
+    saveError,
+    savingTokenId,
+    moveToken,
+    backgroundBusy,
+    backgroundError,
+    uploadBackground,
+    generateBackground,
+    removeBackground,
+  } = useTacticalMap(campaignId, {
     user,
     role: campaign?.role,
     enabled: Boolean(campaign),
@@ -99,6 +111,11 @@ export default function CampaignGamePage() {
           savingTokenId={savingTokenId}
           saveError={saveError}
           onMoveToken={moveToken}
+          backgroundBusy={backgroundBusy}
+          backgroundError={backgroundError}
+          onUploadBackground={uploadBackground}
+          onGenerateBackground={generateBackground}
+          onRemoveBackground={removeBackground}
           backToCampaignHref={`/campanas/${campaignId}`}
         />
       )}

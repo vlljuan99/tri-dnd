@@ -141,6 +141,15 @@ const migrations = [
   ALTER TABLE characters ADD COLUMN wizard_data TEXT NOT NULL DEFAULT '{}';
   CREATE INDEX idx_characters_status ON characters(status);
   `,
+
+  // v6 — mapa táctico: imagen de fondo persistente por campaña (fase 7)
+  `
+  ALTER TABLE game_tables ADD COLUMN map_name TEXT NOT NULL DEFAULT 'Mapa sin título';
+  ALTER TABLE game_tables ADD COLUMN map_background_url TEXT;
+  ALTER TABLE game_tables ADD COLUMN map_width REAL NOT NULL DEFAULT 12;
+  ALTER TABLE game_tables ADD COLUMN map_height REAL NOT NULL DEFAULT 8;
+  ALTER TABLE game_tables ADD COLUMN map_grid_size REAL NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function runMigrations() {

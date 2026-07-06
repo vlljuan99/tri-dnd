@@ -9,6 +9,8 @@ export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) 
   const [loadError, setLoadError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [savingTokenId, setSavingTokenId] = useState(null);
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const [backgroundError, setBackgroundError] = useState('');
 
   useEffect(() => {
     if (!enabled || !campaignId) return undefined;
@@ -44,6 +46,29 @@ export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) 
     setSaveError,
   });
 
+  function applyMapMeta(meta) {
+    if (!meta) return;
+    setMap((prev) => (prev ? { ...prev, ...meta } : prev));
+  }
+
+  async function runBackgroundAction(action) {
+    setBackgroundBusy(true);
+    setBackgroundError('');
+    try {
+      const meta = await action();
+      applyMapMeta(meta);
+    } catch (error) {
+      setBackgroundError(error.message || 'No se pudo actualizar el mapa.');
+    } finally {
+      setBackgroundBusy(false);
+    }
+  }
+
+  const uploadBackground = (file) => runBackgroundAction(() => repository.uploadBackgroundImage(campaignId, file));
+  const generateBackground = (options) =>
+    runBackgroundAction(() => repository.generateBackgroundImage(campaignId, options));
+  const removeBackground = () => runBackgroundAction(() => repository.removeBackgroundImage(campaignId));
+
   return {
     map,
     loading,
@@ -51,5 +76,10 @@ export function useTacticalMap(campaignId, { user, role, enabled = true } = {}) 
     saveError,
     savingTokenId,
     moveToken: movement.moveToken,
+    backgroundBusy,
+    backgroundError,
+    uploadBackground,
+    generateBackground,
+    removeBackground,
   };
 }

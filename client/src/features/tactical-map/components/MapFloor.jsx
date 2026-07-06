@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { Suspense, useMemo } from 'react';
+import { useLoader } from '@react-three/fiber';
+import * as THREE from 'three';
 
 function Wall({ position, scale }) {
   return (
@@ -9,7 +11,20 @@ function Wall({ position, scale }) {
   );
 }
 
-export default function MapFloor({ map }) {
+function ImageFloor({ map }) {
+  const texture = useLoader(THREE.TextureLoader, map.backgroundUrl);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+
+  return (
+    <mesh position={[map.width / 2, 0, map.height / 2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+      <planeGeometry args={[map.width, map.height]} />
+      <meshStandardMaterial map={texture} roughness={1} />
+    </mesh>
+  );
+}
+
+function ProceduralFloor({ map }) {
   const floorMaterial = useMemo(
     () => ({
       color: '#2b241d',
@@ -48,4 +63,16 @@ export default function MapFloor({ map }) {
       <Wall position={[6.5, 0.14, 6.45]} scale={[0.22, 0.28, 2.7]} />
     </group>
   );
+}
+
+export default function MapFloor({ map }) {
+  if (map.backgroundUrl) {
+    return (
+      <Suspense fallback={null}>
+        <ImageFloor map={map} />
+      </Suspense>
+    );
+  }
+
+  return <ProceduralFloor map={map} />;
 }

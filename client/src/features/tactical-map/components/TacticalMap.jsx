@@ -3,6 +3,7 @@ import { worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import MapControls from './MapControls.jsx';
+import MapBackgroundPanel from './MapBackgroundPanel.jsx';
 
 class CanvasErrorBoundary extends Component {
   constructor(props) {
@@ -29,10 +30,24 @@ class CanvasErrorBoundary extends Component {
   }
 }
 
-export default function TacticalMap({ map, user, role, savingTokenId, saveError, onMoveToken, backToCampaignHref }) {
+export default function TacticalMap({
+  map,
+  user,
+  role,
+  savingTokenId,
+  saveError,
+  onMoveToken,
+  backgroundBusy,
+  backgroundError,
+  onUploadBackground,
+  onGenerateBackground,
+  onRemoveBackground,
+  backToCampaignHref,
+}) {
   const [selectedTokenId, setSelectedTokenId] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
   const [cameraCommand, setCameraCommand] = useState(null);
+  const [showBackgroundPanel, setShowBackgroundPanel] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -108,10 +123,24 @@ export default function TacticalMap({ map, user, role, savingTokenId, saveError,
         </div>
       </div>
 
+      {isDm && showBackgroundPanel && (
+        <MapBackgroundPanel
+          map={map}
+          busy={backgroundBusy}
+          error={backgroundError}
+          onUpload={onUploadBackground}
+          onGenerate={onGenerateBackground}
+          onRemove={onRemoveBackground}
+          onClose={() => setShowBackgroundPanel(false)}
+        />
+      )}
+
       <MapControls
         showGrid={showGrid}
         selectedToken={selectedToken}
         isDm={isDm}
+        showBackgroundPanel={showBackgroundPanel}
+        onToggleBackgroundPanel={() => setShowBackgroundPanel((value) => !value)}
         onCenter={() => sendCameraCommand('center')}
         onZoomIn={() => sendCameraCommand('zoom-in')}
         onZoomOut={() => sendCameraCommand('zoom-out')}

@@ -2,7 +2,7 @@ import http from 'node:http';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
-import { PORT } from './config.js';
+import { PORT, UPLOADS_ROOT } from './config.js';
 import { runMigrations, db } from './db.js';
 import { authRouter } from './auth.js';
 import { srdRouter } from './routes/srd.js';
@@ -15,6 +15,7 @@ runMigrations();
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+app.use('/uploads', express.static(UPLOADS_ROOT));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, app: 'TriDnD' }));
 app.use('/api/auth', authRouter);

@@ -20,13 +20,24 @@ export default function TacticalCamera({ map, command }) {
   const lastPointerRef = useRef(null);
   const lastPinchDistanceRef = useRef(null);
   const targetRef = useRef({ x: map.width / 2, z: map.height / 2 });
-  const { gl, invalidate } = useThree();
+  const { gl, invalidate, size, set, camera: previousCamera } = useThree();
   const center = useMemo(() => ({ x: map.width / 2, z: map.height / 2 }), [map.height, map.width]);
+
+  // `makeDefault` es una convención de @react-three/drei, no de fiber puro:
+  // sin este registro manual, el Canvas sigue usando su cámara por defecto.
+  useEffect(() => {
+    const camera = cameraRef.current;
+    if (!camera) return undefined;
+    set({ camera });
+    return () => set({ camera: previousCamera });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set]);
 
   function applyCamera() {
     const camera = cameraRef.current;
     if (!camera) return;
     camera.position.set(targetRef.current.x, CAMERA_HEIGHT, targetRef.current.z);
+    camera.up.set(0, 0, -1);
     camera.lookAt(targetRef.current.x, 0, targetRef.current.z);
     camera.updateProjectionMatrix();
     invalidate();
@@ -44,6 +55,19 @@ export default function TacticalCamera({ map, command }) {
     camera.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
     applyCamera();
   }
+
+  // El frustum ortográfico se define en píxeles de canvas; `zoom` actúa
+  // entonces como una escala de píxeles por unidad de mundo (rejilla).
+  useEffect(() => {
+    const camera = cameraRef.current;
+    if (!camera) return;
+    camera.left = -size.width / 2;
+    camera.right = size.width / 2;
+    camera.top = size.height / 2;
+    camera.bottom = -size.height / 2;
+    applyCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [size.width, size.height]);
 
   useEffect(() => {
     targetRef.current = { ...center };
@@ -129,5 +153,5 @@ export default function TacticalCamera({ map, command }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl.domElement, map.height, map.width]);
 
-  return <orthographicCamera ref={cameraRef} makeDefault near={0.1} far={200} />;
+  return <orthographicCamera ref={cameraRef} near={0.1} far={200} />;
 }
