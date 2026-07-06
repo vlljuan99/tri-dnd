@@ -155,6 +155,92 @@ const migrations = [
   `
   ALTER TABLE game_tables ADD COLUMN map_disabled_cells TEXT NOT NULL DEFAULT '[]';
   `,
+
+  // v8 — Fase 7.5: biblioteca de mapas por campaña. Un mapa tiene plantas
+  // (lienzos independientes) y cada planta salas NxM colocadas en el lienzo;
+  // las puertas conectan salas (entre plantas solo escalera/portal).
+  // El mapa único que vivía en columnas map_* de game_tables se migra a un
+  // mapa de una planta con una sala ya revelada; esas columnas quedan
+  // obsoletas y se retirarán cuando la mesa en vivo lea del mapa activo.
+  `
+  CREATE TABLE maps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Mapa sin título',
+    grid_size REAL NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_maps_campaign ON maps(campaign_id);
+
+  CREATE TABLE map_floors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Planta 1',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_map_floors_map ON map_floors(map_id);
+
+  -- x/y: origen de la sala en casillas del lienzo de su planta (puede ser
+  -- negativo, la mazmorra crece en cualquier dirección). disabled_cells:
+  -- pares [col, fila] relativos al origen de la sala, como en v7.
+  CREATE TABLE map_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    floor_id INTEGER NOT NULL REFERENCES map_floors(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Sala sin nombre',
+    x INTEGER NOT NULL DEFAULT 0,
+    y INTEGER NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL CHECK (width BETWEEN 1 AND 100),
+    height INTEGER NOT NULL CHECK (height BETWEEN 1 AND 100),
+    background_url TEXT,
+    disabled_cells TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    revealed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_map_rooms_floor ON map_rooms(floor_id);
+
+  -- from_x/from_y y to_x/to_y son casillas absolutas del lienzo de la planta
+  -- de cada sala: dónde está la puerta y dónde aparece el token al cruzarla.
+  -- control: 'jugador' (se abre al llegar e interactuar) o 'dm' (llave,
+  -- secreta... solo la abre el DM).
+  CREATE TABLE map_doors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+    from_room_id INTEGER NOT NULL REFERENCES map_rooms(id) ON DELETE CASCADE,
+    to_room_id INTEGER NOT NULL REFERENCES map_rooms(id) ON DELETE CASCADE,
+    from_x INTEGER NOT NULL,
+    from_y INTEGER NOT NULL,
+    to_x INTEGER NOT NULL,
+    to_y INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'puerta' CHECK (kind IN ('puerta', 'escalera', 'portal')),
+    control TEXT NOT NULL DEFAULT 'jugador' CHECK (control IN ('jugador', 'dm')),
+    is_open INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_map_doors_map ON map_doors(map_id);
+
+  ALTER TABLE game_tables ADD COLUMN active_map_id INTEGER REFERENCES maps(id);
+
+  INSERT INTO maps (campaign_id, name, grid_size)
+    SELECT campaign_id, map_name, map_grid_size FROM game_tables;
+
+  INSERT INTO map_floors (map_id, name, position)
+    SELECT id, 'Planta 1', 0 FROM maps;
+
+  INSERT INTO map_rooms (floor_id, name, x, y, width, height, background_url, disabled_cells, revealed)
+    SELECT f.id, 'Sala 1', 0, 0,
+           MAX(1, CAST(ROUND(gt.map_width) AS INTEGER)),
+           MAX(1, CAST(ROUND(gt.map_height) AS INTEGER)),
+           gt.map_background_url, gt.map_disabled_cells, 1
+    FROM map_floors f
+    JOIN maps m ON m.id = f.map_id
+    JOIN game_tables gt ON gt.campaign_id = m.campaign_id;
+
+  UPDATE game_tables
+    SET active_map_id = (SELECT id FROM maps WHERE maps.campaign_id = game_tables.campaign_id);
+  `,
 ];
 
 export function runMigrations() {
