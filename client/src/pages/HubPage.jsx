@@ -27,6 +27,20 @@ export default function HubPage() {
     }
   }
 
+  async function deleteCampaign(campaign) {
+    const sure = window.confirm(
+      `¿Borrar la campaña "${campaign.name}"? Se perderán su chat, mesa y mapas. Las fichas de personaje se conservan.`
+    );
+    if (!sure) return;
+    setError('');
+    try {
+      await api(`/campaigns/${campaign.id}`, { method: 'DELETE' });
+      setCampaigns((cs) => cs.filter((c) => c.id !== campaign.id));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function joinCampaign(e) {
     e.preventDefault();
     if (!joinCode.trim()) return;
@@ -108,12 +122,23 @@ export default function HubPage() {
                   </>
                 )}
               </p>
-              <Link
-                to={`/campanas/${c.id}`}
-                className="mt-3 inline-block rounded-sm bg-ochre px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ochre/90"
-              >
-                Ir a la mesa de juego
-              </Link>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <Link
+                  to={`/campanas/${c.id}`}
+                  className="inline-block rounded-sm bg-ochre px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ochre/90"
+                >
+                  Ir a la mesa de juego
+                </Link>
+                {c.role === 'dm' && (
+                  <button
+                    type="button"
+                    onClick={() => deleteCampaign(c)}
+                    className="rounded-sm border border-ember/40 px-2 py-1.5 text-xs text-ember hover:bg-ember/10"
+                  >
+                    Borrar
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
