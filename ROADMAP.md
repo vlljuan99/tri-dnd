@@ -11,12 +11,14 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 - [x] **Fase 5** — Campañas + mesa de juego persistente + chat en tiempo real + tiradas compartidas (incluidas ocultas del DM)
 - [x] **Fase 6** — Tracker de iniciativa + panel de enemigos del DM
 - [x] **Asistente guiado de creación de personaje (primera iteración)** — pasos Identidad, Clase, Raza, Características, Competencias y Resumen; borrador/completo, autoguardado, recuperación, ayuda contextual, vista previa y tutorial posterior básico. Pendiente para siguientes iteraciones: paso de equipo inicial, paso de hechizos, paso de rasgos/recursos, compra por puntos avanzada y multiclase.
+- [x] **Fase 7 (parcial)** — Tablero táctico con cámara cenital (`client/src/features/tactical-map/`, **react-three-fiber/three.js**, no Konva como decía el plan original — mapa renderizado en 3D visto desde arriba, no en canvas 2D)
+  - Imagen de fondo del mapa: el DM puede subir una imagen propia o generarla con IA (OpenAI/Google), con el prompt refinado en el servidor a vista cenital estilo mapa de batalla (`server/src/services/mapImageGeneration.js`). Persiste por campaña en `game_tables`
+  - Icono de personaje: cada jugador puede subir una foto o generarlo con IA, con un prompt refinado a un estilo visual común para toda la mesa (`server/src/services/avatarImageGeneration.js`). Persiste en `characters.avatar_path` y se ve en su token del tablero
+  - Rejilla, selección y movimiento de tokens por clic ya funcionan; los tokens de enemigos/aliados siguen siendo datos de prueba en el cliente (no persistidos en el backend)
 
 ## Pendientes
 
-- [ ] **Fase 7** — Mapa táctico: rejilla + subida de imagen + tokens + pathing automático + medir + ping + dibujo libre
-  - Konva.js + react-konva. Rejilla cuadrada calculada sobre la imagen subida por el DM
-  - Tokens con color por clase, avatar/iniciales, movimiento con pathing que rodea obstáculos, animado y sincronizado
+- [ ] **Fase 7 (resto)** — Tokens de enemigos/aliados persistidos en el backend (no solo el jugador propio) + pathing automático que rodea obstáculos + medir distancia + ping + dibujo libre
   - Herramientas del DM: obstáculos, trampas (invisibles para jugadores), medir distancia, ping, dibujo libre
 
 - [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra

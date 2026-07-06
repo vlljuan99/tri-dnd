@@ -49,6 +49,15 @@ npm run dev             # arranca server (puerto 4000) + client (puerto 5173) a 
 
 La base de datos vive en `server/data/tri-dnd.db` (generada, ignorada por git). El secreto JWT se autogenera en `server/data/jwt-secret.txt` si no hay variable de entorno `JWT_SECRET` (también ignorado por git).
 
+**Generación de imágenes con IA (opcional)**: la imagen de fondo del mapa táctico y los iconos de personaje se pueden generar con OpenAI o Google. Para que funcione localmente hace falta un archivo `server/.env` (ignorado por git, cada dev usa el suyo) con:
+
+```
+OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
+```
+
+Sin este archivo la app funciona igual, pero el botón "Generar con IA" del mapa (`MapBackgroundPanel.jsx`) y del icono de personaje (`CharacterAvatarPanel.jsx`) devuelve un error explicando que falta la clave; subir una imagen o foto propia no requiere ninguna clave.
+
 ## Convenciones a mantener
 
 - Todo el código, comentarios y mensajes de error orientados al usuario están **en español**.
