@@ -43,6 +43,7 @@ export default function MesaPage() {
   const user = useAuth((s) => s.user);
   const room = useRoom();
   const [text, setText] = useState('');
+  const [rightTab, setRightTab] = useState('iniciativa'); // 'iniciativa' | 'mesa'
   const logRef = useRef(null);
 
   useEffect(() => {
@@ -127,25 +128,40 @@ export default function MesaPage() {
           </form>
         </main>
 
-        {/* Tracker de iniciativa */}
-        <aside className="hidden w-72 shrink-0 flex-col border-l border-gold/15 bg-night-900 lg:flex">
-          <InitiativeTracker campaignId={campaignId} isDm={isDm} userId={user?.id} />
-        </aside>
+        {/* Iniciativa + presencia, en pestañas para dar más espacio al tracker */}
+        <aside className="hidden w-[26rem] shrink-0 flex-col border-l border-gold/15 bg-night-900 lg:flex">
+          <div className="flex border-b border-gold/15">
+            <button
+              onClick={() => setRightTab('iniciativa')}
+              className={`flex-1 py-2 font-display text-sm uppercase tracking-widest transition-colors ${
+                rightTab === 'iniciativa' ? 'border-b-2 border-gold text-gold' : 'text-bone/50 hover:text-bone'
+              }`}
+            >
+              Iniciativa
+            </button>
+            <button
+              onClick={() => setRightTab('mesa')}
+              className={`flex-1 py-2 font-display text-sm uppercase tracking-widest transition-colors ${
+                rightTab === 'mesa' ? 'border-b-2 border-gold text-gold' : 'text-bone/50 hover:text-bone'
+              }`}
+            >
+              Mesa ({room.online.length})
+            </button>
+          </div>
 
-        {/* Presencia */}
-        <aside className="hidden w-56 shrink-0 border-l border-gold/15 bg-night-900 p-4 md:block">
-          <h2 className="mb-3 font-display text-sm uppercase tracking-widest text-gold/70">
-            En la mesa ({room.online.length})
-          </h2>
-          <ul className="space-y-2">
-            {room.online.map((member) => (
-              <li key={member.id} className="flex items-center gap-2 text-sm">
-                <span className="h-2 w-2 rounded-full bg-moss" />
-                <span className="truncate">{member.name}</span>
-                {member.id === user?.id && <span className="text-xs text-bone/40">(tú)</span>}
-              </li>
-            ))}
-          </ul>
+          {rightTab === 'iniciativa' ? (
+            <InitiativeTracker campaignId={campaignId} isDm={isDm} userId={user?.id} />
+          ) : (
+            <ul className="space-y-2 p-4">
+              {room.online.map((member) => (
+                <li key={member.id} className="flex items-center gap-2 text-sm">
+                  <span className="h-2 w-2 rounded-full bg-moss" />
+                  <span className="truncate">{member.name}</span>
+                  {member.id === user?.id && <span className="text-xs text-bone/40">(tú)</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </aside>
       </div>
     </div>
