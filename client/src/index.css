@@ -1,0 +1,33 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Mesa de juego (sesión activa) — modo oscuro, nocturno */
+  --color-night-950: #14110f;
+  --color-night-900: #1e1a16;
+  --color-bone: #e8dfc9;
+  --color-gold: #b8935a;
+  --color-blood: #8c2f2f;
+  --color-moss: #4a5d3a;
+
+  /* Campamento y hub — cálido, pergamino, atardecer */
+  --color-parchment-100: #e9dec4;
+  --color-parchment-200: #dfcfa9;
+  --color-ink: #3a2e1f;
+  --color-ochre: #b9803a;
+  --color-sage: #6e7c55;
+  --color-ember: #c4602e;
+
+  --font-display: 'Cinzel', serif;
+  --font-body: 'Alegreya', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+}

@@ -1,0 +1,14 @@
+{
+  "name": "tri-dnd",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mesa de juego virtual para D&D 5e — jugar online y en persona con el grupo",
+  "scripts": {
+    "dev": "concurrently -n servidor,cliente -c yellow,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "sync-srd": "npm run sync-srd --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

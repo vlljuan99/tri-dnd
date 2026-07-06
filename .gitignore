@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+
+# Base de datos local y secretos generados
+server/data/*.db
+server/data/*.db-journal
+server/data/*.db-wal
+server/data/*.db-shm
+server/data/jwt-secret.txt
+
+# Subidas de usuarios (avatares, mapas)
+server/data/uploads/

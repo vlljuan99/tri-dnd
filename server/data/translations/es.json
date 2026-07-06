@@ -1,0 +1,273 @@
+{
+  "_comentario": "Traducciones al español aplicadas sobre los datos del SRD 5e al sincronizar. Clave: categoría → índice de la API → { name, desc? }. Las entradas sin traducción se muestran en inglés con un indicador en la UI. Pendiente (por lotes en fases posteriores): nombres de hechizos y monstruos, resto de equipo de aventura, descripciones largas.",
+
+  "ability-scores": {
+    "str": { "name": "Fuerza" },
+    "dex": { "name": "Destreza" },
+    "con": { "name": "Constitución" },
+    "int": { "name": "Inteligencia" },
+    "wis": { "name": "Sabiduría" },
+    "cha": { "name": "Carisma" }
+  },
+
+  "classes": {
+    "barbarian": { "name": "Bárbaro" },
+    "bard": { "name": "Bardo" },
+    "cleric": { "name": "Clérigo" },
+    "druid": { "name": "Druida" },
+    "fighter": { "name": "Guerrero" },
+    "monk": { "name": "Monje" },
+    "paladin": { "name": "Paladín" },
+    "ranger": { "name": "Explorador" },
+    "rogue": { "name": "Pícaro" },
+    "sorcerer": { "name": "Hechicero" },
+    "warlock": { "name": "Brujo" },
+    "wizard": { "name": "Mago" }
+  },
+
+  "races": {
+    "dragonborn": { "name": "Dracónido" },
+    "dwarf": { "name": "Enano" },
+    "elf": { "name": "Elfo" },
+    "gnome": { "name": "Gnomo" },
+    "half-elf": { "name": "Semielfo" },
+    "half-orc": { "name": "Semiorco" },
+    "halfling": { "name": "Mediano" },
+    "human": { "name": "Humano" },
+    "tiefling": { "name": "Tiflin" }
+  },
+
+  "skills": {
+    "acrobatics": { "name": "Acrobacias" },
+    "animal-handling": { "name": "Trato con Animales" },
+    "arcana": { "name": "Arcanos" },
+    "athletics": { "name": "Atletismo" },
+    "deception": { "name": "Engaño" },
+    "history": { "name": "Historia" },
+    "insight": { "name": "Perspicacia" },
+    "intimidation": { "name": "Intimidación" },
+    "investigation": { "name": "Investigación" },
+    "medicine": { "name": "Medicina" },
+    "nature": { "name": "Naturaleza" },
+    "perception": { "name": "Percepción" },
+    "performance": { "name": "Interpretación" },
+    "persuasion": { "name": "Persuasión" },
+    "religion": { "name": "Religión" },
+    "sleight-of-hand": { "name": "Juego de Manos" },
+    "stealth": { "name": "Sigilo" },
+    "survival": { "name": "Supervivencia" }
+  },
+
+  "damage-types": {
+    "acid": { "name": "Ácido" },
+    "bludgeoning": { "name": "Contundente" },
+    "cold": { "name": "Frío" },
+    "fire": { "name": "Fuego" },
+    "force": { "name": "Fuerza" },
+    "lightning": { "name": "Relámpago" },
+    "necrotic": { "name": "Necrótico" },
+    "piercing": { "name": "Perforante" },
+    "poison": { "name": "Veneno" },
+    "psychic": { "name": "Psíquico" },
+    "radiant": { "name": "Radiante" },
+    "slashing": { "name": "Cortante" },
+    "thunder": { "name": "Trueno" }
+  },
+
+  "magic-schools": {
+    "abjuration": { "name": "Abjuración" },
+    "conjuration": { "name": "Conjuración" },
+    "divination": { "name": "Adivinación" },
+    "enchantment": { "name": "Encantamiento" },
+    "evocation": { "name": "Evocación" },
+    "illusion": { "name": "Ilusión" },
+    "necromancy": { "name": "Nigromancia" },
+    "transmutation": { "name": "Transmutación" }
+  },
+
+  "conditions": {
+    "blinded": {
+      "name": "Cegado",
+      "desc": "Una criatura cegada no puede ver y falla automáticamente cualquier prueba de característica que requiera la vista. Las tiradas de ataque contra la criatura tienen ventaja, y las tiradas de ataque de la criatura tienen desventaja."
+    },
+    "charmed": {
+      "name": "Encantado",
+      "desc": "Una criatura encantada no puede atacar a quien la encantó ni convertirlo en objetivo de habilidades o efectos mágicos dañinos. Quien la encantó tiene ventaja en las pruebas de característica para interactuar socialmente con la criatura."
+    },
+    "deafened": {
+      "name": "Ensordecido",
+      "desc": "Una criatura ensordecida no puede oír y falla automáticamente cualquier prueba de característica que requiera el oído."
+    },
+    "exhaustion": {
+      "name": "Agotamiento",
+      "desc": "El agotamiento se mide en seis niveles acumulativos: 1) desventaja en pruebas de característica; 2) velocidad reducida a la mitad; 3) desventaja en tiradas de ataque y salvación; 4) puntos de golpe máximos reducidos a la mitad; 5) velocidad reducida a 0; 6) muerte. Un descanso largo con comida y bebida reduce el nivel en 1."
+    },
+    "frightened": {
+      "name": "Asustado",
+      "desc": "Una criatura asustada tiene desventaja en las pruebas de característica y en las tiradas de ataque mientras la fuente de su miedo esté en su línea de visión. La criatura no puede acercarse voluntariamente a la fuente de su miedo."
+    },
+    "grappled": {
+      "name": "Agarrado",
+      "desc": "La velocidad de una criatura agarrada pasa a ser 0 y no puede beneficiarse de ningún bonificador a la velocidad. El estado termina si quien agarra queda incapacitado, o si un efecto saca a la criatura agarrada del alcance de quien la agarra."
+    },
+    "incapacitated": {
+      "name": "Incapacitado",
+      "desc": "Una criatura incapacitada no puede realizar acciones ni reacciones."
+    },
+    "invisible": {
+      "name": "Invisible",
+      "desc": "Una criatura invisible no puede verse sin ayuda de magia o de un sentido especial. A efectos de esconderse, la criatura está muy oscurecida. Su posición puede detectarse por el ruido que hace o los rastros que deja. Las tiradas de ataque contra la criatura tienen desventaja, y las tiradas de ataque de la criatura tienen ventaja."
+    },
+    "paralyzed": {
+      "name": "Paralizado",
+      "desc": "Una criatura paralizada está incapacitada y no puede moverse ni hablar. Falla automáticamente las tiradas de salvación de Fuerza y Destreza. Las tiradas de ataque contra la criatura tienen ventaja. Cualquier ataque que impacte a la criatura es un golpe crítico si el atacante está a 5 pies o menos de ella."
+    },
+    "petrified": {
+      "name": "Petrificado",
+      "desc": "Una criatura petrificada se transforma, junto con los objetos no mágicos que lleve puestos o cargue, en una sustancia sólida inanimada (normalmente piedra). Su peso se multiplica por diez y deja de envejecer. Está incapacitada, no puede moverse ni hablar y no percibe su entorno. Las tiradas de ataque contra ella tienen ventaja. Falla automáticamente las salvaciones de Fuerza y Destreza. Tiene resistencia a todo el daño y es inmune al veneno y la enfermedad."
+    },
+    "poisoned": {
+      "name": "Envenenado",
+      "desc": "Una criatura envenenada tiene desventaja en las tiradas de ataque y en las pruebas de característica."
+    },
+    "prone": {
+      "name": "Derribado",
+      "desc": "La única opción de movimiento de una criatura derribada es arrastrarse, a menos que se ponga en pie y termine así el estado. Tiene desventaja en las tiradas de ataque. Las tiradas de ataque contra la criatura tienen ventaja si el atacante está a 5 pies o menos de ella; si no, tienen desventaja."
+    },
+    "restrained": {
+      "name": "Apresado",
+      "desc": "La velocidad de una criatura apresada pasa a ser 0 y no puede beneficiarse de ningún bonificador a la velocidad. Las tiradas de ataque contra la criatura tienen ventaja y las tiradas de ataque de la criatura tienen desventaja. La criatura tiene desventaja en las tiradas de salvación de Destreza."
+    },
+    "stunned": {
+      "name": "Aturdido",
+      "desc": "Una criatura aturdida está incapacitada, no puede moverse y solo puede hablar entrecortadamente. Falla automáticamente las tiradas de salvación de Fuerza y Destreza. Las tiradas de ataque contra la criatura tienen ventaja."
+    },
+    "unconscious": {
+      "name": "Inconsciente",
+      "desc": "Una criatura inconsciente está incapacitada, no puede moverse ni hablar y no percibe su entorno. Suelta lo que esté sujetando y cae derribada. Falla automáticamente las salvaciones de Fuerza y Destreza. Las tiradas de ataque contra ella tienen ventaja. Cualquier ataque que la impacte es un golpe crítico si el atacante está a 5 pies o menos de ella."
+    }
+  },
+
+  "weapon-properties": {
+    "ammunition": {
+      "name": "Munición",
+      "desc": "Puedes usar un arma con esta propiedad para hacer un ataque a distancia solo si tienes munición. Cada ataque gasta una pieza; al final del combate recuperas la mitad de la munición gastada buscándola durante un minuto."
+    },
+    "finesse": {
+      "name": "Sutil",
+      "desc": "Al atacar con esta arma, eliges usar tu modificador de Fuerza o de Destreza tanto para la tirada de ataque como para la de daño (el mismo para ambas)."
+    },
+    "heavy": {
+      "name": "Pesada",
+      "desc": "Las criaturas Pequeñas tienen desventaja en las tiradas de ataque con armas pesadas."
+    },
+    "light": {
+      "name": "Ligera",
+      "desc": "Un arma ligera es pequeña y fácil de manejar, ideal para combatir con dos armas."
+    },
+    "loading": {
+      "name": "Recarga",
+      "desc": "Debido al tiempo de recarga, solo puedes disparar un proyectil por acción, acción adicional o reacción, aunque normalmente pudieras hacer más de un ataque."
+    },
+    "monk": {
+      "name": "Monje",
+      "desc": "Arma de monje: puede usarse con los rasgos de artes marciales."
+    },
+    "reach": {
+      "name": "Alcance",
+      "desc": "Esta arma añade 5 pies a tu alcance cuando atacas con ella."
+    },
+    "special": {
+      "name": "Especial",
+      "desc": "Un arma con esta propiedad tiene reglas inusuales; consulta su descripción."
+    },
+    "thrown": {
+      "name": "Arrojadiza",
+      "desc": "Puedes lanzar el arma para hacer un ataque a distancia, usando el mismo modificador de característica que usarías en cuerpo a cuerpo."
+    },
+    "two-handed": {
+      "name": "A dos manos",
+      "desc": "Esta arma requiere las dos manos cuando atacas con ella."
+    },
+    "versatile": {
+      "name": "Versátil",
+      "desc": "Puede usarse con una o dos manos. El valor de daño entre paréntesis se aplica al empuñarla a dos manos."
+    }
+  },
+
+  "equipment": {
+    "club": { "name": "Garrote" },
+    "dagger": { "name": "Daga" },
+    "greatclub": { "name": "Gran garrote" },
+    "handaxe": { "name": "Hacha de mano" },
+    "javelin": { "name": "Jabalina" },
+    "light-hammer": { "name": "Martillo ligero" },
+    "mace": { "name": "Maza" },
+    "quarterstaff": { "name": "Bastón" },
+    "sickle": { "name": "Hoz" },
+    "spear": { "name": "Lanza" },
+    "crossbow-light": { "name": "Ballesta ligera" },
+    "dart": { "name": "Dardo" },
+    "shortbow": { "name": "Arco corto" },
+    "sling": { "name": "Honda" },
+    "battleaxe": { "name": "Hacha de batalla" },
+    "flail": { "name": "Mangual" },
+    "glaive": { "name": "Guja" },
+    "greataxe": { "name": "Gran hacha" },
+    "greatsword": { "name": "Espadón" },
+    "halberd": { "name": "Alabarda" },
+    "lance": { "name": "Lanza de caballería" },
+    "longsword": { "name": "Espada larga" },
+    "maul": { "name": "Mazo" },
+    "morningstar": { "name": "Lucero del alba" },
+    "pike": { "name": "Pica" },
+    "rapier": { "name": "Estoque" },
+    "scimitar": { "name": "Cimitarra" },
+    "shortsword": { "name": "Espada corta" },
+    "trident": { "name": "Tridente" },
+    "war-pick": { "name": "Pico de guerra" },
+    "warhammer": { "name": "Martillo de guerra" },
+    "whip": { "name": "Látigo" },
+    "blowgun": { "name": "Cerbatana" },
+    "crossbow-hand": { "name": "Ballesta de mano" },
+    "crossbow-heavy": { "name": "Ballesta pesada" },
+    "longbow": { "name": "Arco largo" },
+    "net": { "name": "Red" },
+
+    "padded": { "name": "Armadura acolchada" },
+    "leather": { "name": "Armadura de cuero" },
+    "studded-leather": { "name": "Cuero tachonado" },
+    "hide": { "name": "Armadura de pieles" },
+    "chain-shirt": { "name": "Camisa de mallas" },
+    "scale-mail": { "name": "Cota de escamas" },
+    "breastplate": { "name": "Coraza" },
+    "half-plate": { "name": "Media armadura" },
+    "ring-mail": { "name": "Cota de anillas" },
+    "chain-mail": { "name": "Cota de mallas" },
+    "splint": { "name": "Armadura de bandas" },
+    "plate": { "name": "Armadura de placas" },
+    "shield": { "name": "Escudo" },
+
+    "arrow": { "name": "Flechas (20)" },
+    "crossbow-bolt": { "name": "Virotes de ballesta (20)" },
+    "sling-bullet": { "name": "Balas de honda (20)" },
+    "blowgun-needle": { "name": "Agujas de cerbatana (50)" },
+    "backpack": { "name": "Mochila" },
+    "bedroll": { "name": "Saco de dormir" },
+    "rope-hempen-50-feet": { "name": "Cuerda de cáñamo (50 pies)" },
+    "rope-silk-50-feet": { "name": "Cuerda de seda (50 pies)" },
+    "torch": { "name": "Antorcha" },
+    "tinderbox": { "name": "Yesquero" },
+    "rations-1-day": { "name": "Raciones (1 día)" },
+    "waterskin": { "name": "Odre de agua" },
+    "healers-kit": { "name": "Kit de sanador" },
+    "potion-of-healing": { "name": "Poción de curación" },
+    "crowbar": { "name": "Palanca" },
+    "grappling-hook": { "name": "Gancho de escalada" },
+    "lantern-hooded": { "name": "Linterna con capucha" },
+    "oil-flask": { "name": "Frasco de aceite" }
+  },
+
+  "spells": {},
+  "monsters": {}
+}
