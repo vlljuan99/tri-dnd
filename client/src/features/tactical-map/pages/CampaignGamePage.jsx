@@ -45,15 +45,6 @@ export default function CampaignGamePage() {
     saveError,
     savingTokenId,
     moveToken,
-    backgroundBusy,
-    backgroundError,
-    uploadBackground,
-    generateBackground,
-    removeBackground,
-    shapeError,
-    toggleShapeCell,
-    fillAllCells,
-    clearAllCells,
   } = useTacticalMap(campaignId, {
     user,
     role: campaign?.role,
@@ -107,8 +98,13 @@ export default function CampaignGamePage() {
         </div>
       ) : loadError || !map ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <p className="font-display text-xl text-blood">{loadError || 'Mapa no disponible.'}</p>
-          <Link to={`/campanas/${campaignId}`} className="text-gold underline">
+          <p className="font-display text-xl text-gold/90">{loadError || 'Mapa no disponible.'}</p>
+          {campaign?.role === 'dm' && (
+            <Link to={`/campanas/${campaignId}/editor`} className="text-gold underline">
+              Abrir el editor de campaña
+            </Link>
+          )}
+          <Link to={`/campanas/${campaignId}`} className="text-bone/70 underline">
             Volver a la campaña
           </Link>
         </div>
@@ -120,16 +116,8 @@ export default function CampaignGamePage() {
           savingTokenId={savingTokenId}
           saveError={saveError}
           onMoveToken={moveToken}
-          backgroundBusy={backgroundBusy}
-          backgroundError={backgroundError}
-          onUploadBackground={uploadBackground}
-          onGenerateBackground={generateBackground}
-          onRemoveBackground={removeBackground}
-          shapeError={shapeError}
-          onToggleShapeCell={toggleShapeCell}
-          onFillAllCells={fillAllCells}
-          onClearAllCells={clearAllCells}
           backToCampaignHref={`/campanas/${campaignId}`}
+          editorHref={`/campanas/${campaignId}/editor`}
         />
       )}
     </div>

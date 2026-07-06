@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { tacticalMapRepository } from '../repositories/TestTacticalMapRepository.js';
-import { allCells, toggleDisabledCell } from '../domain/cells.js';
 import { useTokenMovement } from './useTokenMovement.js';
 
-const SHAPE_SAVE_DEBOUNCE_MS = 500;
-
+// Carga el mapa activo de la mesa (ya filtrado por rol en el servidor) y
+// gestiona el movimiento de tokens. La edición del mapa (salas, puertas,
+// fondos) vive en el editor de campaña, no aquí.
 export function useTacticalMap(campaignId, { user, role, characters = [], enabled = true } = {}) {
   const repository = useMemo(() => tacticalMapRepository, []);
   const [map, setMap] = useState(null);
@@ -12,13 +12,6 @@ export function useTacticalMap(campaignId, { user, role, characters = [], enable
   const [loadError, setLoadError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [savingTokenId, setSavingTokenId] = useState(null);
-  const [backgroundBusy, setBackgroundBusy] = useState(false);
-  const [backgroundError, setBackgroundError] = useState('');
-  const [shapeError, setShapeError] = useState('');
-  const pendingCellsRef = useRef(null);
-  const shapeSaveTimerRef = useRef(null);
-  const mapRef = useRef(map);
-  mapRef.current = map;
 
   useEffect(() => {
     if (!enabled || !campaignId) return undefined;
@@ -54,70 +47,6 @@ export function useTacticalMap(campaignId, { user, role, characters = [], enable
     setSaveError,
   });
 
-  function applyMapMeta(meta) {
-    if (!meta) return;
-    setMap((prev) => (prev ? { ...prev, ...meta } : prev));
-  }
-
-  async function runBackgroundAction(action) {
-    setBackgroundBusy(true);
-    setBackgroundError('');
-    try {
-      const meta = await action();
-      applyMapMeta(meta);
-    } catch (error) {
-      setBackgroundError(error.message || 'No se pudo actualizar el mapa.');
-    } finally {
-      setBackgroundBusy(false);
-    }
-  }
-
-  const uploadBackground = (file) => runBackgroundAction(() => repository.uploadBackgroundImage(campaignId, file));
-  const generateBackground = (options) =>
-    runBackgroundAction(() => repository.generateBackgroundImage(campaignId, options));
-  const removeBackground = () => runBackgroundAction(() => repository.removeBackgroundImage(campaignId));
-
-  useEffect(() => () => clearTimeout(shapeSaveTimerRef.current), []);
-
-  function scheduleShapeSave(disabledCells) {
-    pendingCellsRef.current = disabledCells;
-    clearTimeout(shapeSaveTimerRef.current);
-    shapeSaveTimerRef.current = setTimeout(async () => {
-      const cells = pendingCellsRef.current;
-      pendingCellsRef.current = null;
-      try {
-        await repository.updateDisabledCells(campaignId, cells);
-        setShapeError('');
-      } catch (error) {
-        setShapeError(error.message || 'No se pudo guardar la forma de la sala.');
-      }
-    }, SHAPE_SAVE_DEBOUNCE_MS);
-  }
-
-  function setDisabledCells(disabledCells) {
-    setMap((prev) => (prev ? { ...prev, disabledCells } : prev));
-    scheduleShapeSave(disabledCells);
-  }
-
-  function toggleShapeCell(col, row) {
-    // Se lee y actualiza mapRef (no el `map` cerrado en este render) para que
-    // varios clics seguidos antes del siguiente render no se pisen entre sí.
-    if (!mapRef.current) return;
-    const disabledCells = toggleDisabledCell(mapRef.current.disabledCells, col, row);
-    mapRef.current = { ...mapRef.current, disabledCells };
-    setMap(mapRef.current);
-    scheduleShapeSave(disabledCells);
-  }
-
-  function fillAllCells() {
-    setDisabledCells([]);
-  }
-
-  function clearAllCells() {
-    if (!map) return;
-    setDisabledCells(allCells(map));
-  }
-
   return {
     map,
     loading,
@@ -125,14 +54,5 @@ export function useTacticalMap(campaignId, { user, role, characters = [], enable
     saveError,
     savingTokenId,
     moveToken: movement.moveToken,
-    backgroundBusy,
-    backgroundError,
-    uploadBackground,
-    generateBackground,
-    removeBackground,
-    shapeError,
-    toggleShapeCell,
-    fillAllCells,
-    clearAllCells,
   };
 }

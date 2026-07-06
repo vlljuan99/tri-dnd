@@ -1,32 +1,9 @@
 import { api } from '../../../api.js';
 import { createTestTacticalMap } from '../data/testMap.js';
+import { composeBoardFromMap } from '../domain/composite.js';
 import { updateTokenPosition } from '../domain/tokens.js';
 
 const STORAGE_PREFIX = 'tri-dnd:tactical-map:v1:';
-const MAX_UNITS = 16;
-
-function fitDimensions(pixelWidth, pixelHeight) {
-  const aspect = pixelWidth / pixelHeight;
-  const width = aspect >= 1 ? MAX_UNITS : MAX_UNITS * aspect;
-  const height = aspect >= 1 ? MAX_UNITS / aspect : MAX_UNITS;
-  return { width: Math.round(width * 10) / 10, height: Math.round(height * 10) / 10 };
-}
-
-function readImagePixelSize(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('No se pudo leer la imagen'));
-    };
-    img.src = url;
-  });
-}
 
 function storageKey(mapId) {
   return `${STORAGE_PREFIX}${mapId}`;
@@ -75,63 +52,24 @@ function applyCharacterAvatars(map, characters) {
 }
 
 /**
- * Adaptador temporal hasta que exista modelo persistente de mapas en backend.
- * La página consume este repositorio como contrato reemplazable por API.
+ * Repositorio del tablero en vivo. El mapa viene del servidor ya filtrado
+ * por rol (mapa activo de la campaña, Fase 7.5); los tokens siguen siendo
+ * datos de prueba locales hasta que se persistan por sala en el backend.
  */
 export class TestTacticalMapRepository {
-  async getMapByCampaignId(campaignId, { user, characters = [] } = {}) {
+  async getMapByCampaignId(campaignId, { user, role, characters = [] } = {}) {
     const base = createTestTacticalMap({ campaignId, user });
-    const remote = await api(`/campaigns/${campaignId}/mapa`).catch(() => null);
-    const merged = remote?.map
-      ? {
-          ...base,
-          name: remote.map.name || base.name,
-          width: remote.map.width || base.width,
-          height: remote.map.height || base.height,
-          gridSize: remote.map.gridSize || base.gridSize,
-          backgroundUrl: remote.map.backgroundUrl || undefined,
-          disabledCells: remote.map.disabledCells || [],
-        }
-      : { ...base, disabledCells: [] };
+    const { map: activeMap } = await api(`/campaigns/${campaignId}/mapa-activo`);
+    const board = composeBoardFromMap(activeMap);
+    if (!board) {
+      throw new Error(
+        role === 'dm'
+          ? 'La mesa no tiene mapa con salas: prepara uno en el editor de campaña y llévalo a la mesa.'
+          : 'El DM aún no ha revelado ninguna zona del mapa.'
+      );
+    }
+    const merged = { ...base, ...board, id: `map-${activeMap.id}` };
     return applyCharacterAvatars(applySavedPositions(merged), characters);
-  }
-
-  async uploadBackgroundImage(campaignId, file) {
-    const pixelSize = await readImagePixelSize(file);
-    const { width, height } = fitDimensions(pixelSize.width, pixelSize.height);
-    const params = new URLSearchParams({ width: String(width), height: String(height) });
-    const res = await fetch(`/api/campaigns/${campaignId}/mapa/imagen?${params}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
-      body: file,
-      credentials: 'same-origin',
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'No se pudo subir la imagen');
-    return data.map;
-  }
-
-  async generateBackgroundImage(campaignId, { prompt, provider }) {
-    const data = await api(`/campaigns/${campaignId}/mapa/generar`, { method: 'POST', body: { prompt, provider } });
-    return data.map;
-  }
-
-  async removeBackgroundImage(campaignId) {
-    const res = await fetch(`/api/campaigns/${campaignId}/mapa/imagen`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'No se pudo quitar la imagen');
-    return data.map;
-  }
-
-  async updateDisabledCells(campaignId, disabledCells) {
-    const data = await api(`/campaigns/${campaignId}/mapa/celdas`, {
-      method: 'PATCH',
-      body: { disabledCells },
-    });
-    return data.map;
   }
 
   async updateTokenPosition(mapId, tokenId, position) {

@@ -2,19 +2,17 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { canMoveToken } from '../domain/permissions.js';
-import { worldToGrid } from '../domain/grid.js';
 import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
 import MapToken from './MapToken.jsx';
-import ShapeOverlay from './ShapeOverlay.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
 
-function PointerMissedMovement({ register, selectedTokenId, shapeMode, gridSize, onMoveToken, onToggleShapeCell }) {
+function PointerMissedMovement({ register, selectedTokenId, onMoveToken }) {
   const { camera, gl } = useThree();
 
   useEffect(() => {
     register((event) => {
-      if (!shapeMode && !selectedTokenId) return;
+      if (!selectedTokenId) return;
       const rect = gl.domElement.getBoundingClientRect();
       const pointer = new THREE.Vector2(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -26,15 +24,10 @@ function PointerMissedMovement({ register, selectedTokenId, shapeMode, gridSize,
       const point = new THREE.Vector3();
       if (!raycaster.ray.intersectPlane(ground, point)) return;
 
-      if (shapeMode) {
-        const cell = worldToGrid({ x: point.x, z: point.z }, gridSize);
-        onToggleShapeCell?.(cell.col, cell.row);
-      } else {
-        onMoveToken(selectedTokenId, { x: point.x, y: 0, z: point.z });
-      }
+      onMoveToken(selectedTokenId, { x: point.x, y: 0, z: point.z });
     });
     return () => register(null);
-  }, [camera, gl.domElement, gridSize, onMoveToken, onToggleShapeCell, register, selectedTokenId, shapeMode]);
+  }, [camera, gl.domElement, onMoveToken, register, selectedTokenId]);
 
   return null;
 }
@@ -47,10 +40,8 @@ export default function TacticalMapCanvas({
   showGrid,
   savingTokenId,
   cameraCommand,
-  shapeMode,
   onSelectToken,
   onMoveToken,
-  onToggleShapeCell,
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -67,17 +58,13 @@ export default function TacticalMapCanvas({
       <TacticalCamera map={map} command={cameraCommand} />
       <PointerMissedMovement
         selectedTokenId={selectedTokenId}
-        shapeMode={shapeMode}
-        gridSize={map.gridSize}
         onMoveToken={onMoveToken}
-        onToggleShapeCell={onToggleShapeCell}
         register={(handler) => {
           missedHandlerRef.current = handler;
         }}
       />
       <MapFloor map={map} />
       <MapGrid map={map} visible={showGrid} />
-      <ShapeOverlay map={map} visible={shapeMode} />
       {map.tokens
         .filter((token) => token.visible)
         .map((token) => (

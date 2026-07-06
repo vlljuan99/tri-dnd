@@ -4,10 +4,7 @@ export default function MapControls({
   showGrid,
   selectedToken,
   isDm,
-  showBackgroundPanel,
-  onToggleBackgroundPanel,
-  shapeMode,
-  onToggleShapeMode,
+  editorHref,
   onCenter,
   onZoomIn,
   onZoomOut,
@@ -102,35 +99,13 @@ export default function MapControls({
         </button>
       </div>
       <div className="pointer-events-auto flex items-center gap-2">
-        {isDm && (
-          <button
-            type="button"
-            aria-label="Cambiar imagen del mapa"
-            aria-pressed={showBackgroundPanel}
-            onClick={onToggleBackgroundPanel}
-            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
-              showBackgroundPanel
-                ? 'border-gold bg-gold/10 text-gold'
-                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
-            }`}
+        {isDm && editorHref && (
+          <Link
+            to={editorHref}
+            className="min-h-10 rounded-sm border border-bone/15 px-3 py-2 font-display text-sm tracking-wide text-bone hover:border-gold hover:text-gold"
           >
-            Mapa
-          </button>
-        )}
-        {isDm && (
-          <button
-            type="button"
-            aria-label="Editar forma de la sala"
-            aria-pressed={shapeMode}
-            onClick={onToggleShapeMode}
-            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
-              shapeMode
-                ? 'border-gold bg-gold/10 text-gold'
-                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
-            }`}
-          >
-            Forma
-          </button>
+            Editor
+          </Link>
         )}
         {isDm && (
           <span className="rounded-sm border border-ember/50 bg-night-900/90 px-3 py-2 font-display text-xs uppercase tracking-widest text-ember">
