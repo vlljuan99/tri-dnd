@@ -11,6 +11,7 @@ import ParchmentShell from './components/ParchmentShell.jsx';
 import DiceOverlay from './components/DiceOverlay.jsx';
 
 const CampaignGamePage = lazy(() => import('./features/tactical-map/pages/CampaignGamePage.jsx'));
+const MapEditorPage = lazy(() => import('./features/map-editor/pages/MapEditorPage.jsx'));
 
 // Zona autenticada: cualquier pantalla lleva el tirador de dados flotante
 function Protected() {
@@ -71,6 +72,20 @@ export default function App() {
               }
             >
               <CampaignGamePage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/campanas/:id/editor"
+          element={
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center bg-night-950 text-bone">
+                  <p className="font-display text-lg tracking-wide text-gold">Cargando editor...</p>
+                </div>
+              }
+            >
+              <MapEditorPage />
             </Suspense>
           }
         />
