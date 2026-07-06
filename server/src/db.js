@@ -122,6 +122,12 @@ const migrations = [
   );
   CREATE INDEX idx_combatants_campaign ON combatants(campaign_id);
   `,
+
+  // v4 — vincular un enemigo del tracker a su ficha del compendio (SRD) para
+  // que el DM pueda consultarla y tirar sus ataques automáticamente
+  `
+  ALTER TABLE combatants ADD COLUMN monster_index TEXT;
+  `,
 ];
 
 export function runMigrations() {

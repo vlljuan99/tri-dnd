@@ -67,7 +67,7 @@ function combatantView(row, { isDm }) {
     const c = db.prepare('SELECT hp_current, hp_max, ac FROM characters WHERE id = ?').get(row.character_id);
     if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac });
   } else if (row.kind === 'enemigo' && isDm) {
-    Object.assign(base, { hpCurrent: row.hp_current, hpMax: row.hp_max, ac: row.ac });
+    Object.assign(base, { hpCurrent: row.hp_current, hpMax: row.hp_max, ac: row.ac, monsterIndex: row.monster_index });
   }
   return base;
 }
@@ -217,7 +217,7 @@ export function setupSockets(io) {
 
     // --- Tracker de iniciativa ---------------------------------------
 
-    socket.on('combat:add', ({ campaignId, kind, name, initiative, hpCurrent, hpMax, ac, characterId }, cb) => {
+    socket.on('combat:add', ({ campaignId, kind, name, initiative, hpCurrent, hpMax, ac, characterId, monsterIndex }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede añadir combatientes' });
 
@@ -235,9 +235,15 @@ export function setupSockets(io) {
       const hpM = cleanKind === 'enemigo' && Number.isInteger(hpMax) ? hpMax : null;
       const acVal = cleanKind === 'enemigo' && Number.isInteger(ac) ? ac : null;
 
+      let monsterIdx = null;
+      if (cleanKind === 'enemigo' && typeof monsterIndex === 'string' && monsterIndex) {
+        const monster = db.prepare('SELECT idx FROM srd_entries WHERE category = ? AND idx = ?').get('monsters', monsterIndex);
+        if (monster) monsterIdx = monster.idx;
+      }
+
       db.prepare(
-        'INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current, hp_max, ac) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(campaignId, charId, cleanKind, cleanName, init, hpC, hpM, acVal);
+        'INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current, hp_max, ac, monster_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(campaignId, charId, cleanKind, cleanName, init, hpC, hpM, acVal, monsterIdx);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
     });

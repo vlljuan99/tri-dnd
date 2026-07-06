@@ -4,6 +4,7 @@ import { useRoom } from '../store/socket.js';
 import { abilityModifier } from '../lib/dnd.js';
 import { rollPool } from '../lib/dice.js';
 import SrdPicker from './SrdPicker.jsx';
+import MonsterStatBlock from './MonsterStatBlock.jsx';
 
 function hpRatioColor(ratio) {
   if (ratio > 0.5) return 'bg-moss';
@@ -33,8 +34,9 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
   const [ownerByCharId, setOwnerByCharId] = useState({});
   const [showAdd, setShowAdd] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [form, setForm] = useState({ name: '', initiative: '', hp: '', ac: '' });
+  const [form, setForm] = useState({ name: '', initiative: '', hp: '', ac: '', monsterIndex: null });
   const [editingId, setEditingId] = useState(null);
+  const [statBlockOf, setStatBlockOf] = useState(null); // { index, name } | null
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -69,8 +71,9 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
       hpCurrent: form.hp === '' ? null : Number(form.hp),
       hpMax: form.hp === '' ? null : Number(form.hp),
       ac: form.ac === '' ? null : Number(form.ac),
+      monsterIndex: form.monsterIndex,
     });
-    setForm({ name: '', initiative: '', hp: '', ac: '' });
+    setForm({ name: '', initiative: '', hp: '', ac: '', monsterIndex: null });
     setShowAdd(false);
   }
 
@@ -80,6 +83,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
       initiative: '',
       hp: entry.meta?.hp != null ? String(entry.meta.hp) : '',
       ac: entry.meta?.ac != null ? String(entry.meta.ac) : '',
+      monsterIndex: entry.index,
     });
     setShowPicker(false);
     setShowAdd(true);
@@ -149,6 +153,14 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                   )}
                   {isDm && (
                     <>
+                      {c.monsterIndex && (
+                        <button
+                          onClick={() => setStatBlockOf({ index: c.monsterIndex, name: c.name })}
+                          className="rounded-sm border border-gold/40 px-1.5 py-0.5 text-xs text-gold hover:bg-gold/10"
+                        >
+                          Ficha
+                        </button>
+                      )}
                       <button
                         onClick={() => setEditingId(editingId === c.id ? null : c.id)}
                         className="rounded-sm border border-bone/20 px-1.5 py-0.5 text-xs text-bone/60 hover:text-bone"
@@ -278,6 +290,14 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
           onPick={pickMonster}
           onClose={() => setShowPicker(false)}
           renderMeta={(entry) => (entry.meta?.cr != null ? `DR ${entry.meta.cr}` : '')}
+        />
+      )}
+
+      {statBlockOf && (
+        <MonsterStatBlock
+          index={statBlockOf.index}
+          name={statBlockOf.name}
+          onClose={() => setStatBlockOf(null)}
         />
       )}
     </div>
