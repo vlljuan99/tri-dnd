@@ -52,7 +52,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
     try {
       const { character } = await api(`/characters/${combatant.characterId}`);
       const mod = abilityModifier(character.abilities.dex);
-      const roll = rollPool({ d20: 1 }, { modifier: mod, kind: 'check', label: 'Iniciativa' });
+      const roll = rollPool({ d20: 1 }, { modifier: mod, kind: 'check', label: 'Iniciativa', actorName: character.name });
       room.sendRoll(roll);
       room.setInitiative(combatant.id, roll.total);
     } catch {

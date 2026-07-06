@@ -37,19 +37,23 @@ function ActionRow({ action, monsterName, onRoll }) {
       {canRoll && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <button
-            onClick={() => onRoll(rollAttack(action.attack_bonus, { advantage: 'dis', label: `${monsterName} — ${action.name}` }))}
+            onClick={() =>
+              onRoll(rollAttack(action.attack_bonus, { advantage: 'dis', label: action.name, actorName: monsterName }))
+            }
             className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
           >
             Desv.
           </button>
           <button
-            onClick={() => onRoll(rollAttack(action.attack_bonus, { label: `${monsterName} — ${action.name}` }))}
+            onClick={() => onRoll(rollAttack(action.attack_bonus, { label: action.name, actorName: monsterName }))}
             className="rounded-sm border border-gold/50 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
           >
             Atacar
           </button>
           <button
-            onClick={() => onRoll(rollAttack(action.attack_bonus, { advantage: 'adv', label: `${monsterName} — ${action.name}` }))}
+            onClick={() =>
+              onRoll(rollAttack(action.attack_bonus, { advantage: 'adv', label: action.name, actorName: monsterName }))
+            }
             className="rounded-sm border border-moss px-2 py-0.5 text-xs text-bone/90 hover:bg-moss/20"
           >
             Vent.
@@ -66,7 +70,8 @@ function ActionRow({ action, monsterName, onRoll }) {
                     onRoll(
                       rollDamage(parsed.dice, {
                         modifier: parsed.modifier,
-                        label: `${monsterName} — ${action.name}${typeName ? ` (${typeName})` : ''}`,
+                        label: `${action.name} — daño${typeName ? ` (${typeName})` : ''}`,
+                        actorName: monsterName,
                       })
                     )
                   }
@@ -80,7 +85,8 @@ function ActionRow({ action, monsterName, onRoll }) {
                       rollDamage(parsed.dice, {
                         modifier: parsed.modifier,
                         crit: true,
-                        label: `${monsterName} — ${action.name}${typeName ? ` (${typeName})` : ''} crítico`,
+                        label: `${action.name} — daño${typeName ? ` (${typeName})` : ''} crítico`,
+                        actorName: monsterName,
                       })
                     )
                   }

@@ -64,7 +64,7 @@ function WeaponRow({ item, char, onRoll, disabled }) {
   const typeName = DAMAGE_TYPE_NAMES[w.damageType] ?? '';
 
   function attack(advantage) {
-    onRoll(rollAttack(bonus, { advantage, label: `${item.name} — ataque` }));
+    onRoll(rollAttack(bonus, { advantage, label: `${item.name} — ataque`, actorName: char.name }));
   }
   function damage(crit) {
     onRoll(
@@ -72,6 +72,7 @@ function WeaponRow({ item, char, onRoll, disabled }) {
         modifier: dmgMod,
         crit,
         label: `${item.name} — daño${typeName ? ` (${typeName})` : ''}${crit ? ' crítico' : ''}`,
+        actorName: char.name,
       })
     );
   }
@@ -183,7 +184,7 @@ export default function CharacterSheetPage() {
   }
 
   function rollCheck(label, bonus, kind = 'check') {
-    onRoll({ ...rollAttack(bonus, { label }), kind });
+    onRoll({ ...rollAttack(bonus, { label, actorName: char.name }), kind });
   }
 
   if (error) {
@@ -279,7 +280,7 @@ export default function CharacterSheetPage() {
       ? ` (CD ${spellSaveDC(char)} ${ABILITIES.find((a) => a.key === spell.dc)?.short ?? ''})`
       : '';
     if (mode === 'attack') {
-      onRoll(rollAttack(spellAttackBonus(char), { label: `${spell.name} — ataque de conjuro` }));
+      onRoll(rollAttack(spellAttackBonus(char), { label: `${spell.name} — ataque de conjuro`, actorName: char.name }));
       return;
     }
     try {
@@ -298,6 +299,7 @@ export default function CharacterSheetPage() {
       const roll = rollDamage(`${m[1]}d${m[2]}`, {
         modifier: m[3] ? Number(m[3]) : 0,
         label: `${spell.name} — daño${dcText}`,
+        actorName: char.name,
       });
       onRoll(roll);
     } catch {
