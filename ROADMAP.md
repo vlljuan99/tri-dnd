@@ -18,13 +18,25 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 
 ## Pendientes
 
-- [ ] **Fase 7 (resto)** — Tokens de enemigos/aliados persistidos en el backend (no solo el jugador propio) + pathing automático que rodea obstáculos + medir distancia + ping + dibujo libre
-  - Herramientas del DM: obstáculos, trampas (invisibles para jugadores), medir distancia, ping, dibujo libre
+- [ ] **Fase 7.5 — Mesa del DM (editor de campaña) y mapas multi-sala** *(en curso; prioritaria: el resto de la Fase 7 se apoya en su modelo de datos)*
+  - [x] Modelo de datos (migración v8): `maps` (biblioteca por campaña) → `map_floors` (plantas) → `map_rooms` (salas NxM con forma, suelo, notas y revelado) + `map_doors` (puerta/escalera/portal, control jugador/dm, abierta/cerrada). El mapa único de `game_tables` migrado a un mapa de una sala; `active_map_id` marca cuál está en la mesa
+  - [x] **Editor en página aparte** (`/campanas/:id/editor`, solo DM): biblioteca de mapas (crear/renombrar/activar/borrar), plantas en pestañas, lienzo 2D con plantillas de sala (habitación/salón/pasillo/N×M libre), arrastrar salas para combinarlas, puertas entre salas y entre plantas, panel de sala (revelado, notas del DM, suelo subido o generado con IA)
+  - [x] **Vista filtrada por rol en servidor** (`GET /mapa-activo`): el DM lo ve todo; el jugador solo salas reveladas, sin notas, y sin puertas del DM cerradas (una puerta secreta cerrada no existe para él). El tablero 3D compone las salas visibles de la planta en un único board
+  - [x] Borrado de mapas (incluido el activo) y de campañas enteras (solo DM, las fichas se conservan)
+  - [ ] Revelado en tiempo real por socket (hoy el jugador ve la sala nueva al recargar el tablero) y "entrar por una puerta" moviendo el token hasta ella
+  - [ ] **Enemigos precolocados por sala** (SRD o personalizados), que aparecen al revelarse la sala y se enlazan con el tracker de iniciativa existente
+  - [ ] **Trampas y objetos ocultos** (marcadores solo-DM, filtrados en servidor)
+  - [ ] Suelo por sala en el tablero 3D (hoy la imagen solo se ve en tablero si la planta tiene una única sala; en el editor se ve siempre)
+  - Usuarios de prueba locales: `dm-demo` / `jugador-demo` (contraseña `demo1234`), campaña "La Cripta del Umbral (demo)"
 
-- [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra
+- [ ] **Fase 7 (resto)** — Tokens de enemigos/aliados persistidos en el backend (no solo el jugador propio) + pathing automático que rodea obstáculos + medir distancia + ping + dibujo libre
+  - Herramientas del DM: obstáculos, medir distancia, ping, dibujo libre
+  - Los tokens persistidos se implementan sobre el modelo por-sala de la Fase 7.5 (no sobre las columnas de `game_tables`)
+
+- [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra (refinamiento del revelado por salas de la Fase 7.5)
   - Filtrado de datos **en el backend** según rol y área revelada (ver patrón ya usado con tiradas ocultas en `sockets.js`)
   - Visión compartida (unión de lo visible por el grupo) vs. individual, configurable por escena
-  - Línea de visión bloqueada por obstáculos; el DM ajusta el radio de visión
+  - Línea de visión bloqueada por obstáculos; el DM ajusta el radio de visión dentro de las salas ya reveladas
 
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus)
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)

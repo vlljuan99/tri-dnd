@@ -33,7 +33,8 @@ server/src/
   db.js        # SQLite + migraciones (fuente de verdad del modelo de datos)
   auth.js      # Registro/login/me, middleware requireAuth
   sockets.js   # Chat, tiradas (con filtrado de ocultas), presencia, estado en vivo de la mesa
-  routes/      # srd.js (compendio con filtros y meta por categoría), characters.js, campaigns.js
+  routes/      # srd.js (compendio), characters.js, campaigns.js, maps.js (editor de mapas, solo DM)
+  services/    # mapLibrary.js (consultas/serialización de mapas, filtrado por rol), generación de imágenes IA
 
 server/scripts/sync-srd.js       # Sincronización manual del SRD 5e (re-ejecutable, con concurrencia)
 server/data/translations/es.json # Traducciones al español aplicadas al sincronizar
@@ -56,7 +57,7 @@ OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...
 ```
 
-Sin este archivo la app funciona igual, pero el botón "Generar con IA" del mapa (`MapBackgroundPanel.jsx`) y del icono de personaje (`CharacterAvatarPanel.jsx`) devuelve un error explicando que falta la clave; subir una imagen o foto propia no requiere ninguna clave.
+Sin este archivo la app funciona igual, pero el botón "Generar" del suelo de sala en el editor de mapas (`features/map-editor/components/RoomPanel.jsx`) y del icono de personaje (`CharacterAvatarPanel.jsx`) devuelve un error explicando que falta la clave; subir una imagen o foto propia no requiere ninguna clave.
 
 ## Convenciones a mantener
 

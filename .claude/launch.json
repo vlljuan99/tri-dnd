@@ -8,6 +8,12 @@
       "port": 5173
     },
     {
+      "name": "cliente-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "client", "--", "--port", "5199", "--strictPort"],
+      "port": 5199
+    },
+    {
       "name": "servidor",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "server"],
