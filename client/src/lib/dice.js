@@ -27,8 +27,10 @@ function formatFormula(pool, modifier) {
  * Tira un conjunto de dados. `pool` = { d4: 0, d6: 2, ... }.
  * La ventaja/desventaja solo afecta a los d20: cada d20 se tira dos veces
  * y se conserva el mayor (ventaja) o el menor (desventaja).
+ * `actorName` identifica al personaje o monstruo que tira (distinto de quién
+ * la dispara), para que la mesa muestre "por quién" se tira en grande.
  */
-export function rollPool(pool, { modifier = 0, advantage = 'none', kind = 'dice', label = '' } = {}) {
+export function rollPool(pool, { modifier = 0, advantage = 'none', kind = 'dice', label = '', actorName = null } = {}) {
   const groups = [];
   let total = 0;
 
@@ -59,6 +61,7 @@ export function rollPool(pool, { modifier = 0, advantage = 'none', kind = 'dice'
   return {
     kind,
     label,
+    actorName,
     formula: formatFormula(pool, modifier),
     groups,
     modifier,
@@ -80,15 +83,15 @@ export function parseDice(notation) {
 }
 
 /** Tirada de ataque: 1d20 + bonificador, con ventaja/desventaja. */
-export function rollAttack(bonus, { advantage = 'none', label = 'Ataque' } = {}) {
-  return rollPool({ d20: 1 }, { modifier: bonus, advantage, kind: 'attack', label });
+export function rollAttack(bonus, { advantage = 'none', label = 'Ataque', actorName = null } = {}) {
+  return rollPool({ d20: 1 }, { modifier: bonus, advantage, kind: 'attack', label, actorName });
 }
 
 /**
  * Tirada de daño desde notación ("1d8", "8d6"…) + modificador.
  * Un crítico dobla el número de dados, nunca el modificador.
  */
-export function rollDamage(notation, { modifier = 0, crit = false, label = 'Daño' } = {}) {
+export function rollDamage(notation, { modifier = 0, crit = false, label = 'Daño', actorName = null } = {}) {
   const parsed = parseDice(notation);
   if (!parsed) return null;
   const count = crit ? parsed.count * 2 : parsed.count;
@@ -111,6 +114,7 @@ export function rollDamage(notation, { modifier = 0, crit = false, label = 'Dañ
   return {
     kind: 'damage',
     label,
+    actorName,
     formula,
     groups: [{ die: `d${sides}`, sides, results }],
     modifier,

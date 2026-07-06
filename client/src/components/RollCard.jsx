@@ -5,6 +5,9 @@ const ADVANTAGE_LABEL = { adv: 'ventaja', dis: 'desventaja' };
 /**
  * Pinta el resultado de una tirada (overlay, historial y chat de la mesa).
  * Paleta oscura de mesa de juego: crítico en dorado, pifia en rojo sangre.
+ * Si la tirada tiene `actorName` (personaje o monstruo que la hace), se
+ * destaca en grande; el nombre del jugador que la disparó queda pequeño y
+ * en un tono distinto, para no confundir "quién tira" con "por quién tira".
  */
 export default function RollCard({ roll, authorName, compact = false }) {
   const totalColor = roll.crit
@@ -12,24 +15,41 @@ export default function RollCard({ roll, authorName, compact = false }) {
     : roll.fumble
       ? 'text-blood'
       : 'text-bone';
+  const hasActor = Boolean(roll.actorName);
+
+  const details = (
+    <span className="text-sm text-bone/80">
+      {roll.label || 'Tirada'}
+      {roll.advantage && roll.advantage !== 'none' && (
+        <em className="ml-1 text-bone/50">({ADVANTAGE_LABEL[roll.advantage]})</em>
+      )}
+      {roll.hiddenBadge && (
+        <span className="ml-2 rounded-sm border border-gold/40 px-1 text-xs text-gold/80">oculta</span>
+      )}
+      <span className="ml-2 font-mono text-xs text-bone/50">{roll.formula}</span>
+    </span>
+  );
 
   return (
     <div className="rounded-sm border border-gold/20 bg-night-950/60 px-3 py-2">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          {authorName && (
-            <span className="mr-2 font-display text-xs tracking-wide text-gold/90">{authorName}</span>
+          {hasActor ? (
+            <>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="truncate font-display text-base tracking-wide text-gold">{roll.actorName}</span>
+                {authorName && <span className="shrink-0 text-xs text-bone/40">{authorName}</span>}
+              </div>
+              <div className="mt-0.5">{details}</div>
+            </>
+          ) : (
+            <div className="min-w-0">
+              {authorName && (
+                <span className="mr-2 font-display text-xs tracking-wide text-gold/90">{authorName}</span>
+              )}
+              {details}
+            </div>
           )}
-          <span className="text-sm text-bone/80">
-            {roll.label || 'Tirada'}
-            {roll.advantage && roll.advantage !== 'none' && (
-              <em className="ml-1 text-bone/50">({ADVANTAGE_LABEL[roll.advantage]})</em>
-            )}
-            {roll.hiddenBadge && (
-              <span className="ml-2 rounded-sm border border-gold/40 px-1 text-xs text-gold/80">oculta</span>
-            )}
-          </span>
-          <span className="ml-2 font-mono text-xs text-bone/50">{roll.formula}</span>
         </div>
         <span className={`shrink-0 font-mono text-2xl font-bold ${totalColor}`}>{roll.total}</span>
       </div>
