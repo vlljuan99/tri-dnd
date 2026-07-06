@@ -5,6 +5,7 @@ import AuthPage from './pages/AuthPage.jsx';
 import HubPage from './pages/HubPage.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import CharacterSheetPage from './pages/CharacterSheetPage.jsx';
+import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
 import MesaPage from './pages/MesaPage.jsx';
 import ParchmentShell from './components/ParchmentShell.jsx';
 import DiceOverlay from './components/DiceOverlay.jsx';
@@ -54,6 +55,7 @@ export default function App() {
             </ParchmentShell>
           }
         />
+        <Route path="/personajes/:id/asistente" element={<CharacterWizardPage />} />
         <Route path="/personajes/:id" element={<CharacterSheetPage />} />
         <Route path="/campanas/:id" element={<MesaPage />} />
       </Route>

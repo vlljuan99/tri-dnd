@@ -10,6 +10,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 - [x] **Fase 4** — Tirador de dados con overlay flotante y animaciones
 - [x] **Fase 5** — Campañas + mesa de juego persistente + chat en tiempo real + tiradas compartidas (incluidas ocultas del DM)
 - [x] **Fase 6** — Tracker de iniciativa + panel de enemigos del DM
+- [x] **Asistente guiado de creación de personaje (primera iteración)** — pasos Identidad, Clase, Raza, Características, Competencias y Resumen; borrador/completo, autoguardado, recuperación, ayuda contextual, vista previa y tutorial posterior básico. Pendiente para siguientes iteraciones: paso de equipo inicial, paso de hechizos, paso de rasgos/recursos, compra por puntos avanzada y multiclase.
 
 ## Pendientes
 

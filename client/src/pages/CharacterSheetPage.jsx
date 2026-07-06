@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import {
   ABILITIES,
@@ -22,6 +22,7 @@ import { useDice } from '../store/dice.js';
 import { useRoom } from '../store/socket.js';
 import SrdPicker from '../components/SrdPicker.jsx';
 import RollCard from '../components/RollCard.jsx';
+import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -129,6 +130,7 @@ export default function CharacterSheetPage() {
   const [campaigns, setCampaigns] = useState([]);
   const [picker, setPicker] = useState(null); // 'weapon' | 'gear' | 'spell'
   const [customItem, setCustomItem] = useState('');
+  const [customProficiency, setCustomProficiency] = useState('');
   const [lastRoll, setLastRoll] = useState(null);
   const [error, setError] = useState('');
 
@@ -136,6 +138,8 @@ export default function CharacterSheetPage() {
   const timerRef = useRef(null);
   const joinRoom = useRoom((s) => s.joinRoom);
   const submitRoll = useDice((s) => s.submitRoll);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
     api(`/characters/${id}`)
@@ -148,6 +152,21 @@ export default function CharacterSheetPage() {
     api('/srd/races').then(({ results }) => setRaces(results));
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch(() => {});
   }, [id]);
+
+  // Tras finalizar el asistente llegamos con ?tutorial=1: mostramos la guía
+  // contextual solo si el usuario no la ha visto antes en este navegador.
+  useEffect(() => {
+    if (searchParams.get('tutorial') === '1') {
+      if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) setTutorialOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function closeTutorial() {
+    localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
+    setTutorialOpen(false);
+  }
 
   // Si el personaje está vinculado a una campaña, únete a su sala para
   // que las tiradas se compartan automáticamente en el registro de la mesa.
@@ -241,6 +260,16 @@ export default function CharacterSheetPage() {
     patch({ inventory: char.inventory.map((i) => (i.id === itemId ? { ...i, ...fields } : i)) });
   }
 
+  function addCustomProficiency() {
+    if (!customProficiency.trim()) return;
+    patch({ other_proficiencies: [...char.other_proficiencies, customProficiency.trim()] });
+    setCustomProficiency('');
+  }
+
+  function removeProficiency(name) {
+    patch({ other_proficiencies: char.other_proficiencies.filter((p) => p !== name) });
+  }
+
   function addSpell(entry) {
     const known = char.spells.known ?? [];
     if (!known.some((s) => s.index === entry.index)) {
@@ -317,10 +346,29 @@ export default function CharacterSheetPage() {
         <Link to="/personajes" className="font-display text-sm text-gold/80 hover:text-gold">
           ← Personajes
         </Link>
-        <span className={`text-xs ${saveState === 'error' ? 'text-blood' : 'text-bone/50'}`}>
-          {editable ? saveLabels[saveState] : 'Solo lectura'}
-        </span>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setTutorialOpen(true)} className="text-xs text-gold/70 underline decoration-dotted hover:text-gold">
+            Ayuda
+          </button>
+          <span className={`text-xs ${saveState === 'error' ? 'text-blood' : 'text-bone/50'}`}>
+            {editable ? saveLabels[saveState] : 'Solo lectura'}
+          </span>
+        </div>
       </div>
+
+      {char.status === 'draft' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-ochre/40 bg-ochre/10 p-3 text-sm">
+          <span className="text-bone/80">
+            Este personaje es un <strong className="text-ochre">borrador</strong>: aún no ha terminado la creación
+            guiada.
+          </span>
+          {editable && (
+            <Link to={`/personajes/${id}/asistente`} className="rounded-sm border border-ochre/50 px-3 py-1 text-xs text-ochre hover:bg-ochre/10">
+              Continuar asistente
+            </Link>
+          )}
+        </div>
+      )}
 
       <Card title="Personaje">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -539,6 +587,41 @@ export default function CharacterSheetPage() {
         </Card>
       </div>
 
+      {/* Otras competencias (herramientas, instrumentos, idiomas…) */}
+      {(char.other_proficiencies.length > 0 || !ro) && (
+        <Card title="Otras competencias">
+          {char.other_proficiencies.length === 0 && (
+            <p className="text-sm text-bone/50">Sin herramientas, idiomas u otras competencias registradas.</p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {char.other_proficiencies.map((p) => (
+              <span key={p} className="flex items-center gap-1 rounded-sm border border-bone/15 px-2 py-1 text-xs text-bone/70">
+                {p}
+                {!ro && (
+                  <button onClick={() => removeProficiency(p)} aria-label={`Quitar ${p}`} className="text-bone/40 hover:text-blood">
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+          {!ro && (
+            <div className="mt-3 flex gap-2">
+              <input
+                value={customProficiency}
+                onChange={(e) => setCustomProficiency(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addCustomProficiency()}
+                placeholder="Ej. Herramientas de ladrón"
+                className={`${inputClass} flex-1 text-sm`}
+              />
+              <button onClick={addCustomProficiency} className="rounded-sm border border-bone/30 px-3 text-sm hover:bg-bone/10">
+                Añadir
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Ataques */}
       <Card title="Ataques">
         {lastRoll && (
@@ -749,6 +832,8 @@ export default function CharacterSheetPage() {
           renderMeta={(e) => (e.meta?.level === 0 ? 'truco' : `nv. ${e.meta?.level}`)}
         />
       )}
+
+      <SheetTutorial open={tutorialOpen} onClose={closeTutorial} />
     </div>
     </div>
   );

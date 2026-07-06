@@ -128,6 +128,19 @@ const migrations = [
   `
   ALTER TABLE combatants ADD COLUMN monster_index TEXT;
   `,
+
+  // v5 — asistente guiado de creación de personaje: estado de borrador/completo,
+  // datos de identidad adicionales y competencias no cubiertas por habilidades/salvaciones
+  `
+  ALTER TABLE characters ADD COLUMN status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('draft', 'complete'));
+  ALTER TABLE characters ADD COLUMN background TEXT NOT NULL DEFAULT '';
+  ALTER TABLE characters ADD COLUMN alignment TEXT NOT NULL DEFAULT '';
+  ALTER TABLE characters ADD COLUMN pronouns TEXT NOT NULL DEFAULT '';
+  ALTER TABLE characters ADD COLUMN other_proficiencies TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE characters ADD COLUMN wizard_step INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE characters ADD COLUMN wizard_data TEXT NOT NULL DEFAULT '{}';
+  CREATE INDEX idx_characters_status ON characters(status);
+  `,
 ];
 
 export function runMigrations() {

@@ -43,6 +43,42 @@ export const SPELLCASTING_ABILITY = {
   wizard: 'int',
 };
 
+// Nombres de clase en español (el SRD ya trae "name" en inglés; se traducen
+// aquí porque son solo 12 y se reutilizan en varias pantallas).
+export const CLASS_NAMES = {
+  barbarian: 'Bárbaro', bard: 'Bardo', cleric: 'Clérigo', druid: 'Druida',
+  fighter: 'Guerrero', monk: 'Monje', paladin: 'Paladín', ranger: 'Explorador',
+  rogue: 'Pícaro', sorcerer: 'Hechicero', warlock: 'Brujo', wizard: 'Mago',
+};
+
+// Característica principal orientativa por clase (no viene en el SRD como
+// campo explícito; para las clases con conjuros coincide con su característica
+// de lanzamiento, para el resto es la habitual de las reglas básicas de 5e).
+export const PRIMARY_ABILITY = {
+  ...SPELLCASTING_ABILITY,
+  barbarian: 'str',
+  fighter: 'str',
+  monk: 'dex',
+  rogue: 'dex',
+};
+
+// Descripciones y rol aproximado por clase: contenido propio (no copiado del
+// SRD) pensado solo como orientación rápida en el asistente de creación.
+export const CLASS_SUMMARY = {
+  barbarian: { role: 'Combate cuerpo a cuerpo, resistencia y daño sostenido.', difficulty: 'Baja' },
+  bard: { role: 'Apoyo, interacción social y control mediante la magia.', difficulty: 'Media' },
+  cleric: { role: 'Curación, protección divina y versatilidad en combate.', difficulty: 'Media' },
+  druid: { role: 'Magia natural, transformación y control del campo de batalla.', difficulty: 'Alta' },
+  fighter: { role: 'Combate versátil con armas, fiable en cualquier situación.', difficulty: 'Baja' },
+  monk: { role: 'Combate ágil sin armas, movilidad y golpes rápidos.', difficulty: 'Media' },
+  paladin: { role: 'Combatiente sagrado con magia de apoyo y protección.', difficulty: 'Media' },
+  ranger: { role: 'Exploración, combate a distancia y vínculo con la naturaleza.', difficulty: 'Media' },
+  rogue: { role: 'Sigilo, daño de precisión y destreza en habilidades.', difficulty: 'Baja' },
+  sorcerer: { role: 'Magia arcana innata, potente pero con recursos limitados.', difficulty: 'Alta' },
+  warlock: { role: 'Magia arcana pactada, pocos espacios pero muy potentes.', difficulty: 'Media' },
+  wizard: { role: 'Magia arcana erudita, el mayor abanico de hechizos.', difficulty: 'Alta' },
+};
+
 export const SCHOOL_NAMES = {
   abjuration: 'Abjuración',
   conjuration: 'Conjuración',
@@ -53,6 +89,14 @@ export const SCHOOL_NAMES = {
   necromancy: 'Nigromancia',
   transmutation: 'Transmutación',
 };
+
+// Los nueve alineamientos clásicos de D&D: terminología básica del juego, no
+// texto de trasfondo protegido del SRD.
+export const ALIGNMENTS = [
+  'Legal Bueno', 'Neutral Bueno', 'Caótico Bueno',
+  'Legal Neutral', 'Neutral', 'Caótico Neutral',
+  'Legal Malvado', 'Neutral Malvado', 'Caótico Malvado',
+];
 
 export const DAMAGE_TYPE_NAMES = {
   acid: 'ácido',
@@ -76,6 +120,17 @@ export function abilityModifier(score) {
 
 export function proficiencyBonus(level) {
   return 2 + Math.floor((level - 1) / 4);
+}
+
+/**
+ * Puntos de golpe máximos estimados con la regla de valor fijo por nivel
+ * (máximo del dado de golpe en nivel 1, luego media fija + 1 por nivel):
+ * hitDie + conMod en nivel 1, y + (hitDie/2 + 1 + conMod) por cada nivel extra.
+ */
+export function estimateHitPoints(hitDie, conModifier, level) {
+  if (!hitDie || !level) return 0;
+  const perLevel = Math.floor(hitDie / 2) + 1 + conModifier;
+  return hitDie + conModifier + Math.max(0, level - 1) * perLevel;
 }
 
 export function formatModifier(mod) {
