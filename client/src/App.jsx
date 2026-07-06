@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from './store/auth.js';
 import AuthPage from './pages/AuthPage.jsx';
@@ -9,6 +9,8 @@ import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
 import MesaPage from './pages/MesaPage.jsx';
 import ParchmentShell from './components/ParchmentShell.jsx';
 import DiceOverlay from './components/DiceOverlay.jsx';
+
+const CampaignGamePage = lazy(() => import('./features/tactical-map/pages/CampaignGamePage.jsx'));
 
 // Zona autenticada: cualquier pantalla lleva el tirador de dados flotante
 function Protected() {
@@ -58,6 +60,20 @@ export default function App() {
         <Route path="/personajes/:id/asistente" element={<CharacterWizardPage />} />
         <Route path="/personajes/:id" element={<CharacterSheetPage />} />
         <Route path="/campanas/:id" element={<MesaPage />} />
+        <Route
+          path="/campanas/:id/tablero"
+          element={
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center bg-night-950 text-bone">
+                  <p className="font-display text-lg tracking-wide text-gold">Cargando tablero...</p>
+                </div>
+              }
+            >
+              <CampaignGamePage />
+            </Suspense>
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -5,11 +5,20 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Variables de entorno locales (claves de IA, etc.), no versionadas
+const envFile = path.resolve(__dirname, '../.env');
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
+
 export const DATA_DIR = path.resolve(__dirname, '../data');
 export const DB_PATH = path.join(DATA_DIR, 'tri-dnd.db');
+export const UPLOADS_ROOT = path.join(DATA_DIR, 'uploads');
+export const MAP_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'maps');
+export const AVATAR_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
 export const PORT = Number(process.env.PORT) || 4000;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(MAP_UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(AVATAR_UPLOADS_DIR, { recursive: true });
 
 // Secreto JWT: variable de entorno o uno generado y persistido en local
 const secretFile = path.join(DATA_DIR, 'jwt-secret.txt');

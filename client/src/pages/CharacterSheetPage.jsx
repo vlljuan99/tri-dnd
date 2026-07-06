@@ -18,11 +18,13 @@ import {
   cantripDamageAtLevel,
 } from '../lib/dnd.js';
 import { rollAttack, rollDamage } from '../lib/dice.js';
+import { uploadCharacterAvatar, generateCharacterAvatar, removeCharacterAvatar } from '../lib/characterAvatar.js';
 import { useDice } from '../store/dice.js';
 import { useRoom } from '../store/socket.js';
 import SrdPicker from '../components/SrdPicker.jsx';
 import RollCard from '../components/RollCard.jsx';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
+import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -133,6 +135,8 @@ export default function CharacterSheetPage() {
   const [customProficiency, setCustomProficiency] = useState('');
   const [lastRoll, setLastRoll] = useState(null);
   const [error, setError] = useState('');
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
 
   const pendingRef = useRef({});
   const timerRef = useRef(null);
@@ -195,6 +199,23 @@ export default function CharacterSheetPage() {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(flush, 800);
   }
+
+  async function runAvatarAction(action) {
+    setAvatarBusy(true);
+    setAvatarError('');
+    try {
+      const updated = await action();
+      setChar((c) => ({ ...c, avatar_path: updated.avatar_path }));
+    } catch (e) {
+      setAvatarError(e.message || 'No se pudo actualizar el icono.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  const handleAvatarUpload = (file) => runAvatarAction(() => uploadCharacterAvatar(id, file));
+  const handleAvatarGenerate = (options) => runAvatarAction(() => generateCharacterAvatar(id, options));
+  const handleAvatarRemove = () => runAvatarAction(() => removeCharacterAvatar(id));
 
   function onRoll(roll) {
     if (!roll) return;
@@ -371,6 +392,17 @@ export default function CharacterSheetPage() {
       )}
 
       <Card title="Personaje">
+        <div className="mb-4">
+          <CharacterAvatarPanel
+            avatarUrl={char.avatar_path}
+            editable={editable}
+            busy={avatarBusy}
+            error={avatarError}
+            onUpload={handleAvatarUpload}
+            onGenerate={handleAvatarGenerate}
+            onRemove={handleAvatarRemove}
+          />
+        </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <label className="col-span-2 flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wider text-bone/50">Nombre</span>
