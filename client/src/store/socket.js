@@ -14,6 +14,7 @@ export const useRoom = create((set, get) => ({
   messages: [],
   online: [],
   joinError: null,
+  combat: { active: false, round: 1, turnId: null, combatants: [] },
 
   ensureSocket() {
     if (socket) return socket;
@@ -25,6 +26,7 @@ export const useRoom = create((set, get) => ({
     });
     socket.on('room:members', (online) => set({ online }));
     socket.on('table:live', ({ isLive }) => set({ isLive }));
+    socket.on('combat:state', (combat) => set({ combat }));
     return socket;
   },
 
@@ -44,6 +46,7 @@ export const useRoom = create((set, get) => ({
         campaignName: resp.campaignName,
         messages: resp.messages,
         online: resp.members,
+        combat: resp.combat ?? { active: false, round: 1, turnId: null, combatants: [] },
       });
     });
   },
@@ -51,7 +54,15 @@ export const useRoom = create((set, get) => ({
   leaveRoom() {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('room:leave', { campaignId });
-    set({ campaignId: null, campaignName: '', role: null, isLive: false, messages: [], online: [] });
+    set({
+      campaignId: null,
+      campaignName: '',
+      role: null,
+      isLive: false,
+      messages: [],
+      online: [],
+      combat: { active: false, round: 1, turnId: null, combatants: [] },
+    });
   },
 
   sendChat(text) {
@@ -70,5 +81,49 @@ export const useRoom = create((set, get) => ({
   setLive(isLive) {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('table:set-live', { campaignId, isLive });
+  },
+
+  // --- Tracker de iniciativa ---------------------------------------
+
+  addCombatant(payload) {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:add', { campaignId, ...payload });
+  },
+
+  addParty() {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:add-party', { campaignId });
+  },
+
+  setInitiative(combatantId, initiative) {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:set-initiative', { campaignId, combatantId, initiative });
+  },
+
+  updateCombatant(combatantId, patch) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return;
+    const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    socket.emit('combat:update', { campaignId, combatantId, ...clean });
+  },
+
+  removeCombatant(combatantId) {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:remove', { campaignId, combatantId });
+  },
+
+  startCombat() {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:start', { campaignId });
+  },
+
+  nextTurn() {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:next', { campaignId });
+  },
+
+  endCombat() {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('combat:end', { campaignId });
   },
 }));

@@ -44,6 +44,46 @@ function recentMessages(campaignId, { includeHidden, userId }) {
   return rows.reverse().map(serializeMessage);
 }
 
+// --- Tracker de iniciativa ------------------------------------------------
+
+function orderedCombatants(campaignId) {
+  return db
+    .prepare('SELECT * FROM combatants WHERE campaign_id = ? ORDER BY initiative DESC, id ASC')
+    .all(campaignId);
+}
+
+// Vista de un combatiente según quién la recibe: el HP/CA exacto de los
+// enemigos solo llega al socket del DM, nunca al de los jugadores (mismo
+// patrón que las tiradas ocultas: el filtrado ocurre en el backend).
+function combatantView(row, { isDm }) {
+  const base = {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    initiative: row.initiative,
+    characterId: row.character_id,
+  };
+  if (row.kind === 'pj' && row.character_id) {
+    const c = db.prepare('SELECT hp_current, hp_max, ac FROM characters WHERE id = ?').get(row.character_id);
+    if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac });
+  } else if (row.kind === 'enemigo' && isDm) {
+    Object.assign(base, { hpCurrent: row.hp_current, hpMax: row.hp_max, ac: row.ac });
+  }
+  return base;
+}
+
+function combatStateFor(campaignId, isDm) {
+  const table = db
+    .prepare('SELECT combat_active, combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  return {
+    active: Boolean(table?.combat_active),
+    round: table?.combat_round ?? 1,
+    turnId: table?.combat_turn_id ?? null,
+    combatants: orderedCombatants(campaignId).map((r) => combatantView(r, { isDm })),
+  };
+}
+
 export function setupSockets(io) {
   // Autenticación por la misma cookie de sesión que la API
   io.use((socket, next) => {
@@ -84,6 +124,19 @@ export function setupSockets(io) {
     }
   }
 
+  // Emite el estado de combate a cada socket de la sala con la vista que le
+  // corresponde según su rol (el DM ve HP/CA exactos de los enemigos)
+  function broadcastCombat(campaignId) {
+    const room = io.sockets.adapter.rooms.get(roomName(campaignId));
+    for (const sid of room ?? []) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s) continue;
+      const membership = getMembership(campaignId, s.data.user.id);
+      if (!membership) continue;
+      s.emit('combat:state', combatStateFor(campaignId, membership.role === 'dm'));
+    }
+  }
+
   io.on('connection', (socket) => {
     const user = socket.data.user;
 
@@ -108,6 +161,7 @@ export function setupSockets(io) {
           userId: user.id,
         }),
         members: onlineMembers(campaignId),
+        combat: combatStateFor(campaignId, membership.role === 'dm'),
       });
     });
 
@@ -158,6 +212,175 @@ export function setupSockets(io) {
         body: isLive ? 'La sesión ha comenzado' : 'La sesión ha terminado',
       });
       io.to(roomName(campaignId)).emit('chat:new', note);
+      cb?.({ ok: true });
+    });
+
+    // --- Tracker de iniciativa ---------------------------------------
+
+    socket.on('combat:add', ({ campaignId, kind, name, initiative, hpCurrent, hpMax, ac, characterId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede añadir combatientes' });
+
+      const cleanKind = kind === 'pj' ? 'pj' : 'enemigo';
+      const cleanName = typeof name === 'string' ? name.trim().slice(0, 60) : '';
+      if (!cleanName) return cb?.({ error: 'El combatiente necesita un nombre' });
+      const init = Number.isInteger(initiative) ? initiative : 0;
+
+      let charId = null;
+      if (cleanKind === 'pj' && Number.isInteger(characterId)) {
+        const char = db.prepare('SELECT id FROM characters WHERE id = ? AND campaign_id = ?').get(characterId, campaignId);
+        if (char) charId = char.id;
+      }
+      const hpC = cleanKind === 'enemigo' && Number.isInteger(hpCurrent) ? hpCurrent : null;
+      const hpM = cleanKind === 'enemigo' && Number.isInteger(hpMax) ? hpMax : null;
+      const acVal = cleanKind === 'enemigo' && Number.isInteger(ac) ? ac : null;
+
+      db.prepare(
+        'INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current, hp_max, ac) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(campaignId, charId, cleanKind, cleanName, init, hpC, hpM, acVal);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:add-party', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede añadir al grupo' });
+
+      const characters = db.prepare('SELECT id, name FROM characters WHERE campaign_id = ?').all(campaignId);
+      const existingIds = new Set(
+        db
+          .prepare("SELECT character_id FROM combatants WHERE campaign_id = ? AND kind = 'pj'")
+          .all(campaignId)
+          .map((r) => r.character_id)
+      );
+      const insert = db.prepare(
+        "INSERT INTO combatants (campaign_id, character_id, kind, name, initiative) VALUES (?, ?, 'pj', ?, 0)"
+      );
+      for (const c of characters) {
+        if (!existingIds.has(c.id)) insert.run(campaignId, c.id, c.name);
+      }
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:set-initiative', ({ campaignId, combatantId, initiative }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db.prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+
+      if (membership.role !== 'dm') {
+        if (row.kind !== 'pj' || !row.character_id) return cb?.({ error: 'No puedes editar este combatiente' });
+        const char = db.prepare('SELECT user_id FROM characters WHERE id = ?').get(row.character_id);
+        if (!char || char.user_id !== user.id) return cb?.({ error: 'No puedes editar este combatiente' });
+      }
+
+      const init = Number(initiative);
+      if (!Number.isInteger(init) || init < -20 || init > 60) return cb?.({ error: 'Iniciativa no válida' });
+      db.prepare('UPDATE combatants SET initiative = ? WHERE id = ?').run(init, row.id);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:update', ({ campaignId, combatantId, name, hpCurrent, hpMax, ac }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede editar combatientes' });
+
+      const row = db.prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+
+      if (typeof name === 'string' && name.trim()) {
+        db.prepare('UPDATE combatants SET name = ? WHERE id = ?').run(name.trim().slice(0, 60), row.id);
+      }
+
+      if (row.kind === 'pj' && row.character_id) {
+        const patch = {};
+        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(-99, Math.min(999, hpCurrent));
+        if (Number.isInteger(hpMax)) patch.hp_max = Math.max(0, Math.min(999, hpMax));
+        if (Object.keys(patch).length) {
+          const sets = Object.keys(patch).map((k) => `${k} = ?`).join(', ');
+          db.prepare(`UPDATE characters SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(
+            ...Object.values(patch),
+            row.character_id
+          );
+        }
+      } else {
+        const patch = {};
+        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(-99, Math.min(999, hpCurrent));
+        if (Number.isInteger(hpMax)) patch.hp_max = Math.max(0, Math.min(999, hpMax));
+        if (Number.isInteger(ac)) patch.ac = Math.max(0, Math.min(40, ac));
+        if (Object.keys(patch).length) {
+          const sets = Object.keys(patch).map((k) => `${k} = ?`).join(', ');
+          db.prepare(`UPDATE combatants SET ${sets} WHERE id = ?`).run(...Object.values(patch), row.id);
+        }
+      }
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:remove', ({ campaignId, combatantId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede quitar combatientes' });
+
+      db.prepare('DELETE FROM combatants WHERE id = ? AND campaign_id = ?').run(combatantId, campaignId);
+      const table = db.prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
+      if (table?.combat_turn_id === combatantId) {
+        db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+      }
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:start', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede iniciar el combate' });
+
+      const first = orderedCombatants(campaignId)[0];
+      db.prepare(
+        'UPDATE game_tables SET combat_active = 1, combat_round = 1, combat_turn_id = ? WHERE campaign_id = ?'
+      ).run(first?.id ?? null, campaignId);
+
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha comenzado' });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:next', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede avanzar el turno' });
+
+      const list = orderedCombatants(campaignId);
+      if (list.length === 0) return cb?.({ error: 'No hay combatientes' });
+
+      const table = db.prepare('SELECT combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
+      const idx = list.findIndex((c) => c.id === table?.combat_turn_id);
+      const nextIdx = idx === -1 ? 0 : (idx + 1) % list.length;
+      const wrapped = idx !== -1 && nextIdx === 0;
+      const nextRound = (table?.combat_round ?? 1) + (wrapped ? 1 : 0);
+
+      db.prepare('UPDATE game_tables SET combat_turn_id = ?, combat_round = ? WHERE campaign_id = ?').run(
+        list[nextIdx].id,
+        nextRound,
+        campaignId
+      );
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    socket.on('combat:end', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede terminar el combate' });
+
+      db.prepare('DELETE FROM combatants WHERE campaign_id = ?').run(campaignId);
+      db.prepare(
+        'UPDATE game_tables SET combat_active = 0, combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?'
+      ).run(campaignId);
+
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha terminado' });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
 

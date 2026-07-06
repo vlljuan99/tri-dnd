@@ -101,6 +101,27 @@ const migrations = [
   );
   CREATE INDEX idx_chat_campaign ON chat_messages(campaign_id, id);
   `,
+
+  // v3 — tracker de iniciativa: combatientes (PJ y enemigos) + estado del combate
+  `
+  ALTER TABLE game_tables ADD COLUMN combat_active INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE game_tables ADD COLUMN combat_round INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE game_tables ADD COLUMN combat_turn_id INTEGER;
+
+  CREATE TABLE combatants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'enemigo' CHECK (kind IN ('pj', 'enemigo')),
+    name TEXT NOT NULL,
+    initiative INTEGER NOT NULL DEFAULT 0,
+    hp_current INTEGER,
+    hp_max INTEGER,
+    ac INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_combatants_campaign ON combatants(campaign_id);
+  `,
 ];
 
 export function runMigrations() {

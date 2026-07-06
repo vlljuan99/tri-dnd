@@ -9,13 +9,9 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 - [x] **Fase 3** — Cálculo de ataques (armas y hechizos) usando los datos sincronizados del SRD
 - [x] **Fase 4** — Tirador de dados con overlay flotante y animaciones
 - [x] **Fase 5** — Campañas + mesa de juego persistente + chat en tiempo real + tiradas compartidas (incluidas ocultas del DM)
+- [x] **Fase 6** — Tracker de iniciativa + panel de enemigos del DM
 
 ## Pendientes
-
-- [ ] **Fase 6** — Tracker de iniciativa + panel de enemigos del DM
-  - Tirada de iniciativa por jugador (o introducida por el DM), orden de turnos, turno actual resaltado
-  - El DM añade enemigos/NPCs (del SRD o a mano) con su propia iniciativa, controla su HP
-  - Botón de siguiente turno sincronizado; resumen de HP/CA de todos los personajes para el DM
 
 - [ ] **Fase 7** — Mapa táctico: rejilla + subida de imagen + tokens + pathing automático + medir + ping + dibujo libre
   - Konva.js + react-konva. Rejilla cuadrada calculada sobre la imagen subida por el DM

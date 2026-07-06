@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../store/auth.js';
 import { useRoom } from '../store/socket.js';
 import RollCard from '../components/RollCard.jsx';
+import InitiativeTracker from '../components/InitiativeTracker.jsx';
 
 function Message({ message, selfId }) {
   if (message.type === 'system') {
@@ -33,8 +34,8 @@ function Message({ message, selfId }) {
 
 /**
  * Mesa de juego de una campaña (desktop-first): chat y registro de tiradas en
- * tiempo real, presencia y control de sesión del DM. El mapa táctico y la
- * iniciativa se añadirán a esta pantalla en las fases 6-8.
+ * tiempo real, presencia, control de sesión del DM y tracker de iniciativa
+ * con panel de enemigos. El mapa táctico se añadirá en las fases 7-8.
  */
 export default function MesaPage() {
   const { id } = useParams();
@@ -125,6 +126,11 @@ export default function MesaPage() {
             </button>
           </form>
         </main>
+
+        {/* Tracker de iniciativa */}
+        <aside className="hidden w-72 shrink-0 flex-col border-l border-gold/15 bg-night-900 lg:flex">
+          <InitiativeTracker campaignId={campaignId} isDm={isDm} userId={user?.id} />
+        </aside>
 
         {/* Presencia */}
         <aside className="hidden w-56 shrink-0 border-l border-gold/15 bg-night-900 p-4 md:block">
