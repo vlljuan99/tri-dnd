@@ -24,7 +24,7 @@ export default function MapGrid({ map, visible }) {
   if (!visible) return null;
 
   return (
-    <lineSegments geometry={geometry}>
+    <lineSegments geometry={geometry} raycast={() => null}>
       <lineBasicMaterial color="#e8dfc9" transparent opacity={0.32} />
     </lineSegments>
   );

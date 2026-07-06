@@ -6,6 +6,8 @@ export default function MapControls({
   isDm,
   showBackgroundPanel,
   onToggleBackgroundPanel,
+  shapeMode,
+  onToggleShapeMode,
   onCenter,
   onZoomIn,
   onZoomOut,
@@ -113,6 +115,21 @@ export default function MapControls({
             }`}
           >
             Mapa
+          </button>
+        )}
+        {isDm && (
+          <button
+            type="button"
+            aria-label="Editar forma de la sala"
+            aria-pressed={shapeMode}
+            onClick={onToggleShapeMode}
+            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
+              shapeMode
+                ? 'border-gold bg-gold/10 text-gold'
+                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
+            }`}
+          >
+            Forma
           </button>
         )}
         {isDm && (

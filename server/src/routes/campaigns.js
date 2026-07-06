@@ -18,13 +18,32 @@ function serializeMap(table) {
     width: table.map_width,
     height: table.map_height,
     gridSize: table.map_grid_size,
+    disabledCells: JSON.parse(table.map_disabled_cells || '[]'),
   };
 }
 
 function getMapTable(campaignId) {
   return db
-    .prepare('SELECT map_name, map_background_url, map_width, map_height, map_grid_size FROM game_tables WHERE campaign_id = ?')
+    .prepare(
+      `SELECT map_name, map_background_url, map_width, map_height, map_grid_size, map_disabled_cells
+       FROM game_tables WHERE campaign_id = ?`
+    )
     .get(campaignId);
+}
+
+// Validación de la forma de la sala: lista de pares [col, row] enteros no
+// negativos, tamaño acotado para evitar payloads absurdos.
+function isValidDisabledCells(value) {
+  return (
+    Array.isArray(value) &&
+    value.length <= 4000 &&
+    value.every(
+      (cell) =>
+        Array.isArray(cell) &&
+        cell.length === 2 &&
+        cell.every((n) => Number.isInteger(n) && n >= 0)
+    )
+  );
 }
 
 // Código de invitación legible, sin caracteres ambiguos (0/O, 1/I/L)
@@ -185,6 +204,26 @@ campaignsRouter.delete('/:id/mapa/imagen', (req, res) => {
   db.prepare(
     "UPDATE game_tables SET map_background_url = NULL, updated_at = datetime('now') WHERE campaign_id = ?"
   ).run(req.params.id);
+  res.json({ map: serializeMap(getMapTable(req.params.id)) });
+});
+
+// Forma de la sala: casillas desactivadas para cuadrículas no rectangulares.
+// El DM parte de un rectángulo completo y "borra" las casillas que quiere
+// dejar fuera de la sala (en L, con huecos, etc.).
+campaignsRouter.patch('/:id/mapa/celdas', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  if (membership.role !== 'dm') return res.status(403).json({ error: 'Solo el DM puede editar la forma de la sala' });
+
+  const { disabledCells } = req.body ?? {};
+  if (!isValidDisabledCells(disabledCells)) {
+    return res.status(400).json({ error: 'Lista de casillas no válida' });
+  }
+
+  db.prepare(
+    "UPDATE game_tables SET map_disabled_cells = ?, updated_at = datetime('now') WHERE campaign_id = ?"
+  ).run(JSON.stringify(disabledCells), req.params.id);
+
   res.json({ map: serializeMap(getMapTable(req.params.id)) });
 });
 

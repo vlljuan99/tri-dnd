@@ -4,6 +4,7 @@ import { canMoveToken } from '../domain/permissions.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import MapControls from './MapControls.jsx';
 import MapBackgroundPanel from './MapBackgroundPanel.jsx';
+import MapShapePanel from './MapShapePanel.jsx';
 
 class CanvasErrorBoundary extends Component {
   constructor(props) {
@@ -42,12 +43,17 @@ export default function TacticalMap({
   onUploadBackground,
   onGenerateBackground,
   onRemoveBackground,
+  shapeError,
+  onToggleShapeCell,
+  onFillAllCells,
+  onClearAllCells,
   backToCampaignHref,
 }) {
   const [selectedTokenId, setSelectedTokenId] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
   const [cameraCommand, setCameraCommand] = useState(null);
   const [showBackgroundPanel, setShowBackgroundPanel] = useState(false);
+  const [shapeMode, setShapeMode] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -68,6 +74,17 @@ export default function TacticalMap({
     });
   }
 
+  function toggleShapeMode() {
+    setShapeMode((value) => {
+      const next = !value;
+      if (next) {
+        setShowBackgroundPanel(false);
+        setSelectedTokenId(null);
+      }
+      return next;
+    });
+  }
+
   return (
     <section className="relative min-h-0 flex-1 overflow-hidden bg-night-950">
       <CanvasErrorBoundary>
@@ -79,19 +96,23 @@ export default function TacticalMap({
           showGrid={showGrid}
           savingTokenId={savingTokenId}
           cameraCommand={cameraCommand}
+          shapeMode={isDm && shapeMode}
           onSelectToken={setSelectedTokenId}
           onMoveToken={onMoveToken}
+          onToggleShapeCell={onToggleShapeCell}
         />
       </CanvasErrorBoundary>
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
         <p className="mt-1 text-xs text-bone/65">
-          {selectedToken
-            ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
-                canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
-              }`
-            : 'Selecciona un token y pulsa una casilla.'}
+          {shapeMode
+            ? 'Modo forma activo · haz clic en una casilla para activarla o desactivarla.'
+            : selectedToken
+              ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
+                  canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
+                }`
+              : 'Selecciona un token y pulsa una casilla.'}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
       </div>
@@ -135,12 +156,23 @@ export default function TacticalMap({
         />
       )}
 
+      {isDm && shapeMode && (
+        <MapShapePanel
+          error={shapeError}
+          onFillAll={onFillAllCells}
+          onClearAll={onClearAllCells}
+          onClose={toggleShapeMode}
+        />
+      )}
+
       <MapControls
         showGrid={showGrid}
         selectedToken={selectedToken}
         isDm={isDm}
         showBackgroundPanel={showBackgroundPanel}
         onToggleBackgroundPanel={() => setShowBackgroundPanel((value) => !value)}
+        shapeMode={shapeMode}
+        onToggleShapeMode={toggleShapeMode}
         onCenter={() => sendCameraCommand('center')}
         onZoomIn={() => sendCameraCommand('zoom-in')}
         onZoomOut={() => sendCameraCommand('zoom-out')}

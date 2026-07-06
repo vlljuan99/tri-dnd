@@ -50,6 +50,10 @@ export default function CampaignGamePage() {
     uploadBackground,
     generateBackground,
     removeBackground,
+    shapeError,
+    toggleShapeCell,
+    fillAllCells,
+    clearAllCells,
   } = useTacticalMap(campaignId, {
     user,
     role: campaign?.role,
@@ -121,6 +125,10 @@ export default function CampaignGamePage() {
           onUploadBackground={uploadBackground}
           onGenerateBackground={generateBackground}
           onRemoveBackground={removeBackground}
+          shapeError={shapeError}
+          onToggleShapeCell={toggleShapeCell}
+          onFillAllCells={fillAllCells}
+          onClearAllCells={clearAllCells}
           backToCampaignHref={`/campanas/${campaignId}`}
         />
       )}

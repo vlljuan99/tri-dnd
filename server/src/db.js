@@ -150,6 +150,11 @@ const migrations = [
   ALTER TABLE game_tables ADD COLUMN map_height REAL NOT NULL DEFAULT 8;
   ALTER TABLE game_tables ADD COLUMN map_grid_size REAL NOT NULL DEFAULT 1;
   `,
+
+  // v7 — forma de la sala: casillas desactivadas para cuadrículas no rectangulares
+  `
+  ALTER TABLE game_tables ADD COLUMN map_disabled_cells TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 export function runMigrations() {

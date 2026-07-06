@@ -90,8 +90,9 @@ export class TestTacticalMapRepository {
           height: remote.map.height || base.height,
           gridSize: remote.map.gridSize || base.gridSize,
           backgroundUrl: remote.map.backgroundUrl || undefined,
+          disabledCells: remote.map.disabledCells || [],
         }
-      : base;
+      : { ...base, disabledCells: [] };
     return applyCharacterAvatars(applySavedPositions(merged), characters);
   }
 
@@ -122,6 +123,14 @@ export class TestTacticalMapRepository {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'No se pudo quitar la imagen');
+    return data.map;
+  }
+
+  async updateDisabledCells(campaignId, disabledCells) {
+    const data = await api(`/campaigns/${campaignId}/mapa/celdas`, {
+      method: 'PATCH',
+      body: { disabledCells },
+    });
     return data.map;
   }
 
