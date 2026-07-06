@@ -24,79 +24,115 @@ function parseDamageDice(str) {
   return { dice: `${m[1]}d${m[2]}`, modifier: m[3] ? Number(m[3]) : 0 };
 }
 
+// Algunas acciones (p. ej. agarres/asfixia) no traen un array `damage`
+// explícito: el daño solo aparece narrado en el texto, con el patrón
+// habitual del SRD "10 (2d6 + 3) contundente damage". Lo extraemos como
+// alternativa para poder ofrecer también el botón de tirar el daño.
+function extractDamageFromDesc(desc) {
+  if (!desc) return [];
+  const re = /\((\d+d\d+(?:\s*\+\s*\d+)?)\)\s*([a-z]+)?\s*damage/gi;
+  const found = [];
+  let m;
+  while ((m = re.exec(desc))) {
+    const parsed = parseDamageDice(m[1]);
+    if (parsed) found.push({ parsed, typeName: m[2] ? DAMAGE_TYPE_ES[m[2].toLowerCase()] ?? m[2] : '' });
+  }
+  return found;
+}
+
+const DAMAGE_TYPE_ES = {
+  acid: 'ácido',
+  bludgeoning: 'contundente',
+  cold: 'frío',
+  fire: 'fuego',
+  force: 'fuerza',
+  lightning: 'relámpago',
+  necrotic: 'necrótico',
+  piercing: 'perforante',
+  poison: 'veneno',
+  psychic: 'psíquico',
+  radiant: 'radiante',
+  slashing: 'cortante',
+  thunder: 'trueno',
+};
+
 function ActionRow({ action, monsterName, onRoll }) {
-  const canRoll = Number.isInteger(action.attack_bonus) && action.damage?.length > 0;
+  const canAttack = Number.isInteger(action.attack_bonus);
+  const explicitDamage = (action.damage ?? [])
+    .map((d) => ({ parsed: parseDamageDice(d.damage_dice), typeName: d.damage_type?.name ?? '' }))
+    .filter((d) => d.parsed);
+  const damageOptions = explicitDamage.length > 0 ? explicitDamage : extractDamageFromDesc(action.desc);
+  const canRoll = canAttack || damageOptions.length > 0;
 
   return (
     <div className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="font-medium text-bone">{action.name}</span>
-        {canRoll && <span className="font-mono text-xs text-bone/60">{formatModifier(action.attack_bonus)}</span>}
+        {canAttack && <span className="font-mono text-xs text-bone/60">{formatModifier(action.attack_bonus)}</span>}
       </div>
       {action.desc && <p className="mt-0.5 text-xs text-bone/60">{action.desc}</p>}
       {canRoll && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <button
-            onClick={() =>
-              onRoll(rollAttack(action.attack_bonus, { advantage: 'dis', label: action.name, actorName: monsterName }))
-            }
-            className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
-          >
-            Desv.
-          </button>
-          <button
-            onClick={() => onRoll(rollAttack(action.attack_bonus, { label: action.name, actorName: monsterName }))}
-            className="rounded-sm border border-gold/50 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
-          >
-            Atacar
-          </button>
-          <button
-            onClick={() =>
-              onRoll(rollAttack(action.attack_bonus, { advantage: 'adv', label: action.name, actorName: monsterName }))
-            }
-            className="rounded-sm border border-moss px-2 py-0.5 text-xs text-bone/90 hover:bg-moss/20"
-          >
-            Vent.
-          </button>
-          <span className="mx-1 text-bone/20">|</span>
-          {action.damage.map((d, i) => {
-            const parsed = parseDamageDice(d.damage_dice);
-            if (!parsed) return null;
-            const typeName = d.damage_type?.name ?? '';
-            return (
-              <span key={i} className="flex gap-1.5">
-                <button
-                  onClick={() =>
-                    onRoll(
-                      rollDamage(parsed.dice, {
-                        modifier: parsed.modifier,
-                        label: `${action.name} — daño${typeName ? ` (${typeName})` : ''}`,
-                        actorName: monsterName,
-                      })
-                    )
-                  }
-                  className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10"
-                >
-                  Daño
-                </button>
-                <button
-                  onClick={() =>
-                    onRoll(
-                      rollDamage(parsed.dice, {
-                        modifier: parsed.modifier,
-                        crit: true,
-                        label: `${action.name} — daño${typeName ? ` (${typeName})` : ''} crítico`,
-                        actorName: monsterName,
-                      })
-                    )
-                  }
-                  className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold/90 hover:bg-gold/10"
-                >
-                  ¡Crítico!
-                </button>
-              </span>
-            );
-          })}
+          {canAttack && (
+            <>
+              <button
+                onClick={() =>
+                  onRoll(rollAttack(action.attack_bonus, { advantage: 'dis', label: action.name, actorName: monsterName }))
+                }
+                className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
+              >
+                Desv.
+              </button>
+              <button
+                onClick={() => onRoll(rollAttack(action.attack_bonus, { label: action.name, actorName: monsterName }))}
+                className="rounded-sm border border-gold/50 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
+              >
+                Atacar
+              </button>
+              <button
+                onClick={() =>
+                  onRoll(rollAttack(action.attack_bonus, { advantage: 'adv', label: action.name, actorName: monsterName }))
+                }
+                className="rounded-sm border border-moss px-2 py-0.5 text-xs text-bone/90 hover:bg-moss/20"
+              >
+                Vent.
+              </button>
+            </>
+          )}
+          {canAttack && damageOptions.length > 0 && <span className="mx-1 text-bone/20">|</span>}
+          {damageOptions.map(({ parsed, typeName }, i) => (
+            <span key={i} className="flex gap-1.5">
+              <button
+                onClick={() =>
+                  onRoll(
+                    rollDamage(parsed.dice, {
+                      modifier: parsed.modifier,
+                      label: `${action.name} — daño${typeName ? ` (${typeName})` : ''}`,
+                      actorName: monsterName,
+                    })
+                  )
+                }
+                className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10"
+              >
+                Daño
+              </button>
+              <button
+                onClick={() =>
+                  onRoll(
+                    rollDamage(parsed.dice, {
+                      modifier: parsed.modifier,
+                      crit: true,
+                      label: `${action.name} — daño${typeName ? ` (${typeName})` : ''} crítico`,
+                      actorName: monsterName,
+                    })
+                  )
+                }
+                className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold/90 hover:bg-gold/10"
+              >
+                ¡Crítico!
+              </button>
+            </span>
+          ))}
         </div>
       )}
     </div>
