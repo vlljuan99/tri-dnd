@@ -189,17 +189,17 @@ export default function TacticalMap({
                 type="button"
                 onClick={() => handleSelectToken(token.id)}
                 aria-pressed={selectedTokenId === token.id}
-                className={`flex w-full items-center justify-between gap-2 rounded-sm border px-2 py-2 text-left text-sm ${
+                className={`flex w-full flex-col gap-1.5 rounded-sm border px-2 py-2 text-left text-sm ${
                   selectedTokenId === token.id
                     ? 'border-gold bg-gold/10 text-gold'
                     : 'border-transparent text-bone hover:border-bone/20'
                 }`}
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{token.name}</span>
-                  {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 && (
-                    <span className="mt-0.5 flex items-center gap-1.5">
-                      <span className="h-1.5 w-16 overflow-hidden rounded-sm bg-night-950">
+                <span className="truncate font-medium">{token.name}</span>
+                <div className="flex items-center justify-between gap-2">
+                  {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-12 overflow-hidden rounded-sm bg-night-950">
                         <span
                           className={`block h-full ${
                             token.hp / token.hpMax > 0.5
@@ -212,15 +212,16 @@ export default function TacticalMap({
                         />
                       </span>
                       <span className="font-mono text-[0.65rem] text-bone/60">
-                        {token.hp}/{token.hpMax} HP
+                        {token.hp}/{token.hpMax}
                       </span>
                     </span>
+                  ) : (
+                    <span className="text-[0.65rem] text-bone/40">—</span>
                   )}
-                </span>
-                <span className="shrink-0 text-[0.65rem] uppercase tracking-widest text-bone/55">
-                  {token.speed ? `${Math.floor(token.speed / 5)} casillas · ` : ''}
-                  {movable ? 'mover' : token.type}
-                </span>
+                  <span className="text-[0.65rem] uppercase tracking-widest text-bone/55">
+                    {token.speed ? `${Math.floor(token.speed / 5)} cas` : movable ? 'mover' : token.type}
+                  </span>
+                </div>
               </button>
             );
           })}
