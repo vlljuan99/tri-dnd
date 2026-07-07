@@ -125,6 +125,7 @@ export function composeBoardFromMap(map, preferredFloorId) {
       height: r.height,
       backgroundUrl: r.backgroundUrl || null,
       disabledCells: r.disabledCells,
+      obstacleCells: r.obstacleCells ?? [],
       // Solo el DM recibe salas sin revelar: se pintan atenuadas
       revealed: r.revealed !== false,
     })),

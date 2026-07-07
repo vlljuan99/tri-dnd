@@ -80,6 +80,27 @@ function RoomPlainFloor({ room, gridSize }) {
   );
 }
 
+// Obstáculos de la sala: bloques bajos que no se pueden pisar (columnas,
+// rocas, muebles). Bloquearán la línea de visión en la niebla de guerra.
+function RoomObstacles({ room, gridSize }) {
+  const cells = room.obstacleCells ?? [];
+  if (!cells.length) return null;
+  return (
+    <group>
+      {cells.map(([c, r]) => (
+        <mesh
+          key={`${c},${r}`}
+          position={[(room.col + c + 0.5) * gridSize, 0.2, (room.row + r + 0.5) * gridSize]}
+          raycast={() => null}
+        >
+          <boxGeometry args={[gridSize * 0.86, 0.4, gridSize * 0.86]} />
+          <meshStandardMaterial color="#463526" roughness={0.95} {...dimmedProps(room)} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 // Suelo del tablero compuesto: cada sala visible se pinta por separado, con
 // su imagen (subida o generada en el editor) o con piedra lisa si no tiene.
 export default function MapFloor({ map }) {
@@ -100,15 +121,18 @@ export default function MapFloor({ map }) {
 
   return (
     <group>
-      {rooms.map((room) =>
-        room.backgroundUrl ? (
-          <Suspense key={room.id} fallback={<RoomPlainFloor room={room} gridSize={map.gridSize} />}>
-            <RoomImageFloor room={room} gridSize={map.gridSize} />
-          </Suspense>
-        ) : (
-          <RoomPlainFloor key={room.id} room={room} gridSize={map.gridSize} />
-        )
-      )}
+      {rooms.map((room) => (
+        <group key={room.id}>
+          {room.backgroundUrl ? (
+            <Suspense fallback={<RoomPlainFloor room={room} gridSize={map.gridSize} />}>
+              <RoomImageFloor room={room} gridSize={map.gridSize} />
+            </Suspense>
+          ) : (
+            <RoomPlainFloor room={room} gridSize={map.gridSize} />
+          )}
+          <RoomObstacles room={room} gridSize={map.gridSize} />
+        </group>
+      ))}
     </group>
   );
 }

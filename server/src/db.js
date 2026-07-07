@@ -284,6 +284,14 @@ const migrations = [
   `
   ALTER TABLE combatants ADD COLUMN map_token_id INTEGER;
   `,
+
+  // v12 — Fase 8: obstáculos por sala (columnas, rocas, muebles...). Pares
+  // [col, fila] relativos al origen de la sala, como disabled_cells: la
+  // casilla existe y se ve, pero no se puede pisar y (más adelante)
+  // bloqueará la línea de visión.
+  `
+  ALTER TABLE map_rooms ADD COLUMN obstacle_cells TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 export function runMigrations() {

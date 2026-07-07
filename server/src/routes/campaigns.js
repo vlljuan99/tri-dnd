@@ -199,7 +199,10 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     .all(currentRoom.floor_id, x, x, y, y)
     .find(
       (r) =>
-        !JSON.parse(r.disabled_cells || '[]').some(([c, w]) => c === x - r.x && w === y - r.y)
+        ![
+          ...JSON.parse(r.disabled_cells || '[]'),
+          ...JSON.parse(r.obstacle_cells || '[]'),
+        ].some(([c, w]) => c === x - r.x && w === y - r.y)
     );
   if (!targetRoom) {
     return res.status(400).json({ error: 'Ahí no hay suelo que pisar' });

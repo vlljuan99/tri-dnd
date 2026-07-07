@@ -70,14 +70,17 @@ function isValidCoord(n) {
   return Number.isInteger(n) && Math.abs(n) <= ROOM_COORD_LIMIT;
 }
 
-// La casilla (x, y) del lienzo de la planta cae dentro de la sala y no está
-// desactivada por su forma
+// La casilla (x, y) del lienzo de la planta cae dentro de la sala, no está
+// desactivada por su forma ni ocupada por un obstáculo
 function cellInsideRoom(room, x, y) {
   if (x < room.x || x >= room.x + room.width || y < room.y || y >= room.y + room.height) {
     return false;
   }
-  const disabled = JSON.parse(room.disabled_cells || '[]');
-  return !disabled.some(([col, row]) => col === x - room.x && row === y - room.y);
+  const blocked = [
+    ...JSON.parse(room.disabled_cells || '[]'),
+    ...JSON.parse(room.obstacle_cells || '[]'),
+  ];
+  return !blocked.some(([col, row]) => col === x - room.x && row === y - room.y);
 }
 
 // ---- Mapas ----
@@ -262,7 +265,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { name, x, y, width, height, disabledCells, notes, revealed } = req.body ?? {};
+  const { name, x, y, width, height, disabledCells, obstacleCells, notes, revealed } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'La sala necesita un nombre' });
   }
@@ -277,20 +280,23 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   if (disabledCells !== undefined && !isValidDisabledCells(disabledCells)) {
     return res.status(400).json({ error: 'Lista de casillas no válida' });
   }
+  if (obstacleCells !== undefined && !isValidDisabledCells(obstacleCells)) {
+    return res.status(400).json({ error: 'Lista de obstáculos no válida' });
+  }
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json({ error: 'Las notas deben ser texto' });
   }
 
   const nextWidth = width ?? room.width;
   const nextHeight = height ?? room.height;
-  // Al encoger la sala, las casillas desactivadas que quedan fuera se descartan
-  const nextDisabled = (disabledCells ?? JSON.parse(room.disabled_cells || '[]')).filter(
-    ([col, row]) => col < nextWidth && row < nextHeight
-  );
+  // Al encoger la sala, las casillas desactivadas u obstáculos fuera se descartan
+  const insideRoom = ([col, row]) => col < nextWidth && row < nextHeight;
+  const nextDisabled = (disabledCells ?? JSON.parse(room.disabled_cells || '[]')).filter(insideRoom);
+  const nextObstacles = (obstacleCells ?? JSON.parse(room.obstacle_cells || '[]')).filter(insideRoom);
 
   db.prepare(
     `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-       disabled_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+       disabled_cells = ?, obstacle_cells = ?, notes = ?, revealed = ? WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : room.name,
     x ?? room.x,
@@ -298,6 +304,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     nextWidth,
     nextHeight,
     JSON.stringify(nextDisabled),
+    JSON.stringify(nextObstacles),
     notes ?? room.notes,
     revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
     room.id

@@ -17,6 +17,7 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     height: row.height,
     backgroundUrl: row.background_url,
     disabledCells: JSON.parse(row.disabled_cells || '[]'),
+    obstacleCells: JSON.parse(row.obstacle_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
     // Para el jugador, toda sala que recibe es visible (aunque el DM la
     // tenga sin revelar y solo la vea él por tener ahí su personaje)
@@ -157,7 +158,12 @@ export function ensureCharacterTokens(map, campaignId) {
   for (const character of missing) {
     let placed = false;
     for (const room of spawnRooms) {
-      const disabled = new Set(JSON.parse(room.disabled_cells || '[]').map(([c, r]) => `${c},${r}`));
+      const disabled = new Set(
+        [
+          ...JSON.parse(room.disabled_cells || '[]'),
+          ...JSON.parse(room.obstacle_cells || '[]'),
+        ].map(([c, r]) => `${c},${r}`)
+      );
       for (let r = 0; r < room.height && !placed; r += 1) {
         for (let c = 0; c < room.width && !placed; c += 1) {
           if (disabled.has(`${c},${r}`)) continue;

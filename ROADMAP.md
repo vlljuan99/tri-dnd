@@ -35,10 +35,11 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - Ping compartido (doble clic, socket efímero), regla de medir (casillas/pies, regla 5e), cruzar puertas pisando el umbral (abre, revela, teletransporta; entre plantas por escaleras/portales), selector de planta en el tablero, velocidad del personaje visible, dado flotante arrastrable, y el jugador nunca pierde de vista la sala donde está su personaje (el DM ve atenuado lo no revelado)
   - Pospuesto a la fase de pulido (14): pathing automático que rodea obstáculos y dibujo libre del DM
 
-- [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra (refinamiento del revelado por salas de la Fase 7.5)
-  - Filtrado de datos **en el backend** según rol y área revelada (ver patrón ya usado con tiradas ocultas en `sockets.js`)
-  - Visión compartida (unión de lo visible por el grupo) vs. individual, configurable por escena
-  - Línea de visión bloqueada por obstáculos; el DM ajusta el radio de visión dentro de las salas ya reveladas
+- [ ] **Fase 8 (en curso)** — Obstáculos, trampas y niebla de guerra (refinamiento del revelado por salas de la Fase 7.5)
+  - [x] **Obstáculos por sala** (migración v12): el DM los pinta en el editor (modo "Obstáculos"), se ven como bloques en el tablero 3D y el servidor impide pisarlos (personajes y marcadores); las trampas ocultas ya existían desde la 7.5
+  - [ ] Línea de visión bloqueada por obstáculos; el DM ajusta el radio de visión dentro de las salas ya reveladas
+  - [ ] Visión compartida (unión de lo visible por el grupo) vs. individual, configurable por escena
+  - El filtrado en backend por rol y área revelada ya funciona desde la Fase 7.5 (salas, marcadores, notas y puertas secretas)
 
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus)
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)

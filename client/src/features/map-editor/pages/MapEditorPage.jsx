@@ -119,6 +119,18 @@ export default function MapEditorPage() {
     setMode('select');
   }
 
+  // Pinta o borra un obstáculo en la casilla pulsada de la sala
+  async function toggleObstacle(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const rel = [target.x - room.x, target.y - room.y];
+    const exists = (room.obstacleCells ?? []).some(([c, r]) => c === rel[0] && r === rel[1]);
+    const next = exists
+      ? room.obstacleCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
+      : [...(room.obstacleCells ?? []), rel];
+    await editor.patchRoom(room.id, { obstacleCells: next });
+  }
+
   async function doorCellClick(end) {
     if (!doorDraft) {
       setDoorDraft(end);
@@ -335,6 +347,9 @@ export default function MapEditorPage() {
                 <button type="button" onClick={() => { setMode('token'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'token')}>
                   Marcador
                 </button>
+                <button type="button" onClick={() => { setMode('obstacle'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'obstacle')}>
+                  Obstáculos
+                </button>
 
                 {mode === 'add-room' && (
                   <>
@@ -378,6 +393,11 @@ export default function MapEditorPage() {
                     {doorDraft
                       ? 'ahora pulsa la casilla de destino en otra sala (puedes cambiar de planta)'
                       : 'pulsa la casilla de origen dentro de una sala'}
+                  </span>
+                )}
+                {mode === 'obstacle' && (
+                  <span className="text-xs italic text-bone/50">
+                    clic en una casilla de una sala para poner o quitar un obstáculo (no se puede pisar)
                   </span>
                 )}
                 {mode === 'token' && (
@@ -436,6 +456,7 @@ export default function MapEditorPage() {
                 onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
                 onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
                 onTokenCellClick={(target) => placeToken(target).catch(() => {})}
+                onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
                 onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
               />

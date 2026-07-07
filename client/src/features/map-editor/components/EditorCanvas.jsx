@@ -77,6 +77,7 @@ export default function EditorCanvas({
   onPlaceRoom,
   onDoorCellClick,
   onTokenCellClick,
+  onObstacleCellClick,
   onMoveRoom,
   onMoveToken,
 }) {
@@ -126,6 +127,18 @@ export default function EditorCanvas({
       if (room) onDoorCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
     } else if (mode === 'token') {
       if (room) onTokenCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'obstacle') {
+      // El obstáculo puede pintarse también sobre una casilla ya ocupada por
+      // un obstáculo (para quitarlo), por eso no usa roomAt (que las excluye)
+      const target = rooms.find(
+        (r) =>
+          cellPos.x >= r.x &&
+          cellPos.x < r.x + r.width &&
+          cellPos.y >= r.y &&
+          cellPos.y < r.y + r.height &&
+          !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
+      );
+      if (target) onObstacleCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
     } else if (!room) {
       onSelect(null);
     }
@@ -202,7 +215,7 @@ export default function EditorCanvas({
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
-            : mode === 'door'
+            : mode === 'door' || mode === 'obstacle'
               ? 'cursor-crosshair'
               : 'cursor-default'
         }
@@ -244,6 +257,19 @@ export default function EditorCanvas({
                   height={cell}
                   fill="#14110f"
                   fillOpacity={0.92}
+                />
+              ))}
+              {(room.obstacleCells ?? []).map(([c, r]) => (
+                <rect
+                  key={`obs-${c},${r}`}
+                  x={pos.left + c * cell + cell * 0.12}
+                  y={pos.top + r * cell + cell * 0.12}
+                  width={cell * 0.76}
+                  height={cell * 0.76}
+                  rx={2}
+                  fill="#5a4632"
+                  stroke="#2c2117"
+                  strokeWidth={1.5}
                 />
               ))}
               <rect
