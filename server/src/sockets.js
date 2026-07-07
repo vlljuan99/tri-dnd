@@ -416,6 +416,8 @@ export function setupSockets(io) {
         }
       }
       broadcastCombat(campaignId);
+      // El HP editado en el tracker también actualiza las barras del tablero
+      notifyCampaignMap(campaignId);
       cb?.({ ok: true });
     });
 
@@ -514,7 +516,9 @@ export function setupSockets(io) {
           : `${checked.character.name} ataca a ${resolved.name}${weapon}: falla.${roll.fumble ? ' (pifia)' : ''}`,
       });
       io.to(roomName(campaignId)).emit('chat:new', note);
-      cb?.({ ok: true, hit, crit });
+      // La CA viaja solo tras resolver el ataque: es el feedback de por qué
+      // impacta o falla (en la mesa real también se acaba deduciendo)
+      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total) });
     });
 
     // Aplica el daño al objetivo: enemigos por el tracker (y si caen,
@@ -535,10 +539,13 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       let body;
+      // Detalle para el panel del atacante: HP que queda y máximo del objetivo
+      let detail = { damage, remainingHp: null, maxHp: null, defeated: false };
       if (resolved.kind === 'marcador') {
         const combatant = resolved.combatant;
         if (combatant && Number.isInteger(combatant.hp_current)) {
           const newHp = combatant.hp_current - damage;
+          detail.maxHp = combatant.hp_max ?? null;
           if (newHp <= 0) {
             db.transaction(() => {
               db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
@@ -550,12 +557,12 @@ export function setupSockets(io) {
               }
               db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
             })();
-            const mapId = getActiveMapId(campaignId);
-            if (mapId) touchMap(mapId);
-            notifyCampaignMap(campaignId);
+            detail.remainingHp = 0;
+            detail.defeated = true;
             body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
           } else {
             db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
+            detail.remainingHp = newHp;
             body = `${resolved.name} recibe ${damage} puntos de daño.`;
           }
           broadcastCombat(campaignId);
@@ -569,6 +576,9 @@ export function setupSockets(io) {
           newHp,
           resolved.character.id
         );
+        detail.remainingHp = newHp;
+        detail.maxHp = resolved.character.hp_max ?? null;
+        detail.defeated = newHp <= 0;
         broadcastCombat(campaignId);
         body =
           newHp <= 0
@@ -576,9 +586,14 @@ export function setupSockets(io) {
             : `${resolved.name} recibe ${damage} puntos de daño.`;
       }
 
+      // Las barras de vida del tablero se refrescan en toda la mesa
+      const mapId = getActiveMapId(campaignId);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
       io.to(roomName(campaignId)).emit('chat:new', note);
-      cb?.({ ok: true });
+      cb?.({ ok: true, ...detail });
     });
 
     socket.on('disconnecting', () => {

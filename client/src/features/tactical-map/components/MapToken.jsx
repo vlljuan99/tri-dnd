@@ -11,6 +11,34 @@ function tokenShapeSegments(type) {
   return 32;
 }
 
+// Barra de vida plana sobre el suelo, junto al token: fondo oscuro y
+// relleno proporcional que va del verde al rojo según lo herido que esté
+function HpBar({ token }) {
+  if (!Number.isInteger(token.hp) || !Number.isInteger(token.hpMax) || token.hpMax <= 0) return null;
+  const ratio = Math.max(0, Math.min(1, token.hp / token.hpMax));
+  const width = token.size * 0.9;
+  const color = ratio > 0.5 ? '#5e8c4a' : ratio > 0.25 ? '#c98f2e' : '#b33939';
+
+  return (
+    <group position={[0, 0.02, -token.size * 0.62]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+        <planeGeometry args={[width, 0.14]} />
+        <meshBasicMaterial color="#14110f" transparent opacity={0.85} />
+      </mesh>
+      {ratio > 0 && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[(-width * (1 - ratio)) / 2, 0.005, 0]}
+          raycast={() => null}
+        >
+          <planeGeometry args={[width * ratio, 0.1]} />
+          <meshBasicMaterial color={color} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 export default function MapToken({ token, selected, movable, saving, onSelect }) {
   const groupRef = useRef(null);
   const targetPosition = useMemo(
@@ -49,6 +77,7 @@ export default function MapToken({ token, selected, movable, saving, onSelect })
           <meshBasicMaterial color="#e8dfc9" transparent opacity={0.55} />
         </mesh>
       )}
+      <HpBar token={token} />
       <TokenLabel token={token} />
     </group>
   );

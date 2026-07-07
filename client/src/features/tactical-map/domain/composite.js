@@ -76,6 +76,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
       },
       size: 1,
       type: TOKEN_TYPES[t.kind] ?? 'enemy',
+      hp: Number.isInteger(t.hp) ? t.hp : null,
+      hpMax: Number.isInteger(t.hpMax) ? t.hpMax : null,
       visible: true,
     }));
 
@@ -88,6 +90,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
       characterId: t.characterId,
       name: t.name,
       speed: t.speed,
+      hp: Number.isInteger(t.hp) ? t.hp : null,
+      hpMax: Number.isInteger(t.hpMax) ? t.hpMax : null,
       color: '#4a8bd6',
       imageUrl: t.avatarUrl || undefined,
       position: {

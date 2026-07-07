@@ -6,6 +6,7 @@ import { requireAuth } from '../auth.js';
 import { AVATAR_UPLOADS_DIR } from '../config.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
+import { notifyCampaignMap } from '../services/liveMap.js';
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -206,6 +207,14 @@ charactersRouter.put('/:id', (req, res) => {
     `UPDATE characters SET ${updates.join(', ')}, updated_at = datetime('now') WHERE id = ?`
   ).run(...values, row.id);
   const updated = db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id);
+
+  // Curarse o cambiar HP/CA desde la ficha refresca las barras del tablero
+  if (
+    updated.campaign_id &&
+    ['hp_current', 'hp_max', 'ac', 'name', 'speed'].some((k) => k in plainUpdates)
+  ) {
+    notifyCampaignMap(updated.campaign_id);
+  }
   res.json({ character: serialize(updated) });
 });
 

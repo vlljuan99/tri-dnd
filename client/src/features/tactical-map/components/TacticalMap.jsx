@@ -60,11 +60,13 @@ export default function TacticalMap({
   const selectedCell = selectedToken ? worldToGrid(selectedToken.position, map.gridSize) : null;
   const isDm = role === 'dm';
 
-  // Si el objetivo desaparece del mapa (ha caído), el panel de combate se cierra
+  // El objetivo del combate se mantiene fresco con cada refresco del mapa
+  // (su HP cambia al recibir daño); si desaparece (ha caído), el panel se cierra
   useEffect(() => {
-    if (combatTarget && !map.tokens.some((t) => t.id === combatTarget.id)) {
-      setCombatTarget(null);
-    }
+    if (!combatTarget) return;
+    const fresh = map.tokens.find((t) => t.id === combatTarget.id);
+    if (!fresh) setCombatTarget(null);
+    else if (fresh !== combatTarget) setCombatTarget(fresh);
   }, [combatTarget, map.tokens]);
 
   // Con tu personaje seleccionado, pulsar un enemigo u otro PJ lo fija como
@@ -193,7 +195,28 @@ export default function TacticalMap({
                     : 'border-transparent text-bone hover:border-bone/20'
                 }`}
               >
-                <span className="truncate">{token.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{token.name}</span>
+                  {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 && (
+                    <span className="mt-0.5 flex items-center gap-1.5">
+                      <span className="h-1.5 w-16 overflow-hidden rounded-sm bg-night-950">
+                        <span
+                          className={`block h-full ${
+                            token.hp / token.hpMax > 0.5
+                              ? 'bg-moss'
+                              : token.hp / token.hpMax > 0.25
+                                ? 'bg-ochre'
+                                : 'bg-blood'
+                          }`}
+                          style={{ width: `${Math.max(0, Math.min(100, (token.hp / token.hpMax) * 100))}%` }}
+                        />
+                      </span>
+                      <span className="font-mono text-[0.65rem] text-bone/60">
+                        {token.hp}/{token.hpMax} HP
+                      </span>
+                    </span>
+                  )}
+                </span>
                 <span className="shrink-0 text-[0.65rem] uppercase tracking-widest text-bone/55">
                   {token.speed ? `${Math.floor(token.speed / 5)} casillas · ` : ''}
                   {movable ? 'mover' : token.type}

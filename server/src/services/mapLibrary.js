@@ -51,6 +51,11 @@ export function serializeToken(row) {
     x: row.x,
     y: row.y,
     hidden: Boolean(row.hidden),
+    // HP del tracker si el marcador está enlazado a un combatiente. Solo
+    // viaja para marcadores visibles: un enemigo a la vista muestra su barra
+    // de vida (decisión de producto), uno oculto o sin revelar ni se envía.
+    hp: Number.isInteger(row.combatant_hp) ? row.combatant_hp : null,
+    hpMax: Number.isInteger(row.combatant_hp_max) ? row.combatant_hp_max : null,
   };
 }
 
@@ -102,6 +107,8 @@ export function serializeCharacterToken(row) {
     ownerUserId: row.user_id,
     avatarUrl: row.avatar_path,
     speed: row.speed,
+    hp: row.hp_current,
+    hpMax: row.hp_max,
     x: row.x,
     y: row.y,
   };
@@ -110,7 +117,8 @@ export function serializeCharacterToken(row) {
 function loadCharacterTokens(mapId) {
   return db
     .prepare(
-      `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path, c.speed
+      `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path, c.speed,
+              c.hp_current, c.hp_max
        FROM map_character_tokens t JOIN characters c ON c.id = t.character_id
        WHERE t.map_id = ? ORDER BY t.id`
     )
@@ -235,31 +243,34 @@ export function spawnRoomEnemies(campaignId, roomIds) {
   return added;
 }
 
-function loadMapContents(mapId) {
+function loadMapContents(map) {
   const floors = db
     .prepare('SELECT * FROM map_floors WHERE map_id = ? ORDER BY position, id')
-    .all(mapId);
+    .all(map.id);
   const rooms = db
     .prepare(
       `SELECT r.* FROM map_rooms r JOIN map_floors f ON f.id = r.floor_id
        WHERE f.map_id = ? ORDER BY r.id`
     )
-    .all(mapId);
-  const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ? ORDER BY id').all(mapId);
+    .all(map.id);
+  const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ? ORDER BY id').all(map.id);
+  // El HP de los enemigos llega del combatiente enlazado del tracker
   const tokens = db
     .prepare(
-      `SELECT t.* FROM map_tokens t
+      `SELECT t.*, cb.hp_current AS combatant_hp, cb.hp_max AS combatant_hp_max
+       FROM map_tokens t
        JOIN map_rooms r ON r.id = t.room_id
        JOIN map_floors f ON f.id = r.floor_id
+       LEFT JOIN combatants cb ON cb.map_token_id = t.id AND cb.campaign_id = ?
        WHERE f.map_id = ? ORDER BY t.id`
     )
-    .all(mapId);
+    .all(map.campaign_id, map.id);
   return { floors, rooms, doors, tokens };
 }
 
 // Vista completa del DM: todas las salas, notas, puertas y marcadores
 export function serializeFullMap(map, campaignId) {
-  const { floors, rooms, doors, tokens } = loadMapContents(map.id);
+  const { floors, rooms, doors, tokens } = loadMapContents(map);
   return {
     id: map.id,
     name: map.name,
@@ -285,7 +296,7 @@ export function serializeFullMap(map, campaignId) {
 // donde está un personaje del propio usuario siempre es visible para él,
 // aunque el DM la tenga sin revelar: nunca pierdes de vista a tu personaje.
 export function serializeMapForPlayer(map, userId) {
-  const { floors, rooms, doors, tokens } = loadMapContents(map.id);
+  const { floors, rooms, doors, tokens } = loadMapContents(map);
   const characterTokens = loadCharacterTokens(map.id);
   const visible = new Set(rooms.filter((r) => r.revealed).map((r) => r.id));
   for (const t of characterTokens) {
