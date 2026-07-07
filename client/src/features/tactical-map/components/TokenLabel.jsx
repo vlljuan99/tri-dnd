@@ -23,7 +23,7 @@ function makeLabelTexture(text, { width = 256, height = 64, fontSize = 28 } = {}
   return texture;
 }
 
-function LabelSprite({ text, position, scale, fontSize }) {
+export function LabelSprite({ text, position, scale, fontSize }) {
   const texture = useMemo(() => makeLabelTexture(text, { fontSize }), [fontSize, text]);
 
   useEffect(() => () => texture.dispose(), [texture]);

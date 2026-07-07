@@ -4,6 +4,8 @@ export default function MapControls({
   showGrid,
   selectedToken,
   isDm,
+  measureMode,
+  onToggleMeasureMode,
   editorHref,
   onCenter,
   onZoomIn,
@@ -56,6 +58,19 @@ export default function MapControls({
           className="min-h-10 rounded-sm border border-bone/15 px-3 font-display text-sm text-bone hover:border-gold hover:text-gold disabled:opacity-40"
         >
           Soltar
+        </button>
+        <button
+          type="button"
+          aria-label="Medir distancia"
+          aria-pressed={measureMode}
+          onClick={onToggleMeasureMode}
+          className={`min-h-10 rounded-sm border px-3 font-display text-sm ${
+            measureMode
+              ? 'border-gold bg-gold/10 text-gold'
+              : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
+          }`}
+        >
+          Medir
         </button>
       </div>
       <div className="pointer-events-auto grid grid-cols-3 gap-1 rounded-sm border border-gold/20 bg-night-900/90 p-2 shadow-xl backdrop-blur">

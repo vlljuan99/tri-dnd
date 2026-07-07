@@ -6,6 +6,7 @@ import MapDoor from './MapDoor.jsx';
 import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
 import MapToken from './MapToken.jsx';
+import MeasureOverlay from './MeasureOverlay.jsx';
 import PingMarker from './PingMarker.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
 
@@ -35,12 +36,12 @@ function DoubleClickPing({ onPing }) {
   return null;
 }
 
-function PointerMissedMovement({ register, selectedTokenId, onMoveToken }) {
+function PointerMissedMovement({ register, selectedTokenId, measureMode, onMoveToken, onMeasurePoint }) {
   const { camera, gl } = useThree();
 
   useEffect(() => {
     register((event) => {
-      if (!selectedTokenId) return;
+      if (!measureMode && !selectedTokenId) return;
       const rect = gl.domElement.getBoundingClientRect();
       const pointer = new THREE.Vector2(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -52,10 +53,14 @@ function PointerMissedMovement({ register, selectedTokenId, onMoveToken }) {
       const point = new THREE.Vector3();
       if (!raycaster.ray.intersectPlane(ground, point)) return;
 
-      onMoveToken(selectedTokenId, { x: point.x, y: 0, z: point.z });
+      if (measureMode) {
+        onMeasurePoint({ x: point.x, z: point.z });
+      } else {
+        onMoveToken(selectedTokenId, { x: point.x, y: 0, z: point.z });
+      }
     });
     return () => register(null);
-  }, [camera, gl.domElement, onMoveToken, register, selectedTokenId]);
+  }, [camera, gl.domElement, measureMode, onMeasurePoint, onMoveToken, register, selectedTokenId]);
 
   return null;
 }
@@ -73,6 +78,9 @@ export default function TacticalMapCanvas({
   onOpenDoor,
   onPing,
   pings = [],
+  measureMode = false,
+  measurePoints = [],
+  onMeasurePoint,
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -89,7 +97,9 @@ export default function TacticalMapCanvas({
       <TacticalCamera map={map} command={cameraCommand} />
       <PointerMissedMovement
         selectedTokenId={selectedTokenId}
+        measureMode={measureMode}
         onMoveToken={onMoveToken}
+        onMeasurePoint={onMeasurePoint}
         register={(handler) => {
           missedHandlerRef.current = handler;
         }}
@@ -100,6 +110,7 @@ export default function TacticalMapCanvas({
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}
       <DoubleClickPing onPing={onPing} />
+      {measureMode && <MeasureOverlay points={measurePoints} gridSize={map.gridSize} />}
       {pings
         .filter((ping) => ping.floorId === map.floorId)
         .map((ping) => (

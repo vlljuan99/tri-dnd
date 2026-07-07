@@ -46,6 +46,8 @@ export default function TacticalMap({
   const [selectedTokenId, setSelectedTokenId] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
   const [cameraCommand, setCameraCommand] = useState(null);
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState([]);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -55,6 +57,22 @@ export default function TacticalMap({
 
   function sendCameraCommand(type) {
     setCameraCommand({ type, issuedAt: Date.now() });
+  }
+
+  function toggleMeasureMode() {
+    setMeasureMode((value) => {
+      if (!value) setSelectedTokenId(null);
+      setMeasurePoints([]);
+      return !value;
+    });
+  }
+
+  // Cada clic centra el punto en su casilla; al tercer clic empieza una
+  // medición nueva desde ahí
+  function addMeasurePoint(point) {
+    const snap = (v) => (Math.floor(v / map.gridSize) + 0.5) * map.gridSize;
+    const snapped = { x: snap(point.x), z: snap(point.z) };
+    setMeasurePoints((current) => (current.length >= 2 ? [snapped] : [...current, snapped]));
   }
 
   function nudgeSelectedToken(dx, dz) {
@@ -82,17 +100,22 @@ export default function TacticalMap({
           onOpenDoor={onOpenDoor}
           onPing={onPing}
           pings={pings}
+          measureMode={measureMode}
+          measurePoints={measurePoints}
+          onMeasurePoint={addMeasurePoint}
         />
       </CanvasErrorBoundary>
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
         <p className="mt-1 text-xs text-bone/65">
-          {selectedToken
-            ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
-                canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
-              }`
-            : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
+          {measureMode
+            ? 'Modo medir: pulsa dos casillas para ver la distancia.'
+            : selectedToken
+              ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
+                  canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
+                }`
+              : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
         {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}
@@ -129,6 +152,8 @@ export default function TacticalMap({
         showGrid={showGrid}
         selectedToken={selectedToken}
         isDm={isDm}
+        measureMode={measureMode}
+        onToggleMeasureMode={toggleMeasureMode}
         editorHref={editorHref}
         onCenter={() => sendCameraCommand('center')}
         onZoomIn={() => sendCameraCommand('zoom-in')}
