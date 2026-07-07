@@ -27,13 +27,12 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - [x] **Puertas en el tablero 3D**: marcadores clicables (dorado = jugador, rojo = DM); el jugador abre las suyas y descubre la sala del otro lado en vivo, el DM alterna cualquiera (`POST /puertas/:id/abrir`)
   - [x] **Suelo por sala en el tablero 3D**: cada sala pinta su imagen recortada a su forma, o piedra lisa
   - [x] **Marcadores por sala** (migración v9, `map_tokens`): enemigos (con `monster_index` SRD opcional), aliados, objetos y trampas; las trampas nacen ocultas (solo DM). Se colocan y arrastran en el editor y aparecen en el tablero filtrados por rol; el DM los mueve con persistencia
-  - [ ] Elegir el enemigo desde el compendio SRD en el editor (hoy `monsterIndex` solo por API) y enlazar los enemigos de la sala con el tracker de iniciativa al revelarse
-  - [ ] Tokens de personaje persistidos por sala (sustituir el último token de prueba del jugador)
+  - [x] **Enemigos del compendio SRD en el editor** (SrdPicker en el modo Marcador) y **entrada automática al tracker de iniciativa al revelarse la sala** (HP/CA del SRD, sin duplicados vía `combatants.map_token_id`, migración v11)
+  - [x] **Tokens de personaje persistidos por sala** (migración v10, `map_character_tokens`): aparición automática en la primera sala revelada, movimiento del dueño o el DM validado en servidor (casillas activas, salas reveladas para el jugador), avatar del personaje. El tablero ya no tiene datos de prueba
   - Usuarios de prueba locales: `dm-demo` / `jugador-demo` (contraseña `demo1234`), campaña "La Cripta del Umbral (demo)"
 
-- [ ] **Fase 7 (resto)** — Tokens de enemigos/aliados persistidos en el backend (no solo el jugador propio) + pathing automático que rodea obstáculos + medir distancia + ping + dibujo libre
-  - Herramientas del DM: obstáculos, medir distancia, ping, dibujo libre
-  - Los tokens persistidos se implementan sobre el modelo por-sala de la Fase 7.5 (no sobre las columnas de `game_tables`)
+- [ ] **Fase 7 (resto)** — Herramientas de mesa sobre el tablero: pathing automático que rodea obstáculos, medir distancia, ping y dibujo libre
+  - Cruzar de planta con el token por escaleras/portales (hoy el token se mueve dentro de su planta)
 
 - [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra (refinamiento del revelado por salas de la Fase 7.5)
   - Filtrado de datos **en el backend** según rol y área revelada (ver patrón ya usado con tiradas ocultas en `sockets.js`)
