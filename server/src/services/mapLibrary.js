@@ -1,5 +1,6 @@
 import { db } from '../db.js';
 import { computeFloorVision } from './vision.js';
+import { rollInitiativeValue, ensureTurnStarted } from './turnEconomy.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -211,7 +212,7 @@ export function spawnRoomEnemies(campaignId, roomIds) {
   );
   const insert = db.prepare(
     `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac, monster_index, map_token_id)
-     VALUES (?, 'enemigo', ?, 0, ?, ?, ?, ?, ?)`
+     VALUES (?, 'enemigo', ?, ?, ?, ?, ?, ?, ?)`
   );
 
   let added = 0;
@@ -237,9 +238,13 @@ export function spawnRoomEnemies(campaignId, roomIds) {
         }
       }
     }
-    insert.run(campaignId, enemy.name, hp, hp, ac, enemy.monster_index, enemy.id);
+    // Iniciativa tirada sola (1d20+DES del monstruo), como cualquier otro
+    // combatiente que se une con el modo por turnos activo
+    const initiative = rollInitiativeValue({ kind: 'enemigo', monster_index: enemy.monster_index });
+    insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id);
     added += 1;
   }
+  if (added > 0) ensureTurnStarted(campaignId);
   return added;
 }
 

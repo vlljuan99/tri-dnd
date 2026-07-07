@@ -12,6 +12,7 @@ import {
   touchMap,
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
+import { ensureCombatantForCharacter, trySpendMovement } from '../services/turnEconomy.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -155,6 +156,19 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
   // Los personajes sin token aparecen en la primera sala revelada libre
   ensureCharacterTokens(map, req.params.id);
 
+  // Todo personaje con token en el mapa entra solo al tracker de iniciativa
+  // (mismo patrón que los enemigos al revelarse su sala): con el modo por
+  // turnos activo, en cuanto estás en el tablero tienes tu sitio en el orden.
+  const presentCharacterIds = db
+    .prepare('SELECT character_id FROM map_character_tokens WHERE map_id = ?')
+    .all(activeMapId)
+    .map((r) => r.character_id);
+  let anyJoined = false;
+  for (const characterId of presentCharacterIds) {
+    if (ensureCombatantForCharacter(req.params.id, characterId)) anyJoined = true;
+  }
+  if (anyJoined) notifyCombat(req.params.id);
+
   // El DM puede pedir la vista de los jugadores (?vista=jugador) para
   // comprobar qué está viendo el grupo realmente
   const asPlayer = membership.role === 'dm' && req.query.vista === 'jugador';
@@ -216,6 +230,15 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   // (p. ej. si el DM lo colocó en una sala aún sin revelar)
   if (!isDm && !targetRoom.revealed && targetRoom.id !== token.room_id) {
     return res.status(400).json({ error: 'No puedes entrar en una zona sin descubrir' });
+  }
+
+  // Con el modo por turnos activo, el movimiento se descuenta del
+  // presupuesto del turno (velocidad en casillas); el DM mueve sin límite,
+  // ya sea su propio control de la escena o el de un enemigo/aliado.
+  if (!isDm) {
+    const distance = Math.max(Math.abs(x - token.x), Math.abs(y - token.y));
+    const spend = trySpendMovement(req.params.id, character.id, distance);
+    if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
 
   // ¿La casilla de destino es el umbral de una puerta? Pisarla la cruza:
