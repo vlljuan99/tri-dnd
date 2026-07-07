@@ -48,6 +48,15 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Feedback completo**: el panel desglosa los d20 (con el descartado tachado en ventaja/desventaja) + bonificador = total contra la CA (revelada solo al resolver el ataque), y tras el daño muestra cuánta vida quita y cuánta queda. **Barras de vida** sobre los tokens del tablero 3D y HP actual/total en la lista de tokens, refrescadas por socket con cada golpe, cura o edición del tracker
   - Siguientes iteraciones: alcance real y línea de visión para armas a distancia, hechizos como ataque desde el tablero, ataques de monstruos con daño automático (hoy el DM usa su bloque de estadísticas y edita el tracker)
 
+- [ ] **Fase 8.5 (en curso)** — Movimiento y combate por turnos de verdad
+  - **Modo por turnos activo por defecto**, con un botón claro del DM en el tablero para alternarlo a "modo libre" en cualquier momento (sin borrar el tracker, a diferencia de terminar el combate del todo)
+  - **Arranque e iniciativa automáticos**: en cuanto hay combatientes con el modo activo, el servidor tira 1d20+DES por cada uno y arranca el orden solo, sin que el DM tenga que teclear nada (se puede ajustar después a mano, como ya se podía)
+  - **Fin automático**: al morir el último combatiente de tipo enemigo, se vuelve a movimiento libre solo, con aviso en el chat; el botón del DM sigue disponible para forzarlo antes
+  - **Economía de turno** por combatiente: movimiento acumulado (casillas gastadas en el turno, repartibles antes/después de actuar), 1 acción, 1 acción adicional y 1 reacción (esta por ronda, no por turno, utilizable fuera de tu turno) — la reacción se marca a mano con un botón "usar reacción" cuando el DM narra que corresponde, no hay detección automática de disparadores (ataque de oportunidad, etc.)
+  - El bloqueo de movimiento/acción aplica a los **personajes de los jugadores**; los enemigos los sigue moviendo el DM libremente arrastrando su marcador
+  - **Terminar turno**: botón para quien tiene el turno (jugador o DM controlando un enemigo) y para el DM siempre, que fuerza el avance
+  - **Área de movimiento visible**: al seleccionar tu token en tu turno, se resaltan las casillas a las que aún puedes llegar con el movimiento que te queda, respetando obstáculos y paredes
+
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
   - react-img-mapper + Framer Motion para el halo/zoom al hover y transición de entrada a escena
