@@ -40,6 +40,7 @@ export default function TacticalMap({
   doorError,
   onPing,
   pings,
+  onSelectFloor,
   backToCampaignHref,
   editorHref,
 }) {
@@ -108,6 +109,25 @@ export default function TacticalMap({
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
+        {(map.floors?.length ?? 0) > 1 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {map.floors.map((floor) => (
+              <button
+                key={floor.id}
+                type="button"
+                onClick={() => onSelectFloor?.(floor.id)}
+                aria-pressed={floor.id === map.floorId}
+                className={`rounded-sm border px-2 py-0.5 font-display text-[0.65rem] uppercase tracking-widest ${
+                  floor.id === map.floorId
+                    ? 'border-gold bg-gold/15 text-gold'
+                    : 'border-bone/20 text-bone/60 hover:border-gold/50 hover:text-gold'
+                }`}
+              >
+                {floor.name}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="mt-1 text-xs text-bone/65">
           {measureMode
             ? 'Modo medir: pulsa dos casillas para ver la distancia.'

@@ -24,6 +24,7 @@ export default function CampaignGamePage() {
   const [campaignError, setCampaignError] = useState('');
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [doorError, setDoorError] = useState('');
+  const [floorId, setFloorId] = useState(null);
 
   // Abrir una puerta (o alternarla, si eres DM). El nuevo estado del mapa
   // llega a todos —incluido quien pulsa— por el evento de socket.
@@ -73,6 +74,7 @@ export default function CampaignGamePage() {
     role: campaign?.role,
     enabled: Boolean(campaign),
     version: mapVersion,
+    floorId,
   });
 
   if (campaignLoading) {
@@ -141,6 +143,7 @@ export default function CampaignGamePage() {
           onMoveToken={moveToken}
           onOpenDoor={openDoor}
           doorError={doorError}
+          onSelectFloor={setFloorId}
           pings={pings}
           onPing={(world) =>
             sendPing({

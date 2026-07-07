@@ -7,9 +7,9 @@ import { composeBoardFromMap } from '../domain/composite.js';
  * personaje persistidos por sala).
  */
 export class TacticalMapRepository {
-  async getMapByCampaignId(campaignId, { role } = {}) {
+  async getMapByCampaignId(campaignId, { role, floorId } = {}) {
     const { map: activeMap } = await api(`/campaigns/${campaignId}/mapa-activo`);
-    const board = composeBoardFromMap(activeMap);
+    const board = composeBoardFromMap(activeMap, floorId);
     if (!board) {
       throw new Error(
         role === 'dm'

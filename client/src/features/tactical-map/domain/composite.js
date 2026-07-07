@@ -4,9 +4,11 @@ import { cellKey } from './cells.js';
 // que espera el renderizador 3D: un rectángulo que envuelve las salas
 // visibles, con las casillas que no pertenecen a ninguna sala desactivadas.
 // El servidor ya filtró lo que este usuario puede ver: aquí solo se compone.
-export function composeBoardFromMap(map) {
+export function composeBoardFromMap(map, preferredFloorId) {
   if (!map) return null;
-  const floor = map.floors.find((f) => f.rooms.length > 0);
+  const floorsWithRooms = map.floors.filter((f) => f.rooms.length > 0);
+  const floor =
+    floorsWithRooms.find((f) => f.id === preferredFloorId) ?? floorsWithRooms[0] ?? null;
   if (!floor) return null;
 
   const rooms = floor.rooms;
@@ -106,6 +108,8 @@ export function composeBoardFromMap(map) {
     name: map.name,
     floorId: floor.id,
     floorName: floor.name,
+    // Plantas con algo visible para este usuario: pestañas del tablero
+    floors: floorsWithRooms.map((f) => ({ id: f.id, name: f.name })),
     width: cols * map.gridSize,
     height: rows * map.gridSize,
     gridSize: map.gridSize,
