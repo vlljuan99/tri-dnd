@@ -200,6 +200,19 @@ export function setupSockets(io) {
       cb?.({ ok: true });
     });
 
+    // Ping efímero sobre el tablero: no toca la base de datos, solo rebota
+    // a la sala con coordenadas absolutas de planta (cada cliente lo dibuja
+    // en su propio tablero compuesto)
+    socket.on('mapa:ping', ({ campaignId, floorId, x, y }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(floorId)) {
+        return cb?.({ error: 'Ping no válido' });
+      }
+      io.to(roomName(campaignId)).emit('mapa:ping', { floorId, x, y, by: user.name });
+      cb?.({ ok: true });
+    });
+
     socket.on('table:set-live', ({ campaignId, isLive }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede abrir o cerrar la sesión' });

@@ -38,6 +38,8 @@ export default function TacticalMap({
   onMoveToken,
   onOpenDoor,
   doorError,
+  onPing,
+  pings,
   backToCampaignHref,
   editorHref,
 }) {
@@ -78,6 +80,8 @@ export default function TacticalMap({
           onSelectToken={setSelectedTokenId}
           onMoveToken={onMoveToken}
           onOpenDoor={onOpenDoor}
+          onPing={onPing}
+          pings={pings}
         />
       </CanvasErrorBoundary>
 
@@ -88,7 +92,7 @@ export default function TacticalMap({
             ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
                 canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
               }`
-            : 'Selecciona un token y pulsa una casilla. Pulsa una puerta para abrirla.'}
+            : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
         {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}

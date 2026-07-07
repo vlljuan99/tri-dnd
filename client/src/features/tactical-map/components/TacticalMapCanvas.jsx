@@ -6,7 +6,34 @@ import MapDoor from './MapDoor.jsx';
 import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
 import MapToken from './MapToken.jsx';
+import PingMarker from './PingMarker.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
+
+// Doble clic en el suelo = ping para toda la mesa
+function DoubleClickPing({ onPing }) {
+  const { camera, gl } = useThree();
+
+  useEffect(() => {
+    if (!onPing) return undefined;
+    function handleDoubleClick(event) {
+      const rect = gl.domElement.getBoundingClientRect();
+      const pointer = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(pointer, camera);
+      const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const point = new THREE.Vector3();
+      if (!raycaster.ray.intersectPlane(ground, point)) return;
+      onPing({ x: point.x, z: point.z });
+    }
+    gl.domElement.addEventListener('dblclick', handleDoubleClick);
+    return () => gl.domElement.removeEventListener('dblclick', handleDoubleClick);
+  }, [camera, gl.domElement, onPing]);
+
+  return null;
+}
 
 function PointerMissedMovement({ register, selectedTokenId, onMoveToken }) {
   const { camera, gl } = useThree();
@@ -44,6 +71,8 @@ export default function TacticalMapCanvas({
   onSelectToken,
   onMoveToken,
   onOpenDoor,
+  onPing,
+  pings = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -70,6 +99,12 @@ export default function TacticalMapCanvas({
       {(map.doors ?? []).map((door, index) => (
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}
+      <DoubleClickPing onPing={onPing} />
+      {pings
+        .filter((ping) => ping.floorId === map.floorId)
+        .map((ping) => (
+          <PingMarker key={ping.id} ping={ping} gridSize={map.gridSize} origin={map.origin} />
+        ))}
       {map.tokens
         .filter((token) => token.visible)
         .map((token) => (

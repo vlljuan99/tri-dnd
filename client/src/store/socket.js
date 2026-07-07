@@ -18,6 +18,8 @@ export const useRoom = create((set, get) => ({
   // Contador que sube cuando el servidor avisa de que el mapa activo cambió;
   // quien muestre el mapa lo observa y vuelve a pedir /mapa-activo
   mapVersion: 0,
+  // Pings efímeros sobre el tablero (se autodescartan a los pocos segundos)
+  pings: [],
 
   ensureSocket() {
     if (socket) return socket;
@@ -50,6 +52,14 @@ export const useRoom = create((set, get) => ({
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
     socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
+    socket.on('mapa:ping', (ping) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const entry = { id, createdAt: Date.now(), ...ping };
+      set((s) => ({ pings: [...s.pings.slice(-11), entry] }));
+      setTimeout(() => {
+        set((s) => ({ pings: s.pings.filter((p) => p.id !== id) }));
+      }, 4000);
+    });
     return socket;
   },
 
@@ -104,6 +114,12 @@ export const useRoom = create((set, get) => ({
   setLive(isLive) {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('table:set-live', { campaignId, isLive });
+  },
+
+  /** Lanza un ping en una casilla absoluta de la planta indicada. */
+  sendPing({ floorId, x, y }) {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('mapa:ping', { campaignId, floorId, x, y });
   },
 
   // --- Tracker de iniciativa ---------------------------------------

@@ -12,6 +12,8 @@ export default function CampaignGamePage() {
   const user = useAuth((state) => state.user);
   const joinRoom = useRoom((s) => s.joinRoom);
   const mapVersion = useRoom((s) => s.mapVersion);
+  const pings = useRoom((s) => s.pings);
+  const sendPing = useRoom((s) => s.sendPing);
 
   // Unirse a la sala de la campaña para recibir 'mapa:actualizado' aunque
   // se llegue al tablero directamente, sin pasar por la mesa
@@ -139,6 +141,14 @@ export default function CampaignGamePage() {
           onMoveToken={moveToken}
           onOpenDoor={openDoor}
           doorError={doorError}
+          pings={pings}
+          onPing={(world) =>
+            sendPing({
+              floorId: map.floorId,
+              x: Math.floor(world.x / map.gridSize) + (map.origin?.x ?? 0),
+              y: Math.floor(world.z / map.gridSize) + (map.origin?.y ?? 0),
+            })
+          }
           backToCampaignHref={`/campanas/${campaignId}`}
           editorHref={`/campanas/${campaignId}/editor`}
         />

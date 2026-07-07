@@ -103,6 +103,7 @@ export function composeBoardFromMap(map) {
     serverTokens,
     characterTokens,
     name: map.name,
+    floorId: floor.id,
     floorName: floor.name,
     width: cols * map.gridSize,
     height: rows * map.gridSize,
