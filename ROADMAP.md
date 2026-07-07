@@ -23,10 +23,12 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - [x] **Editor en página aparte** (`/campanas/:id/editor`, solo DM): biblioteca de mapas (crear/renombrar/activar/borrar), plantas en pestañas, lienzo 2D con plantillas de sala (habitación/salón/pasillo/N×M libre), arrastrar salas para combinarlas, puertas entre salas y entre plantas, panel de sala (revelado, notas del DM, suelo subido o generado con IA)
   - [x] **Vista filtrada por rol en servidor** (`GET /mapa-activo`): el DM lo ve todo; el jugador solo salas reveladas, sin notas, y sin puertas del DM cerradas (una puerta secreta cerrada no existe para él). El tablero 3D compone las salas visibles de la planta en un único board
   - [x] Borrado de mapas (incluido el activo) y de campañas enteras (solo DM, las fichas se conservan)
-  - [ ] Revelado en tiempo real por socket (hoy el jugador ve la sala nueva al recargar el tablero) y "entrar por una puerta" moviendo el token hasta ella
-  - [ ] **Enemigos precolocados por sala** (SRD o personalizados), que aparecen al revelarse la sala y se enlazan con el tracker de iniciativa existente
-  - [ ] **Trampas y objetos ocultos** (marcadores solo-DM, filtrados en servidor)
-  - [ ] Suelo por sala en el tablero 3D (hoy la imagen solo se ve en tablero si la planta tiene una única sala; en el editor se ve siempre)
+  - [x] **Revelado en tiempo real por socket**: el servidor emite `mapa:actualizado` (solo la señal, nunca datos) y cada tablero repide su vista filtrada; re-unión automática a la sala tras reconectar
+  - [x] **Puertas en el tablero 3D**: marcadores clicables (dorado = jugador, rojo = DM); el jugador abre las suyas y descubre la sala del otro lado en vivo, el DM alterna cualquiera (`POST /puertas/:id/abrir`)
+  - [x] **Suelo por sala en el tablero 3D**: cada sala pinta su imagen recortada a su forma, o piedra lisa
+  - [x] **Marcadores por sala** (migración v9, `map_tokens`): enemigos (con `monster_index` SRD opcional), aliados, objetos y trampas; las trampas nacen ocultas (solo DM). Se colocan y arrastran en el editor y aparecen en el tablero filtrados por rol; el DM los mueve con persistencia
+  - [ ] Elegir el enemigo desde el compendio SRD en el editor (hoy `monsterIndex` solo por API) y enlazar los enemigos de la sala con el tracker de iniciativa al revelarse
+  - [ ] Tokens de personaje persistidos por sala (sustituir el último token de prueba del jugador)
   - Usuarios de prueba locales: `dm-demo` / `jugador-demo` (contraseña `demo1234`), campaña "La Cripta del Umbral (demo)"
 
 - [ ] **Fase 7 (resto)** — Tokens de enemigos/aliados persistidos en el backend (no solo el jugador propio) + pathing automático que rodea obstáculos + medir distancia + ping + dibujo libre
