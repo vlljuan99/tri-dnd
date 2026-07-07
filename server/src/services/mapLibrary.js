@@ -89,6 +89,87 @@ export function touchMap(mapId) {
   db.prepare("UPDATE maps SET updated_at = datetime('now') WHERE id = ?").run(mapId);
 }
 
+export function serializeCharacterToken(row) {
+  return {
+    id: row.id,
+    characterId: row.character_id,
+    roomId: row.room_id,
+    name: row.character_name,
+    ownerUserId: row.user_id,
+    avatarUrl: row.avatar_path,
+    x: row.x,
+    y: row.y,
+  };
+}
+
+function loadCharacterTokens(mapId) {
+  return db
+    .prepare(
+      `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path
+       FROM map_character_tokens t JOIN characters c ON c.id = t.character_id
+       WHERE t.map_id = ? ORDER BY t.id`
+    )
+    .all(mapId);
+}
+
+// Crea el token de los personajes de la campaña que aún no lo tienen en
+// este mapa, en la primera casilla libre de la primera sala revelada.
+// Se llama al servir el mapa activo: si no hay salas reveladas, el
+// personaje espera fuera del tablero sin token.
+export function ensureCharacterTokens(map, campaignId) {
+  const characters = db
+    .prepare('SELECT id FROM characters WHERE campaign_id = ?')
+    .all(campaignId);
+  if (!characters.length) return;
+
+  const existing = new Set(
+    db.prepare('SELECT character_id FROM map_character_tokens WHERE map_id = ?').all(map.id).map((r) => r.character_id)
+  );
+  const missing = characters.filter((c) => !existing.has(c.id));
+  if (!missing.length) return;
+
+  const spawnRooms = db
+    .prepare(
+      `SELECT r.* FROM map_rooms r JOIN map_floors f ON f.id = r.floor_id
+       WHERE f.map_id = ? AND r.revealed = 1 ORDER BY f.position, r.id`
+    )
+    .all(map.id);
+  if (!spawnRooms.length) return;
+
+  const occupied = new Set(
+    [
+      ...db.prepare('SELECT x, y FROM map_character_tokens WHERE map_id = ?').all(map.id),
+      ...db
+        .prepare(
+          `SELECT t.x, t.y FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id
+           JOIN map_floors f ON f.id = r.floor_id WHERE f.map_id = ?`
+        )
+        .all(map.id),
+    ].map((p) => `${p.x},${p.y}`)
+  );
+
+  const insert = db.prepare(
+    'INSERT INTO map_character_tokens (map_id, character_id, room_id, x, y) VALUES (?, ?, ?, ?, ?)'
+  );
+  for (const character of missing) {
+    let placed = false;
+    for (const room of spawnRooms) {
+      const disabled = new Set(JSON.parse(room.disabled_cells || '[]').map(([c, r]) => `${c},${r}`));
+      for (let r = 0; r < room.height && !placed; r += 1) {
+        for (let c = 0; c < room.width && !placed; c += 1) {
+          if (disabled.has(`${c},${r}`)) continue;
+          const key = `${room.x + c},${room.y + r}`;
+          if (occupied.has(key)) continue;
+          insert.run(map.id, character.id, room.id, room.x + c, room.y + r);
+          occupied.add(key);
+          placed = true;
+        }
+      }
+      if (placed) break;
+    }
+  }
+}
+
 function loadMapContents(mapId) {
   const floors = db
     .prepare('SELECT * FROM map_floors WHERE map_id = ? ORDER BY position, id')
@@ -127,6 +208,7 @@ export function serializeFullMap(map, campaignId) {
     })),
     doors: doors.map(serializeDoor),
     tokens: tokens.map(serializeToken),
+    characterTokens: loadCharacterTokens(map.id).map(serializeCharacterToken),
   };
 }
 
@@ -158,5 +240,8 @@ export function serializeMapForPlayer(map) {
     // Un marcador oculto (trampa, tesoro) no existe para el jugador aunque
     // la sala esté revelada
     tokens: tokens.filter((t) => revealed.has(t.room_id) && !t.hidden).map(serializeToken),
+    characterTokens: loadCharacterTokens(map.id)
+      .filter((t) => revealed.has(t.room_id))
+      .map(serializeCharacterToken),
   };
 }

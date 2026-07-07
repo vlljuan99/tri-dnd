@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { tacticalMapRepository } from '../repositories/TestTacticalMapRepository.js';
+import { tacticalMapRepository } from '../repositories/TacticalMapRepository.js';
 import { useTokenMovement } from './useTokenMovement.js';
 
 // Carga el mapa activo de la mesa (ya filtrado por rol en el servidor) y
 // gestiona el movimiento de tokens. La edición del mapa (salas, puertas,
 // fondos) vive en el editor de campaña, no aquí. `version` sube cuando el
 // socket avisa de un cambio en el mapa: se refresca sin parpadeo de carga.
-export function useTacticalMap(campaignId, { user, role, characters = [], enabled = true, version = 0 } = {}) {
+export function useTacticalMap(campaignId, { user, role, enabled = true, version = 0 } = {}) {
   const repository = useMemo(() => tacticalMapRepository, []);
   const [map, setMap] = useState(null);
   const [loading, setLoading] = useState(Boolean(enabled));
@@ -22,7 +22,7 @@ export function useTacticalMap(campaignId, { user, role, characters = [], enable
     setSaveError('');
 
     repository
-      .getMapByCampaignId(campaignId, { user, role, characters })
+      .getMapByCampaignId(campaignId, { role })
       .then((loadedMap) => {
         if (cancelled) return;
         loadedOnceRef.current = true;
@@ -41,7 +41,7 @@ export function useTacticalMap(campaignId, { user, role, characters = [], enable
     return () => {
       cancelled = true;
     };
-  }, [campaignId, characters, enabled, repository, role, user, version]);
+  }, [campaignId, enabled, repository, role, user, version]);
 
   const movement = useTokenMovement({
     map,

@@ -260,6 +260,23 @@ const migrations = [
   );
   CREATE INDEX idx_map_tokens_room ON map_tokens(room_id);
   `,
+
+  // v10 — tokens de personaje persistidos por mapa (Fase 7, resto): la
+  // posición de cada PJ vive en el servidor, por sala y casilla, y persiste
+  // entre sesiones. Se crea automáticamente al servir el mapa activo si el
+  // personaje aún no tiene token y hay alguna sala revelada donde aparecer.
+  `
+  CREATE TABLE map_character_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    room_id INTEGER NOT NULL REFERENCES map_rooms(id) ON DELETE CASCADE,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    UNIQUE (map_id, character_id)
+  );
+  CREATE INDEX idx_map_char_tokens_map ON map_character_tokens(map_id);
+  `,
 ];
 
 export function runMigrations() {

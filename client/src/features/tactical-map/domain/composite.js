@@ -77,9 +77,31 @@ export function composeBoardFromMap(map) {
       visible: true,
     }));
 
+  // Tokens de personaje persistidos (el servidor ya ocultó al jugador los
+  // que están en salas sin revelar)
+  const characterTokens = (map.characterTokens ?? [])
+    .filter((t) => roomIds.has(t.roomId))
+    .map((t) => ({
+      id: `pj-${t.characterId}`,
+      characterId: t.characterId,
+      name: t.name,
+      color: '#4a8bd6',
+      imageUrl: t.avatarUrl || undefined,
+      position: {
+        x: (t.x - minX + 0.5) * map.gridSize,
+        y: 0,
+        z: (t.y - minY + 0.5) * map.gridSize,
+      },
+      size: 1,
+      type: 'player',
+      ownerUserId: t.ownerUserId,
+      visible: true,
+    }));
+
   return {
     doors,
     serverTokens,
+    characterTokens,
     name: map.name,
     floorName: floor.name,
     width: cols * map.gridSize,

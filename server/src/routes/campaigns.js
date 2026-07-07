@@ -7,6 +7,7 @@ import {
   getMap,
   serializeFullMap,
   serializeMapForPlayer,
+  ensureCharacterTokens,
   touchMap,
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap } from '../services/liveMap.js';
@@ -148,12 +149,73 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
   const map = activeMapId ? getMap(req.params.id, activeMapId) : null;
   if (!map) return res.json({ map: null });
 
+  // Los personajes sin token aparecen en la primera sala revelada libre
+  ensureCharacterTokens(map, req.params.id);
+
   res.json({
     map:
       membership.role === 'dm'
         ? serializeFullMap(map, req.params.id)
         : serializeMapForPlayer(map),
   });
+});
+
+// Mover el token de un personaje en el mapa activo: el dueño del personaje
+// o el DM. La casilla de destino debe ser una casilla activa de una sala de
+// la misma planta; el jugador además solo puede pisar salas reveladas.
+campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  const isDm = membership.role === 'dm';
+
+  const character = db
+    .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ?')
+    .get(req.params.characterId, req.params.id);
+  if (!character) return res.status(404).json({ error: 'Personaje no encontrado en esta campaña' });
+  if (!isDm && character.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo puedes mover tu propio personaje' });
+  }
+
+  const activeMapId = getActiveMapId(req.params.id);
+  const token = activeMapId
+    ? db
+        .prepare('SELECT * FROM map_character_tokens WHERE map_id = ? AND character_id = ?')
+        .get(activeMapId, character.id)
+    : undefined;
+  if (!token) return res.status(404).json({ error: 'El personaje aún no está en el tablero' });
+
+  const { x, y } = req.body ?? {};
+  if (!Number.isInteger(x) || !Number.isInteger(y)) {
+    return res.status(400).json({ error: 'Casilla de destino no válida' });
+  }
+
+  const currentRoom = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(token.room_id);
+  const targetRoom = db
+    .prepare(
+      `SELECT r.* FROM map_rooms r WHERE r.floor_id = ?
+         AND ? >= r.x AND ? < r.x + r.width AND ? >= r.y AND ? < r.y + r.height`
+    )
+    .all(currentRoom.floor_id, x, x, y, y)
+    .find(
+      (r) =>
+        !JSON.parse(r.disabled_cells || '[]').some(([c, w]) => c === x - r.x && w === y - r.y)
+    );
+  if (!targetRoom) {
+    return res.status(400).json({ error: 'Ahí no hay suelo que pisar' });
+  }
+  if (!isDm && !targetRoom.revealed) {
+    return res.status(400).json({ error: 'No puedes entrar en una zona sin descubrir' });
+  }
+
+  db.prepare('UPDATE map_character_tokens SET room_id = ?, x = ?, y = ? WHERE id = ?').run(
+    targetRoom.id,
+    x,
+    y,
+    token.id
+  );
+  touchMap(activeMapId);
+  notifyCampaignMap(req.params.id);
+  res.json({ ok: true });
 });
 
 // Abrir (o cerrar, solo el DM) una puerta del mapa activo desde la mesa.
