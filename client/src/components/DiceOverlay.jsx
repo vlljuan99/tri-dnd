@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { DICE_TYPES } from '../lib/dice.js';
 import { useDice } from '../store/dice.js';
@@ -53,6 +54,10 @@ export default function DiceOverlay() {
   const initialPos = readFabPosition();
   const fabX = useMotionValue(initialPos.x);
   const fabY = useMotionValue(initialPos.y);
+  // Distancia recorrida durante el gesto actual: onTap de Framer Motion
+  // puede disparar igualmente tras un arrastre corto, así que se decide a
+  // mano si abrir el tirador según cuánto se movió el dedo/cursor.
+  const dragDistance = useRef(0);
 
   function saveFabPosition() {
     window.localStorage.setItem(
@@ -76,8 +81,17 @@ export default function DiceOverlay() {
           bottom: 0,
         }}
         style={{ x: fabX, y: fabY, touchAction: 'none' }}
+        onPointerDown={() => {
+          dragDistance.current = 0;
+        }}
+        onDrag={(_, info) => {
+          dragDistance.current += Math.abs(info.delta.x) + Math.abs(info.delta.y);
+        }}
         onDragEnd={saveFabPosition}
-        onTap={dice.toggleOpen}
+        onClick={() => {
+          // Un arrastre real desplaza varios píxeles; un toque simple, casi nada
+          if (dragDistance.current < 5) dice.toggleOpen();
+        }}
         aria-label="Tirador de dados (arrastra para recolocarlo)"
         title="Arrastra para recolocarlo"
         className="fixed bottom-20 right-4 z-40 flex h-14 w-14 cursor-grab items-center justify-center rounded-full border border-gold/50 bg-night-900 text-gold shadow-lg shadow-black/40 active:cursor-grabbing"
