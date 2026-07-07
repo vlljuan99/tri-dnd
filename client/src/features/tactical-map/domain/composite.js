@@ -85,6 +85,7 @@ export function composeBoardFromMap(map) {
       id: `pj-${t.characterId}`,
       characterId: t.characterId,
       name: t.name,
+      speed: t.speed,
       color: '#4a8bd6',
       imageUrl: t.avatarUrl || undefined,
       position: {
@@ -120,6 +121,8 @@ export function composeBoardFromMap(map) {
       height: r.height,
       backgroundUrl: r.backgroundUrl || null,
       disabledCells: r.disabledCells,
+      // Solo el DM recibe salas sin revelar: se pintan atenuadas
+      revealed: r.revealed !== false,
     })),
     // Origen de la planta que ocupa la casilla (0,0) del tablero compuesto,
     // por si hace falta volver a coordenadas absolutas del editor

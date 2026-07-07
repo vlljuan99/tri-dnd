@@ -113,8 +113,10 @@ export default function TacticalMap({
             ? 'Modo medir: pulsa dos casillas para ver la distancia.'
             : selectedToken
               ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
-                  canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
-                }`
+                  selectedToken.speed
+                    ? ` · velocidad ${selectedToken.speed} pies (${Math.floor(selectedToken.speed / 5)} casillas)`
+                    : ''
+                }${canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'}`
               : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
@@ -140,6 +142,7 @@ export default function TacticalMap({
               >
                 <span className="truncate">{token.name}</span>
                 <span className="shrink-0 text-[0.65rem] uppercase tracking-widest text-bone/55">
+                  {token.speed ? `${Math.floor(token.speed / 5)} casillas · ` : ''}
                   {movable ? 'mover' : token.type}
                 </span>
               </button>

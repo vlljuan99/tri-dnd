@@ -52,6 +52,12 @@ function useRoomGeometry(room, gridSize) {
   );
 }
 
+// Las salas sin revelar solo llegan al DM: se pintan atenuadas para que
+// sepa qué parte del mapa no están viendo los jugadores
+function dimmedProps(room) {
+  return room.revealed === false ? { transparent: true, opacity: 0.4 } : {};
+}
+
 function RoomImageFloor({ room, gridSize }) {
   const texture = useLoader(THREE.TextureLoader, room.backgroundUrl);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -60,7 +66,7 @@ function RoomImageFloor({ room, gridSize }) {
 
   return (
     <mesh geometry={geometry} raycast={() => null}>
-      <meshStandardMaterial map={texture} roughness={1} />
+      <meshStandardMaterial map={texture} roughness={1} {...dimmedProps(room)} />
     </mesh>
   );
 }
@@ -69,7 +75,7 @@ function RoomPlainFloor({ room, gridSize }) {
   const geometry = useRoomGeometry(room, gridSize);
   return (
     <mesh geometry={geometry} raycast={() => null}>
-      <meshStandardMaterial color="#2b241d" roughness={1} metalness={0} />
+      <meshStandardMaterial color="#2b241d" roughness={1} metalness={0} {...dimmedProps(room)} />
     </mesh>
   );
 }

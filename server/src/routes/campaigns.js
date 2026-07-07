@@ -157,7 +157,7 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
     map:
       membership.role === 'dm'
         ? serializeFullMap(map, req.params.id)
-        : serializeMapForPlayer(map),
+        : serializeMapForPlayer(map, req.user.id),
   });
 });
 
@@ -204,7 +204,9 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   if (!targetRoom) {
     return res.status(400).json({ error: 'Ahí no hay suelo que pisar' });
   }
-  if (!isDm && !targetRoom.revealed) {
+  // El jugador solo pisa salas reveladas, salvo la que ya ocupa su token
+  // (p. ej. si el DM lo colocó en una sala aún sin revelar)
+  if (!isDm && !targetRoom.revealed && targetRoom.id !== token.room_id) {
     return res.status(400).json({ error: 'No puedes entrar en una zona sin descubrir' });
   }
 
@@ -309,6 +311,8 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
   }
 
   const map = getMap(req.params.id, activeMapId);
-  res.json({ map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map) });
+  res.json({
+    map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map, req.user.id),
+  });
 });
 

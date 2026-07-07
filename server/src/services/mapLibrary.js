@@ -18,7 +18,9 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     backgroundUrl: row.background_url,
     disabledCells: JSON.parse(row.disabled_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
-    revealed: Boolean(row.revealed),
+    // Para el jugador, toda sala que recibe es visible (aunque el DM la
+    // tenga sin revelar y solo la vea él por tener ahí su personaje)
+    revealed: forPlayer ? true : Boolean(row.revealed),
   };
 }
 
@@ -97,6 +99,7 @@ export function serializeCharacterToken(row) {
     name: row.character_name,
     ownerUserId: row.user_id,
     avatarUrl: row.avatar_path,
+    speed: row.speed,
     x: row.x,
     y: row.y,
   };
@@ -105,7 +108,7 @@ export function serializeCharacterToken(row) {
 function loadCharacterTokens(mapId) {
   return db
     .prepare(
-      `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path
+      `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path, c.speed
        FROM map_character_tokens t JOIN characters c ON c.id = t.character_id
        WHERE t.map_id = ? ORDER BY t.id`
     )
@@ -268,11 +271,17 @@ export function serializeFullMap(map, campaignId) {
 }
 
 // Vista del jugador: solo salas reveladas (sin notas del DM) y las puertas
-// que tocan una sala revelada, siempre que no sean de control del DM aún
-// cerradas (una puerta secreta cerrada no existe para el jugador).
-export function serializeMapForPlayer(map) {
+// que tocan una sala visible, siempre que no sean de control del DM aún
+// cerradas (una puerta secreta cerrada no existe para el jugador). La sala
+// donde está un personaje del propio usuario siempre es visible para él,
+// aunque el DM la tenga sin revelar: nunca pierdes de vista a tu personaje.
+export function serializeMapForPlayer(map, userId) {
   const { floors, rooms, doors, tokens } = loadMapContents(map.id);
-  const revealed = new Set(rooms.filter((r) => r.revealed).map((r) => r.id));
+  const characterTokens = loadCharacterTokens(map.id);
+  const visible = new Set(rooms.filter((r) => r.revealed).map((r) => r.id));
+  for (const t of characterTokens) {
+    if (t.user_id === userId) visible.add(t.room_id);
+  }
   return {
     id: map.id,
     name: map.name,
@@ -282,21 +291,21 @@ export function serializeMapForPlayer(map) {
       name: f.name,
       position: f.position,
       rooms: rooms
-        .filter((r) => r.floor_id === f.id && revealed.has(r.id))
+        .filter((r) => r.floor_id === f.id && visible.has(r.id))
         .map((r) => serializeRoom(r, { forPlayer: true })),
     })),
     doors: doors
       .filter(
         (d) =>
-          (revealed.has(d.from_room_id) || revealed.has(d.to_room_id)) &&
+          (visible.has(d.from_room_id) || visible.has(d.to_room_id)) &&
           (d.control === 'jugador' || d.is_open)
       )
       .map(serializeDoor),
     // Un marcador oculto (trampa, tesoro) no existe para el jugador aunque
-    // la sala esté revelada
-    tokens: tokens.filter((t) => revealed.has(t.room_id) && !t.hidden).map(serializeToken),
-    characterTokens: loadCharacterTokens(map.id)
-      .filter((t) => revealed.has(t.room_id))
+    // la sala esté visible
+    tokens: tokens.filter((t) => visible.has(t.room_id) && !t.hidden).map(serializeToken),
+    characterTokens: characterTokens
+      .filter((t) => visible.has(t.room_id))
       .map(serializeCharacterToken),
   };
 }

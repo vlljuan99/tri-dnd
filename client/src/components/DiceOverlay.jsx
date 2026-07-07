@@ -1,8 +1,25 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { DICE_TYPES } from '../lib/dice.js';
 import { useDice } from '../store/dice.js';
 import { useRoom } from '../store/socket.js';
 import RollCard from './RollCard.jsx';
+
+// Posición del botón flotante, recordada por navegador (offsets negativos
+// desde su esquina inferior derecha por defecto)
+const FAB_POSITION_KEY = 'tri-dnd:dice-fab-pos';
+
+function readFabPosition() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(FAB_POSITION_KEY) || '{}');
+    // Nunca fuera de la pantalla actual (pudo guardarse en una más grande)
+    return {
+      x: Math.min(0, Math.max(-(window.innerWidth - 72), saved.x || 0)),
+      y: Math.min(0, Math.max(-(window.innerHeight - 72), saved.y || 0)),
+    };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
 
 function D20Icon({ className }) {
   return (
@@ -33,17 +50,40 @@ export default function DiceOverlay() {
   const inRoom = Boolean(campaignId);
   const isDm = role === 'dm';
   const hasDice = DICE_TYPES.some((d) => dice.pool[d] > 0);
+  const initialPos = readFabPosition();
+  const fabX = useMotionValue(initialPos.x);
+  const fabY = useMotionValue(initialPos.y);
+
+  function saveFabPosition() {
+    window.localStorage.setItem(
+      FAB_POSITION_KEY,
+      JSON.stringify({ x: Math.round(fabX.get()), y: Math.round(fabY.get()) })
+    );
+  }
 
   return (
     <>
-      {/* Botón flotante */}
-      <button
-        onClick={dice.toggleOpen}
-        aria-label="Tirador de dados"
-        className="fixed bottom-4 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-gold/50 bg-night-900 text-gold shadow-lg shadow-black/40 transition-transform hover:scale-105"
+      {/* Botón flotante: arrastrable, cada cual lo deja donde no le estorbe.
+          onTap (y no onClick) para que soltar tras arrastrar no lo abra. */}
+      <motion.button
+        drag
+        dragMomentum={false}
+        dragElastic={0.08}
+        dragConstraints={{
+          left: -(window.innerWidth - 72),
+          right: 0,
+          top: -(window.innerHeight - 72),
+          bottom: 0,
+        }}
+        style={{ x: fabX, y: fabY, touchAction: 'none' }}
+        onDragEnd={saveFabPosition}
+        onTap={dice.toggleOpen}
+        aria-label="Tirador de dados (arrastra para recolocarlo)"
+        title="Arrastra para recolocarlo"
+        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 cursor-grab items-center justify-center rounded-full border border-gold/50 bg-night-900 text-gold shadow-lg shadow-black/40 active:cursor-grabbing"
       >
         <D20Icon className="h-8 w-8" />
-      </button>
+      </motion.button>
 
       <AnimatePresence>
         {dice.open && (
