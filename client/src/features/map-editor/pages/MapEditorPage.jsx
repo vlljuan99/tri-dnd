@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
+import SrdPicker from '../../../components/SrdPicker.jsx';
 import { useMapEditor } from '../hooks/useMapEditor.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
@@ -46,6 +47,8 @@ export default function MapEditorPage() {
   const [newMapName, setNewMapName] = useState('');
   const [tokenKind, setTokenKind] = useState('enemigo');
   const [tokenName, setTokenName] = useState('');
+  const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
+  const [showMonsterPicker, setShowMonsterPicker] = useState(false);
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -100,12 +103,17 @@ export default function MapEditorPage() {
   }
 
   async function placeToken(target) {
-    const name = tokenName.trim() || TOKEN_KINDS.find((k) => k.key === tokenKind)?.label || 'Marcador';
+    const name =
+      tokenName.trim() ||
+      (tokenKind === 'enemigo' && tokenMonster?.name) ||
+      TOKEN_KINDS.find((k) => k.key === tokenKind)?.label ||
+      'Marcador';
     const { token } = await editor.addToken(target.roomId, {
       kind: tokenKind,
       name,
       x: target.x,
       y: target.y,
+      monsterIndex: tokenKind === 'enemigo' ? tokenMonster?.index : undefined,
     });
     setSelection({ type: 'token', id: token.id });
     setMode('select');
@@ -376,7 +384,10 @@ export default function MapEditorPage() {
                   <>
                     <select
                       value={tokenKind}
-                      onChange={(e) => setTokenKind(e.target.value)}
+                      onChange={(e) => {
+                        setTokenKind(e.target.value);
+                        if (e.target.value !== 'enemigo') setTokenMonster(null);
+                      }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
                       {TOKEN_KINDS.map((k) => (
@@ -389,6 +400,25 @@ export default function MapEditorPage() {
                       placeholder="Nombre (Esqueleto, Cofre…)"
                       className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
                     />
+                    {tokenKind === 'enemigo' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowMonsterPicker(true)}
+                        className="rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10"
+                      >
+                        {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Compendio…'}
+                      </button>
+                    )}
+                    {tokenMonster && tokenKind === 'enemigo' && (
+                      <button
+                        type="button"
+                        onClick={() => setTokenMonster(null)}
+                        aria-label="Quitar monstruo del compendio"
+                        className="text-xs text-bone/50 hover:text-blood"
+                      >
+                        ✕
+                      </button>
+                    )}
                     <span className="text-xs italic text-bone/50">clic en una sala para colocarlo</span>
                   </>
                 )}
@@ -487,6 +517,19 @@ export default function MapEditorPage() {
           ) : null}
         </aside>
       </div>
+
+      {showMonsterPicker && (
+        <SrdPicker
+          title="Elegir monstruo del compendio"
+          category="monsters"
+          onPick={(entry) => {
+            setTokenMonster({ index: entry.index, name: entry.name });
+            if (!tokenName.trim()) setTokenName(entry.name);
+            setShowMonsterPicker(false);
+          }}
+          onClose={() => setShowMonsterPicker(false)}
+        />
+      )}
     </div>
   );
 }

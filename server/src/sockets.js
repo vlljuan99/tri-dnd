@@ -5,6 +5,7 @@ import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership } from './routes/campaigns.js';
+import { bindCombatBroadcaster } from './services/liveMap.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
@@ -136,6 +137,9 @@ export function setupSockets(io) {
       s.emit('combat:state', combatStateFor(campaignId, membership.role === 'dm'));
     }
   }
+  // Las rutas HTTP del mapa también meten enemigos en el tracker al
+  // revelarse una sala
+  bindCombatBroadcaster(broadcastCombat);
 
   io.on('connection', (socket) => {
     const user = socket.data.user;

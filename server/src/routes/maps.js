@@ -18,8 +18,9 @@ import {
   serializeDoor,
   serializeToken,
   serializeFullMap,
+  spawnRoomEnemies,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap, notifyIfActive } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyIfActive, notifyCombat } from '../services/liveMap.js';
 
 // Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
 // sockets de la campaña para que recarguen su vista (ya filtrada por rol)
@@ -302,6 +303,12 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     room.id
   );
   touchAndNotify(map);
+
+  // Al revelarse por primera vez en la mesa, sus enemigos entran al tracker
+  const becameRevealed = revealed !== undefined && Boolean(revealed) && !room.revealed;
+  if (becameRevealed && getActiveMapId(req.params.campaignId) === map.id) {
+    if (spawnRoomEnemies(map.campaign_id, [room.id]) > 0) notifyCombat(map.campaign_id);
+  }
 
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
   res.json({ room: serializeRoom(updated) });

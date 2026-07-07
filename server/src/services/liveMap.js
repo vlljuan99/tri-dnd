@@ -7,9 +7,21 @@ import { getActiveMapId } from './mapLibrary.js';
 // Solo se emite una señal, nunca datos del mapa: así ningún socket recibe
 // más de lo que su rol le permite ver.
 let ioRef = null;
+let combatBroadcaster = null;
 
 export function bindIo(io) {
   ioRef = io;
+}
+
+// sockets.js registra aquí su broadcastCombat (emite a cada socket la vista
+// de combate que corresponde a su rol) para que las rutas HTTP puedan
+// avisar cuando el mapa mete enemigos en el tracker
+export function bindCombatBroadcaster(fn) {
+  combatBroadcaster = fn;
+}
+
+export function notifyCombat(campaignId) {
+  combatBroadcaster?.(campaignId);
 }
 
 export function notifyCampaignMap(campaignId) {

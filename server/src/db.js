@@ -277,6 +277,13 @@ const migrations = [
   );
   CREATE INDEX idx_map_char_tokens_map ON map_character_tokens(map_id);
   `,
+
+  // v11 — enlace entre un combatiente del tracker y el marcador de mapa que
+  // lo originó: al revelarse una sala, sus enemigos entran al tracker una
+  // sola vez aunque la sala se oculte y revele varias veces
+  `
+  ALTER TABLE combatants ADD COLUMN map_token_id INTEGER;
+  `,
 ];
 
 export function runMigrations() {

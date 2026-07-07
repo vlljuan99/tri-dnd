@@ -170,6 +170,61 @@ export function ensureCharacterTokens(map, campaignId) {
   }
 }
 
+// Al revelarse salas del mapa activo, sus enemigos visibles entran al
+// tracker de iniciativa (una sola vez por marcador, enlazados por
+// map_token_id). HP y CA salen del compendio SRD si el marcador tiene
+// monster_index. Devuelve cuántos combatientes se añadieron.
+export function spawnRoomEnemies(campaignId, roomIds) {
+  if (!roomIds.length) return 0;
+  const placeholders = roomIds.map(() => '?').join(', ');
+  const enemies = db
+    .prepare(
+      `SELECT * FROM map_tokens WHERE room_id IN (${placeholders})
+       AND kind = 'enemigo' AND hidden = 0`
+    )
+    .all(...roomIds);
+  if (!enemies.length) return 0;
+
+  const already = new Set(
+    db
+      .prepare('SELECT map_token_id FROM combatants WHERE campaign_id = ? AND map_token_id IS NOT NULL')
+      .all(campaignId)
+      .map((r) => r.map_token_id)
+  );
+  const insert = db.prepare(
+    `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac, monster_index, map_token_id)
+     VALUES (?, 'enemigo', ?, 0, ?, ?, ?, ?, ?)`
+  );
+
+  let added = 0;
+  for (const enemy of enemies) {
+    if (already.has(enemy.id)) continue;
+    let hp = null;
+    let ac = null;
+    if (enemy.monster_index) {
+      const entry = db
+        .prepare("SELECT data FROM srd_entries WHERE category = 'monsters' AND idx = ?")
+        .get(enemy.monster_index);
+      if (entry) {
+        try {
+          const data = JSON.parse(entry.data);
+          hp = Number.isInteger(data.hit_points) ? data.hit_points : null;
+          ac = Array.isArray(data.armor_class)
+            ? data.armor_class[0]?.value ?? null
+            : Number.isInteger(data.armor_class)
+              ? data.armor_class
+              : null;
+        } catch {
+          // sin estadísticas: el DM las pone a mano
+        }
+      }
+    }
+    insert.run(campaignId, enemy.name, hp, hp, ac, enemy.monster_index, enemy.id);
+    added += 1;
+  }
+  return added;
+}
+
 function loadMapContents(mapId) {
   const floors = db
     .prepare('SELECT * FROM map_floors WHERE map_id = ? ORDER BY position, id')

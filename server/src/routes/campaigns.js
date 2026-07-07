@@ -8,9 +8,10 @@ import {
   serializeFullMap,
   serializeMapForPlayer,
   ensureCharacterTokens,
+  spawnRoomEnemies,
   touchMap,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -246,6 +247,14 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
     if (revealedSides === 0) return res.status(403).json({ error: 'No ves ninguna puerta ahí' });
   }
 
+  // Salas que se van a revelar ahora: sus enemigos entrarán al tracker
+  const newlyRevealed = open
+    ? db
+        .prepare('SELECT id FROM map_rooms WHERE id IN (?, ?) AND revealed = 0')
+        .all(door.from_room_id, door.to_room_id)
+        .map((r) => r.id)
+    : [];
+
   db.transaction(() => {
     db.prepare('UPDATE map_doors SET is_open = ? WHERE id = ?').run(open ? 1 : 0, door.id);
     if (open) {
@@ -257,6 +266,9 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
   })();
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
+  if (newlyRevealed.length && spawnRoomEnemies(req.params.id, newlyRevealed) > 0) {
+    notifyCombat(req.params.id);
+  }
 
   const map = getMap(req.params.id, activeMapId);
   res.json({ map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map) });
