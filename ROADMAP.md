@@ -44,7 +44,8 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 
 - [x] **Combate en el tablero (primera iteración)** — con tu personaje seleccionado, pulsar un enemigo u otro PJ abre el panel de ataque con tus armas equipadas (y el golpe desarmado)
   - El cliente tira los dados (se comparten en el chat), pero el **impacto lo resuelve el servidor contra la CA**, que el jugador nunca recibe; valida propiedad del personaje, planta y adyacencia en cuerpo a cuerpo
-  - El daño se aplica en servidor: enemigos por el tracker (sin revelar HP; al caer desaparecen del tablero y del tracker), personajes por su ficha (inconsciente a 0 HP); mensajes de sistema narran el combate
+  - El daño se aplica en servidor: enemigos por el tracker (al caer desaparecen del tablero y del tracker), personajes por su ficha (inconsciente a 0 HP); mensajes de sistema narran el combate
+  - **Feedback completo**: el panel desglosa los d20 (con el descartado tachado en ventaja/desventaja) + bonificador = total contra la CA (revelada solo al resolver el ataque), y tras el daño muestra cuánta vida quita y cuánta queda. **Barras de vida** sobre los tokens del tablero 3D y HP actual/total en la lista de tokens, refrescadas por socket con cada golpe, cura o edición del tracker
   - Siguientes iteraciones: alcance real y línea de visión para armas a distancia, hechizos como ataque desde el tablero, ataques de monstruos con daño automático (hoy el DM usa su bloque de estadísticas y edita el tracker)
 
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
