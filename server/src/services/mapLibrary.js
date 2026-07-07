@@ -37,6 +37,19 @@ export function serializeDoor(row) {
   };
 }
 
+export function serializeToken(row) {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    kind: row.kind,
+    name: row.name,
+    monsterIndex: row.monster_index,
+    x: row.x,
+    y: row.y,
+    hidden: Boolean(row.hidden),
+  };
+}
+
 export function getActiveMapId(campaignId) {
   return db.prepare('SELECT active_map_id FROM game_tables WHERE campaign_id = ?').get(campaignId)
     ?.active_map_id;
@@ -60,6 +73,18 @@ export function getRoom(mapId, roomId) {
     .get(roomId, mapId);
 }
 
+// Marcador solo si pertenece al mapa indicado (sala → planta → mapa)
+export function getToken(mapId, tokenId) {
+  return db
+    .prepare(
+      `SELECT t.* FROM map_tokens t
+       JOIN map_rooms r ON r.id = t.room_id
+       JOIN map_floors f ON f.id = r.floor_id
+       WHERE t.id = ? AND f.map_id = ?`
+    )
+    .get(tokenId, mapId);
+}
+
 export function touchMap(mapId) {
   db.prepare("UPDATE maps SET updated_at = datetime('now') WHERE id = ?").run(mapId);
 }
@@ -75,12 +100,20 @@ function loadMapContents(mapId) {
     )
     .all(mapId);
   const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ? ORDER BY id').all(mapId);
-  return { floors, rooms, doors };
+  const tokens = db
+    .prepare(
+      `SELECT t.* FROM map_tokens t
+       JOIN map_rooms r ON r.id = t.room_id
+       JOIN map_floors f ON f.id = r.floor_id
+       WHERE f.map_id = ? ORDER BY t.id`
+    )
+    .all(mapId);
+  return { floors, rooms, doors, tokens };
 }
 
-// Vista completa del DM: todas las salas, notas y puertas
+// Vista completa del DM: todas las salas, notas, puertas y marcadores
 export function serializeFullMap(map, campaignId) {
-  const { floors, rooms, doors } = loadMapContents(map.id);
+  const { floors, rooms, doors, tokens } = loadMapContents(map.id);
   return {
     id: map.id,
     name: map.name,
@@ -93,6 +126,7 @@ export function serializeFullMap(map, campaignId) {
       rooms: rooms.filter((r) => r.floor_id === f.id).map((r) => serializeRoom(r)),
     })),
     doors: doors.map(serializeDoor),
+    tokens: tokens.map(serializeToken),
   };
 }
 
@@ -100,7 +134,7 @@ export function serializeFullMap(map, campaignId) {
 // que tocan una sala revelada, siempre que no sean de control del DM aún
 // cerradas (una puerta secreta cerrada no existe para el jugador).
 export function serializeMapForPlayer(map) {
-  const { floors, rooms, doors } = loadMapContents(map.id);
+  const { floors, rooms, doors, tokens } = loadMapContents(map.id);
   const revealed = new Set(rooms.filter((r) => r.revealed).map((r) => r.id));
   return {
     id: map.id,
@@ -121,5 +155,8 @@ export function serializeMapForPlayer(map) {
           (d.control === 'jugador' || d.is_open)
       )
       .map(serializeDoor),
+    // Un marcador oculto (trampa, tesoro) no existe para el jugador aunque
+    // la sala esté revelada
+    tokens: tokens.filter((t) => revealed.has(t.room_id) && !t.hidden).map(serializeToken),
   };
 }

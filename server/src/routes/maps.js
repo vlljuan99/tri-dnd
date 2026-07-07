@@ -12,9 +12,11 @@ import {
   getMap,
   getFloor,
   getRoom,
+  getToken,
   touchMap,
   serializeRoom,
   serializeDoor,
+  serializeToken,
   serializeFullMap,
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyIfActive } from '../services/liveMap.js';
@@ -377,6 +379,106 @@ mapsRouter.delete('/:mapId/salas/:roomId/imagen', (req, res) => {
   touchAndNotify(map);
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
   res.json({ room: serializeRoom(updated) });
+});
+
+// ---- Marcadores (enemigos, aliados, objetos, trampas) ----
+
+const TOKEN_KINDS = ['enemigo', 'aliado', 'objeto', 'trampa'];
+
+// Colocar un marcador en una casilla activa de una sala. Las trampas nacen
+// ocultas salvo que se indique lo contrario.
+mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const room = map && getRoom(map.id, req.params.roomId);
+  if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+
+  const { kind = 'enemigo', name, x, y, monsterIndex, hidden } = req.body ?? {};
+  if (!TOKEN_KINDS.includes(kind)) {
+    return res.status(400).json({ error: 'Tipo de marcador no válido' });
+  }
+  const cleanName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 60) : '';
+  if (!cleanName) return res.status(400).json({ error: 'El marcador necesita un nombre' });
+  if (!isValidCoord(x) || !isValidCoord(y) || !cellInsideRoom(room, x, y)) {
+    return res.status(400).json({ error: 'El marcador debe estar en una casilla activa de la sala' });
+  }
+
+  let monsterIdx = null;
+  if (kind === 'enemigo' && typeof monsterIndex === 'string' && monsterIndex) {
+    const monster = db
+      .prepare("SELECT idx FROM srd_entries WHERE category = 'monsters' AND idx = ?")
+      .get(monsterIndex);
+    if (monster) monsterIdx = monster.idx;
+  }
+  const isHidden = hidden !== undefined ? Number(Boolean(hidden)) : kind === 'trampa' ? 1 : 0;
+
+  const info = db
+    .prepare('INSERT INTO map_tokens (room_id, kind, name, monster_index, x, y, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(room.id, kind, cleanName, monsterIdx, x, y, isHidden);
+  touchAndNotify(map);
+
+  const token = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json({ token: serializeToken(token) });
+});
+
+mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const token = map && getToken(map.id, req.params.tokenId);
+  if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
+
+  const { name, x, y, hidden, kind } = req.body ?? {};
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    return res.status(400).json({ error: 'El marcador necesita un nombre' });
+  }
+  if (kind !== undefined && !TOKEN_KINDS.includes(kind)) {
+    return res.status(400).json({ error: 'Tipo de marcador no válido' });
+  }
+
+  // Al moverlo puede cambiar de sala: se busca la sala de la misma planta
+  // que contiene la casilla de destino
+  let roomId = token.room_id;
+  if (x !== undefined || y !== undefined) {
+    const nextX = x ?? token.x;
+    const nextY = y ?? token.y;
+    if (!isValidCoord(nextX) || !isValidCoord(nextY)) {
+      return res.status(400).json({ error: 'Posición del marcador no válida' });
+    }
+    const currentRoom = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(token.room_id);
+    const targetRoom = db
+      .prepare(
+        `SELECT r.* FROM map_rooms r WHERE r.floor_id = ?
+           AND ? >= r.x AND ? < r.x + r.width AND ? >= r.y AND ? < r.y + r.height`
+      )
+      .all(currentRoom.floor_id, nextX, nextX, nextY, nextY)
+      .find((r) => cellInsideRoom(r, nextX, nextY));
+    if (!targetRoom) {
+      return res.status(400).json({ error: 'El marcador debe quedar en una casilla activa de una sala' });
+    }
+    roomId = targetRoom.id;
+  }
+
+  db.prepare('UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ? WHERE id = ?').run(
+    roomId,
+    name !== undefined ? name.trim().slice(0, 60) : token.name,
+    x ?? token.x,
+    y ?? token.y,
+    hidden !== undefined ? Number(Boolean(hidden)) : token.hidden,
+    kind ?? token.kind,
+    token.id
+  );
+  touchAndNotify(map);
+
+  const updated = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(token.id);
+  res.json({ token: serializeToken(updated) });
+});
+
+mapsRouter.delete('/:mapId/fichas/:tokenId', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const token = map && getToken(map.id, req.params.tokenId);
+  if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
+
+  db.prepare('DELETE FROM map_tokens WHERE id = ?').run(token.id);
+  touchAndNotify(map);
+  res.json({ ok: true });
 });
 
 // ---- Puertas ----

@@ -241,6 +241,25 @@ const migrations = [
   UPDATE game_tables
     SET active_map_id = (SELECT id FROM maps WHERE maps.campaign_id = game_tables.campaign_id);
   `,
+
+  // v9 — Fase 7.5: marcadores preparados por sala (enemigos, aliados,
+  // objetos y trampas). x/y en casillas absolutas del lienzo de la planta,
+  // como las puertas. hidden=1 = solo lo ve el DM (trampas, tesoro oculto),
+  // con el mismo filtrado en servidor que las salas sin revelar.
+  `
+  CREATE TABLE map_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id INTEGER NOT NULL REFERENCES map_rooms(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'enemigo' CHECK (kind IN ('enemigo', 'aliado', 'objeto', 'trampa')),
+    name TEXT NOT NULL,
+    monster_index TEXT,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_map_tokens_room ON map_tokens(room_id);
+  `,
 ];
 
 export function runMigrations() {
