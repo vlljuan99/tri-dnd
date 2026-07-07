@@ -122,6 +122,22 @@ export const useRoom = create((set, get) => ({
     if (socket && campaignId) socket.emit('mapa:ping', { campaignId, floorId, x, y });
   },
 
+  // --- Combate en el tablero ---------------------------------------
+
+  /** Ataque de un personaje a un objetivo; el servidor decide el impacto. */
+  attackTarget(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combate:atacar', { campaignId, ...payload }, resolve));
+  },
+
+  /** Daño de un personaje a un objetivo; el servidor lo aplica. */
+  dealDamage(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combate:danio', { campaignId, ...payload }, resolve));
+  },
+
   // --- Tracker de iniciativa ---------------------------------------
 
   addCombatant(payload) {

@@ -5,7 +5,8 @@ import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership } from './routes/campaigns.js';
-import { bindCombatBroadcaster } from './services/liveMap.js';
+import { bindCombatBroadcaster, notifyCampaignMap } from './services/liveMap.js';
+import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
@@ -83,6 +84,82 @@ function combatStateFor(campaignId, isDm) {
     turnId: table?.combat_turn_id ?? null,
     combatants: orderedCombatants(campaignId).map((r) => combatantView(r, { isDm })),
   };
+}
+
+// --- Combate en el tablero -------------------------------------------------
+
+// Localiza y valida el objetivo de un ataque en el mapa activo. La CA nunca
+// viaja al cliente: el impacto se decide aquí. Devuelve { error } o
+// { ac, name, kind, token, combatant?, character? }.
+function resolveCombatTarget(campaignId, attackerCharacter, target, { melee }) {
+  const mapId = getActiveMapId(campaignId);
+  if (!mapId) return { error: 'La mesa no tiene mapa activo' };
+
+  const attacker = db
+    .prepare(
+      `SELECT t.*, r.floor_id FROM map_character_tokens t
+       JOIN map_rooms r ON r.id = t.room_id
+       WHERE t.map_id = ? AND t.character_id = ?`
+    )
+    .get(mapId, attackerCharacter.id);
+  if (!attacker) return { error: 'Tu personaje no está en el tablero' };
+
+  let resolved;
+  if (target?.kind === 'marcador') {
+    const row = db
+      .prepare(
+        `SELECT t.*, r.floor_id, r.revealed FROM map_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id
+         WHERE t.id = ? AND f.map_id = ?`
+      )
+      .get(target.id, mapId);
+    if (!row || row.hidden || !row.revealed) return { error: 'Objetivo no encontrado' };
+    if (row.kind !== 'enemigo' && row.kind !== 'aliado') return { error: 'Eso no se puede atacar' };
+    const combatant = db
+      .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+      .get(campaignId, row.id);
+    resolved = { ac: combatant?.ac ?? 10, name: row.name, kind: 'marcador', token: row, combatant };
+  } else if (target?.kind === 'personaje') {
+    if (Number(target.id) === attackerCharacter.id) return { error: 'No puedes atacarte a ti mismo' };
+    const row = db
+      .prepare(
+        `SELECT t.*, r.floor_id FROM map_character_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         WHERE t.map_id = ? AND t.character_id = ?`
+      )
+      .get(mapId, target.id);
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(target.id);
+    if (!row || !character) return { error: 'Objetivo no encontrado' };
+    resolved = { ac: character.ac ?? 10, name: character.name, kind: 'personaje', token: row, character };
+  } else {
+    return { error: 'Objetivo no válido' };
+  }
+
+  if (resolved.token.floor_id !== attacker.floor_id) {
+    return { error: 'El objetivo está en otra planta' };
+  }
+  const distance = Math.max(
+    Math.abs(resolved.token.x - attacker.x),
+    Math.abs(resolved.token.y - attacker.y)
+  );
+  if (melee && distance > 1) return { error: 'Demasiado lejos para atacar cuerpo a cuerpo' };
+  return resolved;
+}
+
+// Valida al atacante de un evento de combate: personaje de la campaña, del
+// propio usuario (o cualquiera si eres el DM), con tirada razonable
+function validateCombatEvent({ campaignId, characterId, roll, user, membershipRole }) {
+  const character = db
+    .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ?')
+    .get(characterId, campaignId);
+  if (!character) return { error: 'Personaje no encontrado en esta campaña' };
+  if (membershipRole !== 'dm' && character.user_id !== user.id) {
+    return { error: 'Solo puedes atacar con tu propio personaje' };
+  }
+  if (!Number.isFinite(Number(roll?.total))) return { error: 'Tirada no válida' };
+  if (JSON.stringify(roll ?? {}).length > 8000) return { error: 'Tirada demasiado grande' };
+  return { character };
 }
 
 export function setupSockets(io) {
@@ -404,6 +481,103 @@ export function setupSockets(io) {
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha terminado' });
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    // --- Combate en el tablero: atacar y aplicar daño -----------------
+
+    // El cliente tira el d20 (mismos dados que el resto de la app) y el
+    // servidor decide el impacto contra la CA, que el jugador nunca ve.
+    socket.on('combate:atacar', ({ campaignId, characterId, target, weaponName, melee, roll }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const checked = validateCombatEvent({ campaignId, characterId, roll, user, membershipRole: membership.role });
+      if (checked.error) return cb?.({ error: checked.error });
+
+      const resolved = resolveCombatTarget(campaignId, checked.character, target, { melee: Boolean(melee) });
+      if (resolved.error) return cb?.({ error: resolved.error });
+
+      const crit = Boolean(roll.crit);
+      const hit = crit || (!roll.fumble && Number(roll.total) >= resolved.ac);
+
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+
+      const weapon =
+        typeof weaponName === 'string' && weaponName.trim() ? ` con ${weaponName.trim().slice(0, 40)}` : '';
+      const note = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'system',
+        body: hit
+          ? `${checked.character.name} ataca a ${resolved.name}${weapon}: ¡impacta!${crit ? ' (crítico)' : ''}`
+          : `${checked.character.name} ataca a ${resolved.name}${weapon}: falla.${roll.fumble ? ' (pifia)' : ''}`,
+      });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      cb?.({ ok: true, hit, crit });
+    });
+
+    // Aplica el daño al objetivo: enemigos por el tracker (y si caen,
+    // desaparecen del tablero y del tracker), personajes por su ficha.
+    // El mensaje de sistema nunca revela el HP restante de un enemigo.
+    socket.on('combate:danio', ({ campaignId, characterId, target, roll }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const checked = validateCombatEvent({ campaignId, characterId, roll, user, membershipRole: membership.role });
+      if (checked.error) return cb?.({ error: checked.error });
+
+      // Sin exigencia de adyacencia aquí: la posición se validó al atacar
+      const resolved = resolveCombatTarget(campaignId, checked.character, target, { melee: false });
+      if (resolved.error) return cb?.({ error: resolved.error });
+
+      const damage = Math.max(0, Math.min(999, Math.round(Number(roll.total)) || 0));
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+
+      let body;
+      if (resolved.kind === 'marcador') {
+        const combatant = resolved.combatant;
+        if (combatant && Number.isInteger(combatant.hp_current)) {
+          const newHp = combatant.hp_current - damage;
+          if (newHp <= 0) {
+            db.transaction(() => {
+              db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
+              const table = db
+                .prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?')
+                .get(campaignId);
+              if (table?.combat_turn_id === combatant.id) {
+                db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+              }
+              db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
+            })();
+            const mapId = getActiveMapId(campaignId);
+            if (mapId) touchMap(mapId);
+            notifyCampaignMap(campaignId);
+            body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
+          } else {
+            db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
+            body = `${resolved.name} recibe ${damage} puntos de daño.`;
+          }
+          broadcastCombat(campaignId);
+        } else {
+          // Sin ficha en el tracker (p. ej. un aliado): solo se narra
+          body = `${resolved.name} recibe ${damage} puntos de daño.`;
+        }
+      } else {
+        const newHp = Math.max(-99, (resolved.character.hp_current ?? 0) - damage);
+        db.prepare("UPDATE characters SET hp_current = ?, updated_at = datetime('now') WHERE id = ?").run(
+          newHp,
+          resolved.character.id
+        );
+        broadcastCombat(campaignId);
+        body =
+          newHp <= 0
+            ? `${resolved.name} recibe ${damage} puntos de daño y cae inconsciente.`
+            : `${resolved.name} recibe ${damage} puntos de daño.`;
+      }
+
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
+      io.to(roomName(campaignId)).emit('chat:new', note);
       cb?.({ ok: true });
     });
 

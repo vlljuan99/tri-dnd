@@ -1,7 +1,8 @@
-import { Component, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useState } from 'react';
 import { worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
+import AttackPanel from './AttackPanel.jsx';
 import MapControls from './MapControls.jsx';
 
 class CanvasErrorBoundary extends Component {
@@ -51,6 +52,7 @@ export default function TacticalMap({
   const [cameraCommand, setCameraCommand] = useState(null);
   const [measureMode, setMeasureMode] = useState(false);
   const [measurePoints, setMeasurePoints] = useState([]);
+  const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -58,13 +60,42 @@ export default function TacticalMap({
   const selectedCell = selectedToken ? worldToGrid(selectedToken.position, map.gridSize) : null;
   const isDm = role === 'dm';
 
+  // Si el objetivo desaparece del mapa (ha caído), el panel de combate se cierra
+  useEffect(() => {
+    if (combatTarget && !map.tokens.some((t) => t.id === combatTarget.id)) {
+      setCombatTarget(null);
+    }
+  }, [combatTarget, map.tokens]);
+
+  // Con tu personaje seleccionado, pulsar un enemigo u otro PJ lo fija como
+  // objetivo de ataque; cualquier otro caso simplemente selecciona el token.
+  function handleSelectToken(tokenId) {
+    const clicked = map.tokens.find((t) => t.id === tokenId);
+    const canAttackFrom =
+      selectedToken?.characterId && canMoveToken({ token: selectedToken, user, role });
+    const attackable =
+      clicked &&
+      clicked.id !== selectedToken?.id &&
+      ((clicked.serverId && clicked.type === 'enemy') ||
+        (clicked.characterId && clicked.characterId !== selectedToken?.characterId));
+    if (canAttackFrom && attackable) {
+      setCombatTarget(clicked);
+      return;
+    }
+    setSelectedTokenId(tokenId);
+    setCombatTarget(null);
+  }
+
   function sendCameraCommand(type) {
     setCameraCommand({ type, issuedAt: Date.now() });
   }
 
   function toggleMeasureMode() {
     setMeasureMode((value) => {
-      if (!value) setSelectedTokenId(null);
+      if (!value) {
+        setSelectedTokenId(null);
+        setCombatTarget(null);
+      }
       setMeasurePoints([]);
       return !value;
     });
@@ -98,7 +129,7 @@ export default function TacticalMap({
           showGrid={showGrid}
           savingTokenId={savingTokenId}
           cameraCommand={cameraCommand}
-          onSelectToken={setSelectedTokenId}
+          onSelectToken={handleSelectToken}
           onMoveToken={onMoveToken}
           onOpenDoor={onOpenDoor}
           onPing={onPing}
@@ -154,7 +185,7 @@ export default function TacticalMap({
               <button
                 key={token.id}
                 type="button"
-                onClick={() => setSelectedTokenId(token.id)}
+                onClick={() => handleSelectToken(token.id)}
                 aria-pressed={selectedTokenId === token.id}
                 className={`flex w-full items-center justify-between gap-2 rounded-sm border px-2 py-2 text-left text-sm ${
                   selectedTokenId === token.id
@@ -173,6 +204,14 @@ export default function TacticalMap({
         </div>
       </div>
 
+      {combatTarget && selectedToken?.characterId && (
+        <AttackPanel
+          attacker={selectedToken}
+          target={combatTarget}
+          onClose={() => setCombatTarget(null)}
+        />
+      )}
+
       <MapControls
         showGrid={showGrid}
         selectedToken={selectedToken}
@@ -186,7 +225,10 @@ export default function TacticalMap({
         onZoomIn={() => sendCameraCommand('zoom-in')}
         onZoomOut={() => sendCameraCommand('zoom-out')}
         onToggleGrid={() => setShowGrid((value) => !value)}
-        onClearSelection={() => setSelectedTokenId(null)}
+        onClearSelection={() => {
+          setSelectedTokenId(null);
+          setCombatTarget(null);
+        }}
         onNudgeToken={nudgeSelectedToken}
         backToCampaignHref={backToCampaignHref}
       />
