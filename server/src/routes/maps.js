@@ -360,6 +360,26 @@ mapsRouter.patch(
   }
 );
 
+// En qué lados de la sala hay puertas/aberturas, en términos de imagen
+// (norte = borde superior). Las que caen en el interior (escaleras,
+// trampillas) no marcan lado.
+function roomOpenings(mapId, room) {
+  const doors = db
+    .prepare('SELECT * FROM map_doors WHERE map_id = ? AND (from_room_id = ? OR to_room_id = ?)')
+    .all(mapId, room.id, room.id);
+  const sides = new Set();
+  for (const door of doors) {
+    const isFrom = door.from_room_id === room.id;
+    const x = isFrom ? door.from_x : door.to_x;
+    const y = isFrom ? door.from_y : door.to_y;
+    if (x === room.x) sides.add('oeste');
+    if (x === room.x + room.width - 1) sides.add('este');
+    if (y === room.y) sides.add('norte');
+    if (y === room.y + room.height - 1) sides.add('sur');
+  }
+  return [...sides];
+}
+
 mapsRouter.post('/:mapId/salas/:roomId/imagen/generar', async (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   const room = map && getRoom(map.id, req.params.roomId);
@@ -370,7 +390,13 @@ mapsRouter.post('/:mapId/salas/:roomId/imagen/generar', async (req, res) => {
   if (!cleanPrompt) return res.status(400).json({ error: 'Describe la sala que quieres generar' });
 
   try {
-    const generated = await generateMapImage(provider, cleanPrompt);
+    // La forma de la sala y sus aberturas guían la imagen: un pasillo 8×2
+    // sale apaisado y las puertas quedan en el borde correcto
+    const generated = await generateMapImage(provider, cleanPrompt, {
+      width: room.width,
+      height: room.height,
+      openings: roomOpenings(map.id, room),
+    });
     saveRoomBackground(map, room, generated.buffer, '.png', res);
   } catch (error) {
     res.status(502).json({ error: error.message || 'No se pudo generar la imagen' });
