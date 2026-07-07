@@ -3,40 +3,29 @@ import { useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { disabledCellsToSet, cellKey } from '../domain/cells.js';
 
-function Wall({ position, scale }) {
-  return (
-    <mesh position={position} scale={scale} raycast={() => null}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#463526" roughness={0.95} />
-    </mesh>
-  );
-}
-
-// Construye una única geometría con un cuadrado por casilla activa (las
-// desactivadas se omiten, quedando como vacío/oscuro). Las UV de cada
-// casilla apuntan a su porción correspondiente de la textura compartida,
-// para que una imagen rectangular se "recorte" a la forma de la sala.
-function buildCellFloorGeometry(map) {
-  const cols = Math.ceil(map.width / map.gridSize);
-  const rows = Math.ceil(map.height / map.gridSize);
-  const disabled = disabledCellsToSet(map.disabledCells);
+// Construye la geometría del suelo de una sala: un cuadrado por casilla
+// activa (las desactivadas se omiten, quedando como vacío/oscuro). Las UV de
+// cada casilla apuntan a su porción de la textura de la sala, para que una
+// imagen rectangular se "recorte" a la forma de la sala.
+function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells }) {
+  const disabled = disabledCellsToSet(disabledCells);
   const positions = [];
   const uvs = [];
   const indices = [];
   let vertex = 0;
 
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      if (disabled.has(cellKey(col, row))) continue;
+  for (let r = 0; r < height; r += 1) {
+    for (let c = 0; c < width; c += 1) {
+      if (disabled.has(cellKey(c, r))) continue;
 
-      const x0 = col * map.gridSize;
-      const x1 = Math.min((col + 1) * map.gridSize, map.width);
-      const z0 = row * map.gridSize;
-      const z1 = Math.min((row + 1) * map.gridSize, map.height);
-      const u0 = x0 / map.width;
-      const u1 = x1 / map.width;
-      const v0 = 1 - z0 / map.height;
-      const v1 = 1 - z1 / map.height;
+      const x0 = (col + c) * gridSize;
+      const x1 = (col + c + 1) * gridSize;
+      const z0 = (row + r) * gridSize;
+      const z1 = (row + r + 1) * gridSize;
+      const u0 = c / width;
+      const u1 = (c + 1) / width;
+      const v0 = 1 - r / height;
+      const v1 = 1 - (r + 1) / height;
 
       positions.push(x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1);
       uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
@@ -56,18 +45,18 @@ function buildCellFloorGeometry(map) {
   return geometry;
 }
 
-function useCellFloorGeometry(map) {
+function useRoomGeometry(room, gridSize) {
   return useMemo(
-    () => buildCellFloorGeometry(map),
-    [map.disabledCells, map.gridSize, map.height, map.width]
+    () => buildRoomGeometry({ ...room, gridSize }),
+    [room.col, room.row, room.width, room.height, room.disabledCells, gridSize]
   );
 }
 
-function ImageFloor({ map }) {
-  const texture = useLoader(THREE.TextureLoader, map.backgroundUrl);
+function RoomImageFloor({ room, gridSize }) {
+  const texture = useLoader(THREE.TextureLoader, room.backgroundUrl);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
-  const geometry = useCellFloorGeometry(map);
+  const geometry = useRoomGeometry(room, gridSize);
 
   return (
     <mesh geometry={geometry} raycast={() => null}>
@@ -76,52 +65,44 @@ function ImageFloor({ map }) {
   );
 }
 
-// Los muebles y muros de ambientación solo tienen sentido para el rectángulo
-// completo de partida; en cuanto el DM personaliza la forma de la sala se
-// ocultan para no dar la falsa impresión de que las casillas apagadas siguen
-// formando parte de la sala.
-function ProceduralFloor({ map }) {
-  const geometry = useCellFloorGeometry(map);
-  const isDefaultShape = map.disabledCells.length === 0;
-
+function RoomPlainFloor({ room, gridSize }) {
+  const geometry = useRoomGeometry(room, gridSize);
   return (
-    <group>
-      <mesh geometry={geometry} raycast={() => null}>
-        <meshStandardMaterial color="#2b241d" roughness={1} metalness={0} />
-      </mesh>
-
-      {isDefaultShape && (
-        <>
-          <mesh position={[3.1, 0.025, 2.2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-            <planeGeometry args={[2.8, 1.6]} />
-            <meshStandardMaterial color="#352d24" roughness={1} />
-          </mesh>
-          <mesh position={[8.5, 0.03, 5.2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-            <circleGeometry args={[1.1, 24]} />
-            <meshStandardMaterial color="#1f2d2b" roughness={1} />
-          </mesh>
-
-          <Wall position={[map.width / 2, 0.18, -0.08]} scale={[map.width + 0.35, 0.35, 0.28]} />
-          <Wall position={[map.width / 2, 0.18, map.height + 0.08]} scale={[map.width + 0.35, 0.35, 0.28]} />
-          <Wall position={[-0.08, 0.18, map.height / 2]} scale={[0.28, 0.35, map.height + 0.35]} />
-          <Wall position={[map.width + 0.08, 0.18, map.height / 2]} scale={[0.28, 0.35, map.height + 0.35]} />
-
-          <Wall position={[6.5, 0.14, 1.55]} scale={[0.22, 0.28, 3.1]} />
-          <Wall position={[6.5, 0.14, 6.45]} scale={[0.22, 0.28, 2.7]} />
-        </>
-      )}
-    </group>
+    <mesh geometry={geometry} raycast={() => null}>
+      <meshStandardMaterial color="#2b241d" roughness={1} metalness={0} />
+    </mesh>
   );
 }
 
+// Suelo del tablero compuesto: cada sala visible se pinta por separado, con
+// su imagen (subida o generada en el editor) o con piedra lisa si no tiene.
 export default function MapFloor({ map }) {
-  if (map.backgroundUrl) {
-    return (
-      <Suspense fallback={null}>
-        <ImageFloor map={map} />
-      </Suspense>
-    );
-  }
+  // Compatibilidad con mapas sin salas (datos de prueba): un solo rectángulo
+  const rooms = map.rooms?.length
+    ? map.rooms
+    : [
+        {
+          id: 'board',
+          col: 0,
+          row: 0,
+          width: Math.ceil(map.width / map.gridSize),
+          height: Math.ceil(map.height / map.gridSize),
+          backgroundUrl: map.backgroundUrl || null,
+          disabledCells: map.disabledCells ?? [],
+        },
+      ];
 
-  return <ProceduralFloor map={map} />;
+  return (
+    <group>
+      {rooms.map((room) =>
+        room.backgroundUrl ? (
+          <Suspense key={room.id} fallback={<RoomPlainFloor room={room} gridSize={map.gridSize} />}>
+            <RoomImageFloor room={room} gridSize={map.gridSize} />
+          </Suspense>
+        ) : (
+          <RoomPlainFloor key={room.id} room={room} gridSize={map.gridSize} />
+        )
+      )}
+    </group>
+  );
 }

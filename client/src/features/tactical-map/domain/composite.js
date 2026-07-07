@@ -35,12 +35,6 @@ export function composeBoardFromMap(map) {
     }
   }
 
-  // El fondo de imagen solo puede cubrir el tablero entero: se conserva
-  // cuando la planta es una única sala (los mapas migrados de la fase 7).
-  // Con varias salas, cada una tendrá su propio suelo cuando el
-  // renderizador soporte suelos por sala.
-  const single = rooms.length === 1 ? rooms[0] : null;
-
   // Puertas con al menos un extremo en una sala visible de esta planta: un
   // marcador por extremo visible, en coordenadas del tablero compuesto.
   // (El servidor ya decidió qué puertas puede ver este usuario.)
@@ -69,8 +63,19 @@ export function composeBoardFromMap(map) {
     width: cols * map.gridSize,
     height: rows * map.gridSize,
     gridSize: map.gridSize,
-    backgroundUrl: single?.backgroundUrl || undefined,
     disabledCells,
+    // Salas en coordenadas del tablero compuesto, cada una con su propio
+    // suelo (imagen o color); el renderizador pinta una a una
+    rooms: rooms.map((r) => ({
+      id: r.id,
+      name: r.name,
+      col: r.x - minX,
+      row: r.y - minY,
+      width: r.width,
+      height: r.height,
+      backgroundUrl: r.backgroundUrl || null,
+      disabledCells: r.disabledCells,
+    })),
     // Origen de la planta que ocupa la casilla (0,0) del tablero compuesto,
     // por si hace falta volver a coordenadas absolutas del editor
     origin: { x: minX, y: minY },
