@@ -41,7 +41,29 @@ export function composeBoardFromMap(map) {
   // renderizador soporte suelos por sala.
   const single = rooms.length === 1 ? rooms[0] : null;
 
+  // Puertas con al menos un extremo en una sala visible de esta planta: un
+  // marcador por extremo visible, en coordenadas del tablero compuesto.
+  // (El servidor ya decidió qué puertas puede ver este usuario.)
+  const roomIds = new Set(rooms.map((r) => r.id));
+  const doors = [];
+  for (const door of map.doors ?? []) {
+    const sides = [];
+    if (roomIds.has(door.fromRoomId)) sides.push({ x: door.fromX, y: door.fromY });
+    if (roomIds.has(door.toRoomId)) sides.push({ x: door.toX, y: door.toY });
+    for (const side of sides) {
+      doors.push({
+        id: door.id,
+        kind: door.kind,
+        control: door.control,
+        isOpen: door.isOpen,
+        col: side.x - minX,
+        row: side.y - minY,
+      });
+    }
+  }
+
   return {
+    doors,
     name: map.name,
     floorName: floor.name,
     width: cols * map.gridSize,

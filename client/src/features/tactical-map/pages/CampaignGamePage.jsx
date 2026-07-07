@@ -22,6 +22,22 @@ export default function CampaignGamePage() {
   const [characters, setCharacters] = useState([]);
   const [campaignError, setCampaignError] = useState('');
   const [campaignLoading, setCampaignLoading] = useState(true);
+  const [doorError, setDoorError] = useState('');
+
+  // Abrir una puerta (o alternarla, si eres DM). El nuevo estado del mapa
+  // llega a todos —incluido quien pulsa— por el evento de socket.
+  async function openDoor(door) {
+    if (campaign?.role !== 'dm' && door.isOpen) return;
+    setDoorError('');
+    try {
+      await api(`/campaigns/${campaignId}/puertas/${door.id}/abrir`, {
+        method: 'POST',
+        body: { open: campaign?.role === 'dm' ? !door.isOpen : true },
+      });
+    } catch (error) {
+      setDoorError(error.message || 'No se pudo abrir la puerta.');
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +142,8 @@ export default function CampaignGamePage() {
           savingTokenId={savingTokenId}
           saveError={saveError}
           onMoveToken={moveToken}
+          onOpenDoor={openDoor}
+          doorError={doorError}
           backToCampaignHref={`/campanas/${campaignId}`}
           editorHref={`/campanas/${campaignId}/editor`}
         />

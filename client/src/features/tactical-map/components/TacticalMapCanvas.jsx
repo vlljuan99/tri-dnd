@@ -2,6 +2,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { canMoveToken } from '../domain/permissions.js';
+import MapDoor from './MapDoor.jsx';
 import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
 import MapToken from './MapToken.jsx';
@@ -42,6 +43,7 @@ export default function TacticalMapCanvas({
   cameraCommand,
   onSelectToken,
   onMoveToken,
+  onOpenDoor,
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -65,6 +67,9 @@ export default function TacticalMapCanvas({
       />
       <MapFloor map={map} />
       <MapGrid map={map} visible={showGrid} />
+      {(map.doors ?? []).map((door, index) => (
+        <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
+      ))}
       {map.tokens
         .filter((token) => token.visible)
         .map((token) => (

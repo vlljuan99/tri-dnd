@@ -36,6 +36,8 @@ export default function TacticalMap({
   savingTokenId,
   saveError,
   onMoveToken,
+  onOpenDoor,
+  doorError,
   backToCampaignHref,
   editorHref,
 }) {
@@ -75,6 +77,7 @@ export default function TacticalMap({
           cameraCommand={cameraCommand}
           onSelectToken={setSelectedTokenId}
           onMoveToken={onMoveToken}
+          onOpenDoor={onOpenDoor}
         />
       </CanvasErrorBoundary>
 
@@ -85,9 +88,10 @@ export default function TacticalMap({
             ? `${selectedToken.name} seleccionado · casilla ${selectedCell.col}, ${selectedCell.row}${
                 canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'
               }`
-            : 'Selecciona un token y pulsa una casilla.'}
+            : 'Selecciona un token y pulsa una casilla. Pulsa una puerta para abrirla.'}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
+        {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}
       </div>
 
       <div className="absolute right-3 top-3 z-10 hidden max-h-[42vh] w-56 overflow-y-auto rounded-sm border border-gold/20 bg-night-900/90 p-2 shadow-xl backdrop-blur md:block">
