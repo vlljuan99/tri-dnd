@@ -42,6 +42,11 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **"Ojo jugador"** en el tablero del DM: alterna su vista completa con la vista filtrada del grupo (`?vista=jugador`) para comprobar qué están viendo
   - Mejora futura (fase 12/pulido): memoria de zonas ya exploradas en penumbra
 
+- [x] **Combate en el tablero (primera iteración)** — con tu personaje seleccionado, pulsar un enemigo u otro PJ abre el panel de ataque con tus armas equipadas (y el golpe desarmado)
+  - El cliente tira los dados (se comparten en el chat), pero el **impacto lo resuelve el servidor contra la CA**, que el jugador nunca recibe; valida propiedad del personaje, planta y adyacencia en cuerpo a cuerpo
+  - El daño se aplica en servidor: enemigos por el tracker (sin revelar HP; al caer desaparecen del tablero y del tracker), personajes por su ficha (inconsciente a 0 HP); mensajes de sistema narran el combate
+  - Siguientes iteraciones: alcance real y línea de visión para armas a distancia, hechizos como ataque desde el tablero, ataques de monstruos con daño automático (hoy el DM usa su bloque de estadísticas y edita el tracker)
+
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
   - react-img-mapper + Framer Motion para el halo/zoom al hover y transición de entrada a escena
