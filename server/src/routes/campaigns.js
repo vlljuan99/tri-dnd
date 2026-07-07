@@ -208,14 +208,52 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     return res.status(400).json({ error: 'No puedes entrar en una zona sin descubrir' });
   }
 
+  // ¿La casilla de destino es el umbral de una puerta? Pisarla la cruza:
+  // si está cerrada y puede abrirse (control jugador, o cualquier puerta si
+  // eres DM), se abre revelando ambos lados, y el token aparece en el otro
+  // extremo — también entre plantas con escaleras y portales.
+  const door = db
+    .prepare(
+      `SELECT * FROM map_doors WHERE map_id = ? AND (
+         (from_room_id = ? AND from_x = ? AND from_y = ?) OR
+         (to_room_id = ? AND to_x = ? AND to_y = ?))`
+    )
+    .get(activeMapId, targetRoom.id, x, y, targetRoom.id, x, y);
+
+  let finalRoomId = targetRoom.id;
+  let finalX = x;
+  let finalY = y;
+  let newlyRevealed = [];
+  if (door && (door.is_open || isDm || door.control === 'jugador')) {
+    if (!door.is_open) {
+      newlyRevealed = db
+        .prepare('SELECT id FROM map_rooms WHERE id IN (?, ?) AND revealed = 0')
+        .all(door.from_room_id, door.to_room_id)
+        .map((r) => r.id);
+      db.prepare('UPDATE map_doors SET is_open = 1 WHERE id = ?').run(door.id);
+      db.prepare('UPDATE map_rooms SET revealed = 1 WHERE id IN (?, ?)').run(
+        door.from_room_id,
+        door.to_room_id
+      );
+    }
+    const isFromSide =
+      door.from_room_id === targetRoom.id && door.from_x === x && door.from_y === y;
+    finalRoomId = isFromSide ? door.to_room_id : door.from_room_id;
+    finalX = isFromSide ? door.to_x : door.from_x;
+    finalY = isFromSide ? door.to_y : door.from_y;
+  }
+
   db.prepare('UPDATE map_character_tokens SET room_id = ?, x = ?, y = ? WHERE id = ?').run(
-    targetRoom.id,
-    x,
-    y,
+    finalRoomId,
+    finalX,
+    finalY,
     token.id
   );
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
+  if (newlyRevealed.length && spawnRoomEnemies(req.params.id, newlyRevealed) > 0) {
+    notifyCombat(req.params.id);
+  }
   res.json({ ok: true });
 });
 
