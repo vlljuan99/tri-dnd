@@ -31,8 +31,12 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - [x] **Tokens de personaje persistidos por sala** (migración v10, `map_character_tokens`): aparición automática en la primera sala revelada, movimiento del dueño o el DM validado en servidor (casillas activas, salas reveladas para el jugador), avatar del personaje. El tablero ya no tiene datos de prueba
   - Usuarios de prueba locales: `dm-demo` / `jugador-demo` (contraseña `demo1234`), campaña "La Cripta del Umbral (demo)"
 
-- [ ] **Fase 7 (resto)** — Herramientas de mesa sobre el tablero: pathing automático que rodea obstáculos, medir distancia, ping y dibujo libre
-  - Cruzar de planta con el token por escaleras/portales (hoy el token se mueve dentro de su planta)
+- [ ] **Fase 7 (resto)** — Herramientas de mesa sobre el tablero
+  - [x] **Ping compartido** (doble clic): pulso efímero por socket que ve toda la mesa, sin tocar la base de datos
+  - [x] **Medir distancia** (modo "Medir"): dos clics, distancia en casillas y pies con la regla simplificada de 5e
+  - [x] **Cruzar puertas con el token**: pisar el umbral abre la puerta (si puede abrirse), revela el otro lado —enemigos al tracker— y teletransporta al otro extremo, también entre plantas por escaleras/portales; las puertas del DM cerradas no ceden
+  - [ ] Selector de planta en el tablero en vivo (hoy muestra la primera planta con salas visibles; al bajar al sótano el jugador sigue viendo la planta 1)
+  - [ ] Pathing automático que rodea obstáculos + dibujo libre del DM
 
 - [ ] **Fase 8** — Obstáculos, trampas y niebla de guerra (refinamiento del revelado por salas de la Fase 7.5)
   - Filtrado de datos **en el backend** según rol y área revelada (ver patrón ya usado con tiradas ocultas en `sockets.js`)
