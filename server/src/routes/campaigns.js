@@ -2,7 +2,14 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { getActiveMapId, getMap, serializeFullMap, serializeMapForPlayer } from '../services/mapLibrary.js';
+import {
+  getActiveMapId,
+  getMap,
+  serializeFullMap,
+  serializeMapForPlayer,
+  touchMap,
+} from '../services/mapLibrary.js';
+import { notifyCampaignMap } from '../services/liveMap.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -147,5 +154,49 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
         ? serializeFullMap(map, req.params.id)
         : serializeMapForPlayer(map),
   });
+});
+
+// Abrir (o cerrar, solo el DM) una puerta del mapa activo desde la mesa.
+// Abrirla revela las salas de ambos lados: así se descubre el tablero de
+// detrás al entrar por una puerta. El jugador solo puede abrir puertas de
+// control 'jugador' que tocan una sala ya revelada; las del DM (llave,
+// secretas) ni siquiera le llegan al socket mientras estén cerradas.
+campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  const isDm = membership.role === 'dm';
+  const open = req.body?.open !== false;
+
+  const activeMapId = getActiveMapId(req.params.id);
+  const door = activeMapId
+    ? db.prepare('SELECT * FROM map_doors WHERE id = ? AND map_id = ?').get(req.params.doorId, activeMapId)
+    : undefined;
+  if (!door) return res.status(404).json({ error: 'Puerta no encontrada en el mapa activo' });
+
+  if (!isDm) {
+    if (!open) return res.status(403).json({ error: 'Solo el DM puede cerrar puertas' });
+    if (door.control !== 'jugador') {
+      return res.status(403).json({ error: 'La puerta no cede: está cerrada con llave o atrancada' });
+    }
+    const revealedSides = db
+      .prepare('SELECT COUNT(*) AS n FROM map_rooms WHERE id IN (?, ?) AND revealed = 1')
+      .get(door.from_room_id, door.to_room_id).n;
+    if (revealedSides === 0) return res.status(403).json({ error: 'No ves ninguna puerta ahí' });
+  }
+
+  db.transaction(() => {
+    db.prepare('UPDATE map_doors SET is_open = ? WHERE id = ?').run(open ? 1 : 0, door.id);
+    if (open) {
+      db.prepare('UPDATE map_rooms SET revealed = 1 WHERE id IN (?, ?)').run(
+        door.from_room_id,
+        door.to_room_id
+      );
+    }
+  })();
+  touchMap(activeMapId);
+  notifyCampaignMap(req.params.id);
+
+  const map = getMap(req.params.id, activeMapId);
+  res.json({ map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map) });
 });
 

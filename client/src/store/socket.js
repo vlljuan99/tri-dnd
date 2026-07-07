@@ -15,11 +15,33 @@ export const useRoom = create((set, get) => ({
   online: [],
   joinError: null,
   combat: { active: false, round: 1, turnId: null, combatants: [] },
+  // Contador que sube cuando el servidor avisa de que el mapa activo cambió;
+  // quien muestre el mapa lo observa y vuelve a pedir /mapa-activo
+  mapVersion: 0,
 
   ensureSocket() {
     if (socket) return socket;
     socket = io({ withCredentials: true });
-    socket.on('connect', () => set({ connected: true }));
+    socket.on('connect', () => {
+      set({ connected: true });
+      // Tras una reconexión (p. ej. reinicio del servidor) hay que volver a
+      // entrar en la sala: el servidor ya no recuerda a este socket
+      const { campaignId } = get();
+      if (campaignId) {
+        socket.emit('room:join', { campaignId }, (resp) => {
+          if (!resp?.error) {
+            set((s) => ({
+              role: resp.role,
+              isLive: resp.isLive,
+              campaignName: resp.campaignName,
+              online: resp.members,
+              combat: resp.combat ?? s.combat,
+              mapVersion: s.mapVersion + 1,
+            }));
+          }
+        });
+      }
+    });
     socket.on('disconnect', () => set({ connected: false, online: [] }));
     socket.on('chat:new', (message) => {
       set((s) => ({ messages: [...s.messages.slice(-199), message] }));
@@ -27,6 +49,7 @@ export const useRoom = create((set, get) => ({
     socket.on('room:members', (online) => set({ online }));
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
+    socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
     return socket;
   },
 

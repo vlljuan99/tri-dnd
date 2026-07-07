@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import { useAuth } from '../../../store/auth.js';
+import { useRoom } from '../../../store/socket.js';
 import TacticalMap from '../components/TacticalMap.jsx';
 import { useTacticalMap } from '../hooks/useTacticalMap.js';
 
@@ -9,6 +10,14 @@ export default function CampaignGamePage() {
   const { id } = useParams();
   const campaignId = Number(id);
   const user = useAuth((state) => state.user);
+  const joinRoom = useRoom((s) => s.joinRoom);
+  const mapVersion = useRoom((s) => s.mapVersion);
+
+  // Unirse a la sala de la campaña para recibir 'mapa:actualizado' aunque
+  // se llegue al tablero directamente, sin pasar por la mesa
+  useEffect(() => {
+    joinRoom(campaignId);
+  }, [campaignId, joinRoom]);
   const [campaign, setCampaign] = useState(null);
   const [characters, setCharacters] = useState([]);
   const [campaignError, setCampaignError] = useState('');
@@ -50,6 +59,7 @@ export default function CampaignGamePage() {
     role: campaign?.role,
     characters,
     enabled: Boolean(campaign),
+    version: mapVersion,
   });
 
   if (campaignLoading) {

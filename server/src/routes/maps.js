@@ -17,6 +17,14 @@ import {
   serializeDoor,
   serializeFullMap,
 } from '../services/mapLibrary.js';
+import { notifyCampaignMap, notifyIfActive } from '../services/liveMap.js';
+
+// Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
+// sockets de la campaña para que recarguen su vista (ya filtrada por rol)
+function touchAndNotify(map) {
+  touchMap(map.id);
+  notifyIfActive(map.campaign_id, map.id);
+}
 
 // Biblioteca de mapas del editor de campaña (Fase 7.5). Solo el DM pasa por
 // aquí, incluso en lectura: los jugadores reciben el mapa activo ya filtrado
@@ -132,6 +140,7 @@ mapsRouter.patch('/:mapId', (req, res) => {
   db.prepare(
     "UPDATE maps SET name = COALESCE(?, name), grid_size = COALESCE(?, grid_size), updated_at = datetime('now') WHERE id = ?"
   ).run(name !== undefined ? name.trim().slice(0, 80) : null, gridSize ?? null, map.id);
+  notifyIfActive(map.campaign_id, map.id);
 
   res.json({ map: serializeFullMap(getMap(req.params.campaignId, map.id), req.params.campaignId) });
 });
@@ -141,12 +150,14 @@ mapsRouter.delete('/:mapId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
 
+  const wasActive = getActiveMapId(req.params.campaignId) === map.id;
   db.transaction(() => {
     db.prepare(
       "UPDATE game_tables SET active_map_id = NULL, updated_at = datetime('now') WHERE campaign_id = ? AND active_map_id = ?"
     ).run(req.params.campaignId, map.id);
     db.prepare('DELETE FROM maps WHERE id = ?').run(map.id);
   })();
+  if (wasActive) notifyCampaignMap(map.campaign_id);
   res.json({ ok: true });
 });
 
@@ -157,6 +168,7 @@ mapsRouter.post('/:mapId/activar', (req, res) => {
   db.prepare(
     "UPDATE game_tables SET active_map_id = ?, updated_at = datetime('now') WHERE campaign_id = ?"
   ).run(map.id, req.params.campaignId);
+  notifyCampaignMap(map.campaign_id);
   res.json({ map: serializeFullMap(map, req.params.campaignId) });
 });
 
@@ -179,7 +191,7 @@ mapsRouter.post('/:mapId/plantas', (req, res) => {
     cleanName,
     position
   );
-  touchMap(map.id);
+  touchAndNotify(map);
   res.status(201).json({ map: serializeFullMap(map, req.params.campaignId) });
 });
 
@@ -193,7 +205,7 @@ mapsRouter.patch('/:mapId/plantas/:floorId', (req, res) => {
     return res.status(400).json({ error: 'La planta necesita un nombre' });
   }
   db.prepare('UPDATE map_floors SET name = ? WHERE id = ?').run(name.trim().slice(0, 80), floor.id);
-  touchMap(map.id);
+  touchAndNotify(map);
   res.json({ map: serializeFullMap(map, req.params.campaignId) });
 });
 
@@ -208,7 +220,7 @@ mapsRouter.delete('/:mapId/plantas/:floorId', (req, res) => {
   }
   // Borra en cascada sus salas y las puertas que tocaban esas salas
   db.prepare('DELETE FROM map_floors WHERE id = ?').run(floor.id);
-  touchMap(map.id);
+  touchAndNotify(map);
   res.json({ map: serializeFullMap(map, req.params.campaignId) });
 });
 
@@ -236,7 +248,7 @@ mapsRouter.post('/:mapId/plantas/:floorId/salas', (req, res) => {
   const info = db
     .prepare('INSERT INTO map_rooms (floor_id, name, x, y, width, height) VALUES (?, ?, ?, ?, ?, ?)')
     .run(floor.id, cleanName, x, y, width, height);
-  touchMap(map.id);
+  touchAndNotify(map);
 
   const room = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ room: serializeRoom(room) });
@@ -287,7 +299,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
     room.id
   );
-  touchMap(map.id);
+  touchAndNotify(map);
 
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
   res.json({ room: serializeRoom(updated) });
@@ -300,7 +312,7 @@ mapsRouter.delete('/:mapId/salas/:roomId', (req, res) => {
 
   // Las puertas que tocaban esta sala caen en cascada (FK)
   db.prepare('DELETE FROM map_rooms WHERE id = ?').run(room.id);
-  touchMap(map.id);
+  touchAndNotify(map);
   res.json({ ok: true });
 });
 
@@ -313,7 +325,7 @@ function saveRoomBackground(map, room, buffer, extension, res) {
     `/uploads/maps/${filename}`,
     room.id
   );
-  touchMap(map.id);
+  touchAndNotify(map);
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
   res.json({ room: serializeRoom(updated) });
 }
@@ -362,7 +374,7 @@ mapsRouter.delete('/:mapId/salas/:roomId/imagen', (req, res) => {
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
   db.prepare('UPDATE map_rooms SET background_url = NULL WHERE id = ?').run(room.id);
-  touchMap(map.id);
+  touchAndNotify(map);
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
   res.json({ room: serializeRoom(updated) });
 });
@@ -416,7 +428,7 @@ mapsRouter.post('/:mapId/puertas', (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(map.id, fromRoom.id, toRoom.id, fromX, fromY, toX, toY, kind, control);
-  touchMap(map.id);
+  touchAndNotify(map);
 
   const door = db.prepare('SELECT * FROM map_doors WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ door: serializeDoor(door) });
@@ -451,7 +463,7 @@ mapsRouter.patch('/:mapId/puertas/:doorId', (req, res) => {
     isOpen !== undefined ? Number(Boolean(isOpen)) : door.is_open,
     door.id
   );
-  touchMap(map.id);
+  touchAndNotify(map);
 
   const updated = db.prepare('SELECT * FROM map_doors WHERE id = ?').get(door.id);
   res.json({ door: serializeDoor(updated) });
@@ -464,6 +476,6 @@ mapsRouter.delete('/:mapId/puertas/:doorId', (req, res) => {
   if (!door) return res.status(404).json({ error: 'Puerta no encontrada' });
 
   db.prepare('DELETE FROM map_doors WHERE id = ?').run(door.id);
-  touchMap(map.id);
+  touchAndNotify(map);
   res.json({ ok: true });
 });

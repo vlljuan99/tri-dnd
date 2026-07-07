@@ -10,6 +10,7 @@ import { charactersRouter } from './routes/characters.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { mapsRouter } from './routes/maps.js';
 import { setupSockets } from './sockets.js';
+import { bindIo } from './services/liveMap.js';
 
 runMigrations();
 
@@ -31,6 +32,7 @@ const server = http.createServer(app);
 
 export const io = new SocketServer(server);
 setupSockets(io);
+bindIo(io);
 
 server.listen(PORT, () => {
   const srdCount = db.prepare('SELECT COUNT(*) AS n FROM srd_entries').get().n;
