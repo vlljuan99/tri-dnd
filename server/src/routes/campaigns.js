@@ -73,7 +73,9 @@ campaignsRouter.post('/', (req, res) => {
       );
     const id = info.lastInsertRowid;
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
-    db.prepare('INSERT INTO game_tables (campaign_id) VALUES (?)').run(id);
+    // combat_active nace en 1: el modo por turnos está activo por defecto
+    // en toda mesa nueva (Fase 8.5); el DM lo alterna a modo libre cuando quiera.
+    db.prepare('INSERT INTO game_tables (campaign_id, combat_active) VALUES (?, 1)').run(id);
     return id;
   });
   const id = create();

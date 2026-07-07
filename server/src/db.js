@@ -304,6 +304,22 @@ const migrations = [
     CHECK (vision_mode IN ('sala', 'compartida', 'individual'));
   ALTER TABLE maps ADD COLUMN vision_radius INTEGER NOT NULL DEFAULT 6;
   `,
+
+  // v14 — Fase 8.5: economía de turno de verdad. El modo por turnos pasa a
+  // ser el estado por defecto de toda mesa (antes combat_active solo movía
+  // el tracker, sin bloquear nada); las mesas ya existentes se activan aquí.
+  // Cada combatiente lleva sus recursos del turno: casillas de movimiento
+  // gastadas (se resetean al empezar SU turno), y si ya ha usado su acción y
+  // su acción adicional (también por turno). La reacción es por RONDA, no
+  // por turno, y se puede gastar fuera de tu turno: se guarda en qué ronda
+  // se gastó por última vez y se compara con game_tables.combat_round.
+  `
+  UPDATE game_tables SET combat_active = 1;
+  ALTER TABLE combatants ADD COLUMN moved_squares INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN action_used INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN bonus_used INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN reaction_used_round INTEGER;
+  `,
 ];
 
 export function runMigrations() {
