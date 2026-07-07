@@ -135,17 +135,31 @@ mapsRouter.patch('/:mapId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
 
-  const { name, gridSize } = req.body ?? {};
+  const { name, gridSize, visionMode, visionRadius } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El mapa necesita un nombre' });
   }
   if (gridSize !== undefined && (!Number.isFinite(gridSize) || gridSize <= 0 || gridSize > 10)) {
     return res.status(400).json({ error: 'Tamaño de casilla no válido' });
   }
+  if (visionMode !== undefined && !['sala', 'compartida', 'individual'].includes(visionMode)) {
+    return res.status(400).json({ error: 'Modo de visión no válido' });
+  }
+  if (visionRadius !== undefined && (!Number.isInteger(visionRadius) || visionRadius < 1 || visionRadius > 30)) {
+    return res.status(400).json({ error: 'El radio de visión debe ser un entero entre 1 y 30 casillas' });
+  }
 
   db.prepare(
-    "UPDATE maps SET name = COALESCE(?, name), grid_size = COALESCE(?, grid_size), updated_at = datetime('now') WHERE id = ?"
-  ).run(name !== undefined ? name.trim().slice(0, 80) : null, gridSize ?? null, map.id);
+    `UPDATE maps SET name = COALESCE(?, name), grid_size = COALESCE(?, grid_size),
+       vision_mode = COALESCE(?, vision_mode), vision_radius = COALESCE(?, vision_radius),
+       updated_at = datetime('now') WHERE id = ?`
+  ).run(
+    name !== undefined ? name.trim().slice(0, 80) : null,
+    gridSize ?? null,
+    visionMode ?? null,
+    visionRadius ?? null,
+    map.id
+  );
   notifyIfActive(map.campaign_id, map.id);
 
   res.json({ map: serializeFullMap(getMap(req.params.campaignId, map.id), req.params.campaignId) });

@@ -528,6 +528,45 @@ export default function MapEditorPage() {
                   <p className="mt-1 text-[0.65rem] uppercase tracking-widest text-sage">● En la mesa</p>
                 )}
               </div>
+
+              <div className="border-t border-gold/15 pt-3">
+                <p className="text-[0.65rem] uppercase tracking-widest text-bone/50">
+                  Visión de los jugadores
+                </p>
+                <select
+                  value={map.visionMode ?? 'sala'}
+                  onChange={(e) => editor.patchMap(map.id, { visionMode: e.target.value }).catch(() => {})}
+                  className="mt-1 w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none"
+                >
+                  <option value="sala">Sala completa (sin niebla fina)</option>
+                  <option value="compartida">Compartida: lo que ve el grupo</option>
+                  <option value="individual">Individual: cada cual lo suyo</option>
+                </select>
+                {map.visionMode !== 'sala' && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-bone/70">
+                    Radio de visión
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      defaultValue={map.visionRadius ?? 6}
+                      key={`radius-${map.id}-${map.visionRadius}`}
+                      onBlur={(e) => {
+                        const value = Number.parseInt(e.target.value, 10);
+                        if (Number.isInteger(value) && value !== map.visionRadius) {
+                          editor.patchMap(map.id, { visionRadius: value }).catch(() => {});
+                        }
+                      }}
+                      className="w-16 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-sm text-bone focus:border-gold focus:outline-none"
+                    />
+                    casillas
+                  </label>
+                )}
+                <p className="mt-1 text-[0.65rem] text-bone/45">
+                  Con niebla fina, los obstáculos y las paredes bloquean la línea de visión.
+                </p>
+              </div>
+
               <ul className="list-inside list-disc space-y-1 text-xs">
                 <li>Arrastra una sala para recolocarla; combina pasillos y salones pegándolos.</li>
                 <li>Las salas <span className="text-bone">ocultas</span> (borde discontinuo) no existen para los jugadores hasta que las reveles.</li>

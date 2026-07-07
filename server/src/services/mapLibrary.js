@@ -263,6 +263,8 @@ export function serializeFullMap(map, campaignId) {
     id: map.id,
     name: map.name,
     gridSize: map.grid_size,
+    visionMode: map.vision_mode,
+    visionRadius: map.vision_radius,
     isActive: getActiveMapId(campaignId) === map.id,
     floors: floors.map((f) => ({
       id: f.id,

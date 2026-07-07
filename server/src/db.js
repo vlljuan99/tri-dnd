@@ -292,6 +292,18 @@ const migrations = [
   `
   ALTER TABLE map_rooms ADD COLUMN obstacle_cells TEXT NOT NULL DEFAULT '[]';
   `,
+
+  // v13 — Fase 8: niebla fina configurable por mapa (escena). vision_mode:
+  // 'sala' = se ve toda sala revelada (comportamiento clásico);
+  // 'compartida' = se ve lo que ve el grupo entero (unión de visiones);
+  // 'individual' = cada jugador solo ve lo que ven sus personajes.
+  // vision_radius en casillas; obstáculos y paredes bloquean la línea de
+  // visión. El filtrado ocurre en el servidor, como todo lo oculto.
+  `
+  ALTER TABLE maps ADD COLUMN vision_mode TEXT NOT NULL DEFAULT 'sala'
+    CHECK (vision_mode IN ('sala', 'compartida', 'individual'));
+  ALTER TABLE maps ADD COLUMN vision_radius INTEGER NOT NULL DEFAULT 6;
+  `,
 ];
 
 export function runMigrations() {

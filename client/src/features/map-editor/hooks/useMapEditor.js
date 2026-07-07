@@ -96,6 +96,7 @@ export function useMapEditor(campaignId) {
         return created;
       }),
     renameMap: (mapId, name) => mutate(() => api(`${base}/${mapId}`, { method: 'PATCH', body: { name } })),
+    patchMap: (mapId, fields) => mutate(() => api(`${base}/${mapId}`, { method: 'PATCH', body: fields })),
     deleteMap: (mapId) =>
       mutate(async () => {
         await api(`${base}/${mapId}`, { method: 'DELETE' });
