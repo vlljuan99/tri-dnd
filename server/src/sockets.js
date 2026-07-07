@@ -7,6 +7,16 @@ import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership } from './routes/campaigns.js';
 import { bindCombatBroadcaster, notifyCampaignMap } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
+import {
+  orderedCombatants,
+  rollInitiativeValue,
+  startTurnFor,
+  ensureTurnStarted,
+  activateTurnMode,
+  deactivateTurnMode,
+  trySpendAction,
+  endCombatIfNoEnemiesLeft,
+} from './services/turnEconomy.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
@@ -48,26 +58,26 @@ function recentMessages(campaignId, { includeHidden, userId }) {
 
 // --- Tracker de iniciativa ------------------------------------------------
 
-function orderedCombatants(campaignId) {
-  return db
-    .prepare('SELECT * FROM combatants WHERE campaign_id = ? ORDER BY initiative DESC, id ASC')
-    .all(campaignId);
-}
-
 // Vista de un combatiente según quién la recibe: el HP/CA exacto de los
 // enemigos solo llega al socket del DM, nunca al de los jugadores (mismo
-// patrón que las tiradas ocultas: el filtrado ocurre en el backend).
-function combatantView(row, { isDm }) {
+// patrón que las tiradas ocultas: el filtrado ocurre en el backend). Los
+// recursos del turno (movimiento/acción/acción adicional/reacción) sí
+// viajan a todos: son necesarios para saber qué puede hacer cada cual.
+function combatantView(row, { isDm, round }) {
   const base = {
     id: row.id,
     kind: row.kind,
     name: row.name,
     initiative: row.initiative,
     characterId: row.character_id,
+    movedSquares: row.moved_squares,
+    actionUsed: Boolean(row.action_used),
+    bonusUsed: Boolean(row.bonus_used),
+    reactionAvailable: row.reaction_used_round !== round,
   };
   if (row.kind === 'pj' && row.character_id) {
-    const c = db.prepare('SELECT hp_current, hp_max, ac FROM characters WHERE id = ?').get(row.character_id);
-    if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac });
+    const c = db.prepare('SELECT hp_current, hp_max, ac, speed FROM characters WHERE id = ?').get(row.character_id);
+    if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac, speed: c.speed });
   } else if (row.kind === 'enemigo' && isDm) {
     Object.assign(base, { hpCurrent: row.hp_current, hpMax: row.hp_max, ac: row.ac, monsterIndex: row.monster_index });
   }
@@ -78,11 +88,12 @@ function combatStateFor(campaignId, isDm) {
   const table = db
     .prepare('SELECT combat_active, combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
+  const round = table?.combat_round ?? 1;
   return {
     active: Boolean(table?.combat_active),
-    round: table?.combat_round ?? 1,
+    round,
     turnId: table?.combat_turn_id ?? null,
-    combatants: orderedCombatants(campaignId).map((r) => combatantView(r, { isDm })),
+    combatants: orderedCombatants(campaignId).map((r) => combatantView(r, { isDm, round })),
   };
 }
 
@@ -318,7 +329,6 @@ export function setupSockets(io) {
       const cleanKind = kind === 'pj' ? 'pj' : 'enemigo';
       const cleanName = typeof name === 'string' ? name.trim().slice(0, 60) : '';
       if (!cleanName) return cb?.({ error: 'El combatiente necesita un nombre' });
-      const init = Number.isInteger(initiative) ? initiative : 0;
 
       let charId = null;
       if (cleanKind === 'pj' && Number.isInteger(characterId)) {
@@ -335,9 +345,15 @@ export function setupSockets(io) {
         if (monster) monsterIdx = monster.idx;
       }
 
+      // Si el DM no fija una iniciativa concreta, se tira sola (1d20+DES)
+      const init = Number.isInteger(initiative)
+        ? initiative
+        : rollInitiativeValue({ kind: cleanKind, character_id: charId, monster_index: monsterIdx });
+
       db.prepare(
         'INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current, hp_max, ac, monster_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
       ).run(campaignId, charId, cleanKind, cleanName, init, hpC, hpM, acVal, monsterIdx);
+      ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
@@ -354,11 +370,14 @@ export function setupSockets(io) {
           .map((r) => r.character_id)
       );
       const insert = db.prepare(
-        "INSERT INTO combatants (campaign_id, character_id, kind, name, initiative) VALUES (?, ?, 'pj', ?, 0)"
+        "INSERT INTO combatants (campaign_id, character_id, kind, name, initiative) VALUES (?, ?, 'pj', ?, ?)"
       );
       for (const c of characters) {
-        if (!existingIds.has(c.id)) insert.run(campaignId, c.id, c.name);
+        if (!existingIds.has(c.id)) {
+          insert.run(campaignId, c.id, c.name, rollInitiativeValue({ kind: 'pj', character_id: c.id }));
+        }
       }
+      ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
@@ -438,10 +457,9 @@ export function setupSockets(io) {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede iniciar el combate' });
 
-      const first = orderedCombatants(campaignId)[0];
-      db.prepare(
-        'UPDATE game_tables SET combat_active = 1, combat_round = 1, combat_turn_id = ? WHERE campaign_id = ?'
-      ).run(first?.id ?? null, campaignId);
+      // Arranque fresco: tira iniciativa para todos los presentes y resetea
+      // sus recursos, aunque ya llevaran un rato en el tracker
+      activateTurnMode(campaignId);
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha comenzado' });
       io.to(roomName(campaignId)).emit('chat:new', note);
@@ -449,12 +467,12 @@ export function setupSockets(io) {
       cb?.({ ok: true });
     });
 
-    socket.on('combat:next', ({ campaignId }, cb) => {
-      const membership = getMembership(campaignId, user.id);
-      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede avanzar el turno' });
-
+    // Avanza al siguiente combatiente por iniciativa, saltando de ronda al
+    // dar la vuelta, y resetea sus recursos del turno. Compartido por
+    // combat:next (solo DM) y combat:end-turn (el propio jugador o el DM).
+    function advanceTurn(campaignId) {
       const list = orderedCombatants(campaignId);
-      if (list.length === 0) return cb?.({ error: 'No hay combatientes' });
+      if (list.length === 0) return { error: 'No hay combatientes' };
 
       const table = db.prepare('SELECT combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
       const idx = list.findIndex((c) => c.id === table?.combat_turn_id);
@@ -462,13 +480,66 @@ export function setupSockets(io) {
       const wrapped = idx !== -1 && nextIdx === 0;
       const nextRound = (table?.combat_round ?? 1) + (wrapped ? 1 : 0);
 
-      db.prepare('UPDATE game_tables SET combat_turn_id = ?, combat_round = ? WHERE campaign_id = ?').run(
-        list[nextIdx].id,
-        nextRound,
-        campaignId
-      );
+      startTurnFor(campaignId, list[nextIdx].id, nextRound);
+      return { ok: true };
+    }
+
+    socket.on('combat:next', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede avanzar el turno' });
+
+      const result = advanceTurn(campaignId);
+      if (result.error) return cb?.(result);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
+    });
+
+    // Termina tu propio turno: lo puede pulsar quien tiene el turno (el
+    // dueño del PJ activo) o siempre el DM, por si controla el combatiente
+    // activo (un enemigo) o el jugador no está disponible.
+    socket.on('combat:end-turn', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      if (membership.role !== 'dm') {
+        const table = db.prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
+        const active = table?.combat_turn_id
+          ? db.prepare('SELECT * FROM combatants WHERE id = ?').get(table.combat_turn_id)
+          : null;
+        const owns =
+          active?.kind === 'pj' &&
+          active.character_id &&
+          db.prepare('SELECT 1 FROM characters WHERE id = ? AND user_id = ?').get(active.character_id, user.id);
+        if (!owns) return cb?.({ error: 'No es tu turno' });
+      }
+
+      const result = advanceTurn(campaignId);
+      if (result.error) return cb?.(result);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    // Alterna entre modo por turnos (bloquea movimiento/acción fuera de tu
+    // turno) y modo libre (sin restricciones), sin vaciar el tracker.
+    socket.on('combat:toggle-mode', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede cambiar el modo de la mesa' });
+
+      const table = db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId);
+      const turningOn = !table?.combat_active;
+
+      let body;
+      if (turningOn) {
+        activateTurnMode(campaignId);
+        body = 'Modo por turnos activado: movimiento y acciones solo en tu turno.';
+      } else {
+        deactivateTurnMode(campaignId);
+        body = 'Modo libre: movimiento y acciones sin restricción de turno.';
+      }
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, active: turningOn });
     });
 
     socket.on('combat:end', ({ campaignId }, cb) => {
