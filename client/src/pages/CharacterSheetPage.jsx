@@ -1,28 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import {
   ABILITIES,
   SKILLS,
-  DAMAGE_TYPE_NAMES,
   SCHOOL_NAMES,
   abilityModifier,
   proficiencyBonus,
   formatModifier,
   saveBonus,
   skillBonus,
-  weaponAttackBonus,
-  weaponDamageModifier,
   spellAttackBonus,
   spellSaveDC,
-  cantripDamageAtLevel,
 } from '../lib/dnd.js';
-import { rollAttack, rollDamage } from '../lib/dice.js';
+import { rollAttack } from '../lib/dice.js';
+import { castSpellRoll } from '../lib/spellcasting.js';
 import { uploadCharacterAvatar, generateCharacterAvatar, removeCharacterAvatar } from '../lib/characterAvatar.js';
+import { useCharacter } from '../hooks/useCharacter.js';
 import { useDice } from '../store/dice.js';
 import { useRoom } from '../store/socket.js';
 import SrdPicker from '../components/SrdPicker.jsx';
 import RollCard from '../components/RollCard.jsx';
+import WeaponRow from '../components/WeaponRow.jsx';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 
@@ -58,75 +57,9 @@ function NumberField({ label, value, onChange, min = 0, max = 999, disabled, mon
   );
 }
 
-function WeaponRow({ item, char, onRoll, disabled }) {
-  const [twoHanded, setTwoHanded] = useState(false);
-  const w = item.weapon;
-  const bonus = weaponAttackBonus(char, w);
-  const dmgMod = weaponDamageModifier(char, w);
-  const dice = twoHanded && w.versatileDice ? w.versatileDice : w.damageDice;
-  const typeName = DAMAGE_TYPE_NAMES[w.damageType] ?? '';
-
-  function attack(advantage) {
-    onRoll(rollAttack(bonus, { advantage, label: `${item.name} — ataque`, actorName: char.name }));
-  }
-  function damage(crit) {
-    onRoll(
-      rollDamage(dice, {
-        modifier: dmgMod,
-        crit,
-        label: `${item.name} — daño${typeName ? ` (${typeName})` : ''}${crit ? ' crítico' : ''}`,
-        actorName: char.name,
-      })
-    );
-  }
-
-  return (
-    <div className="rounded-sm border border-bone/10 bg-night-950/50 p-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="font-medium">{item.name}</span>
-        <span className="font-mono text-sm text-bone/70">
-          {formatModifier(bonus)} · {dice}
-          {dmgMod !== 0 ? formatModifier(dmgMod) : ''} {typeName}
-        </span>
-      </div>
-      {w.versatileDice && (
-        <label className="mt-1 flex items-center gap-2 text-xs text-bone/60">
-          <input
-            type="checkbox"
-            checked={twoHanded}
-            onChange={(e) => setTwoHanded(e.target.checked)}
-            className="accent-gold"
-          />
-          A dos manos ({w.versatileDice})
-        </label>
-      )}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <button onClick={() => attack('dis')} disabled={disabled} className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40">
-          Desv.
-        </button>
-        <button onClick={() => attack('none')} disabled={disabled} className="rounded-sm border border-gold/50 px-3 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40">
-          Atacar
-        </button>
-        <button onClick={() => attack('adv')} disabled={disabled} className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40">
-          Vent.
-        </button>
-        <span className="mx-1 text-bone/20">|</span>
-        <button onClick={() => damage(false)} disabled={disabled} className="rounded-sm border border-bone/30 px-3 py-1 text-xs hover:bg-bone/10 disabled:opacity-40">
-          Daño
-        </button>
-        <button onClick={() => damage(true)} disabled={disabled} className="rounded-sm border border-gold/40 px-2 py-1 text-xs text-gold/90 hover:bg-gold/10 disabled:opacity-40">
-          ¡Crítico!
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function CharacterSheetPage() {
   const { id } = useParams();
-  const [char, setChar] = useState(null);
-  const [editable, setEditable] = useState(false);
-  const [saveState, setSaveState] = useState('saved'); // saved | pending | saving | error
+  const { char, editable, saveState, error, patch } = useCharacter(id);
   const [classes, setClasses] = useState([]);
   const [races, setRaces] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -134,28 +67,19 @@ export default function CharacterSheetPage() {
   const [customItem, setCustomItem] = useState('');
   const [customProficiency, setCustomProficiency] = useState('');
   const [lastRoll, setLastRoll] = useState(null);
-  const [error, setError] = useState('');
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
 
-  const pendingRef = useRef({});
-  const timerRef = useRef(null);
   const joinRoom = useRoom((s) => s.joinRoom);
   const submitRoll = useDice((s) => s.submitRoll);
   const [searchParams, setSearchParams] = useSearchParams();
   const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
-    api(`/characters/${id}`)
-      .then(({ character, editable }) => {
-        setChar(character);
-        setEditable(editable);
-      })
-      .catch((e) => setError(e.message));
     api('/srd/classes').then(({ results }) => setClasses(results));
     api('/srd/races').then(({ results }) => setRaces(results));
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch(() => {});
-  }, [id]);
+  }, []);
 
   // Tras finalizar el asistente llegamos con ?tutorial=1: mostramos la guía
   // contextual solo si el usuario no la ha visto antes en este navegador.
@@ -178,34 +102,12 @@ export default function CharacterSheetPage() {
     if (char?.campaign_id) joinRoom(char.campaign_id);
   }, [char?.campaign_id, joinRoom]);
 
-  async function flush() {
-    const body = pendingRef.current;
-    pendingRef.current = {};
-    if (Object.keys(body).length === 0) return;
-    setSaveState('saving');
-    try {
-      await api(`/characters/${id}`, { method: 'PUT', body });
-      setSaveState('saved');
-    } catch {
-      setSaveState('error');
-      Object.assign(pendingRef.current, body); // reintentar con el siguiente cambio
-    }
-  }
-
-  function patch(fields) {
-    setChar((c) => ({ ...c, ...fields }));
-    Object.assign(pendingRef.current, fields);
-    setSaveState('pending');
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(flush, 800);
-  }
-
   async function runAvatarAction(action) {
     setAvatarBusy(true);
     setAvatarError('');
     try {
       const updated = await action();
-      setChar((c) => ({ ...c, avatar_path: updated.avatar_path }));
+      patch({ avatar_path: updated.avatar_path });
     } catch (e) {
       setAvatarError(e.message || 'No se pudo actualizar el icono.');
     } finally {
@@ -326,35 +228,8 @@ export default function CharacterSheetPage() {
   }
 
   async function castSpell(spell, mode) {
-    const dcText = spell.dc
-      ? ` (CD ${spellSaveDC(char)} ${ABILITIES.find((a) => a.key === spell.dc)?.short ?? ''})`
-      : '';
-    if (mode === 'attack') {
-      onRoll(rollAttack(spellAttackBonus(char), { label: `${spell.name} — ataque de conjuro`, actorName: char.name }));
-      return;
-    }
-    try {
-      const detail = await api(`/srd/spells/${spell.index}`);
-      const data = detail.data;
-      let notation = null;
-      if (data.damage?.damage_at_slot_level) {
-        notation = data.damage.damage_at_slot_level[data.level] ?? Object.values(data.damage.damage_at_slot_level)[0];
-      } else if (data.damage?.damage_at_character_level) {
-        notation = cantripDamageAtLevel(data.damage.damage_at_character_level, char.level);
-      }
-      if (!notation) return;
-      // Notaciones tipo "8d6" o "3d4 + 3" (bonificador plano incluido)
-      const m = /(\d+)d(\d+)(?:\s*\+\s*(\d+))?/.exec(notation);
-      if (!m) return;
-      const roll = rollDamage(`${m[1]}d${m[2]}`, {
-        modifier: m[3] ? Number(m[3]) : 0,
-        label: `${spell.name} — daño${dcText}`,
-        actorName: char.name,
-      });
-      onRoll(roll);
-    } catch {
-      /* sin conexión al compendio */
-    }
+    const roll = await castSpellRoll(char, spell, mode);
+    if (roll) onRoll(roll);
   }
 
   const saveLabels = { saved: 'Guardado ✓', pending: 'Cambios sin guardar…', saving: 'Guardando…', error: 'Error al guardar' };

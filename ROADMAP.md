@@ -42,12 +42,12 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **"Ojo jugador"** en el tablero del DM: alterna su vista completa con la vista filtrada del grupo (`?vista=jugador`) para comprobar qué están viendo
   - Mejora futura (fase 12/pulido): memoria de zonas ya exploradas en penumbra
 
-- [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus)
+- [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
   - react-img-mapper + Framer Motion para el halo/zoom al hover y transición de entrada a escena
   - Diseño del Campamento: mapa de región con hoguera central, tiendas (ficha propia/compañeros), camino a la mesa, diario de campaña, cofre/inventario
 
-- [ ] **Fase 10** — Vista rápida "modo presencial"
+- [ ] **Fase 10 (en curso)** — Vista rápida "modo presencial"
   - HP, CA, ataques con tirada directa, inventario y hechizos desde el móvil sin sala online activa
 
 - [ ] **Fase 11** — Buscador de compendio + comandos de chat (`/r 1d20+4`)
