@@ -118,6 +118,15 @@ export function useMapEditor(campaignId) {
     deleteRoom: (roomId) =>
       mutate(() => api(`${base}/${selectedMapId}/salas/${roomId}`, { method: 'DELETE' })),
 
+    addToken: (roomId, token) =>
+      mutate(() =>
+        api(`${base}/${selectedMapId}/salas/${roomId}/fichas`, { method: 'POST', body: token })
+      ),
+    patchToken: (tokenId, fields) =>
+      mutate(() => api(`${base}/${selectedMapId}/fichas/${tokenId}`, { method: 'PATCH', body: fields })),
+    deleteToken: (tokenId) =>
+      mutate(() => api(`${base}/${selectedMapId}/fichas/${tokenId}`, { method: 'DELETE' })),
+
     addDoor: (door) => mutate(() => api(`${base}/${selectedMapId}/puertas`, { method: 'POST', body: door })),
     patchDoor: (doorId, fields) =>
       mutate(() => api(`${base}/${selectedMapId}/puertas/${doorId}`, { method: 'PATCH', body: fields })),

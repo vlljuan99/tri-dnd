@@ -5,6 +5,14 @@ import { useMapEditor } from '../hooks/useMapEditor.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
 import DoorPanel from '../components/DoorPanel.jsx';
+import TokenPanel from '../components/TokenPanel.jsx';
+
+const TOKEN_KINDS = [
+  { key: 'enemigo', label: 'Enemigo' },
+  { key: 'aliado', label: 'Aliado' },
+  { key: 'objeto', label: 'Objeto' },
+  { key: 'trampa', label: 'Trampa' },
+];
 
 // Plantillas de sala para combinar piezas: habitaciones, salones y pasillos
 const ROOM_TEMPLATES = [
@@ -31,11 +39,13 @@ export default function MapEditorPage() {
 
   const [activeFloorId, setActiveFloorId] = useState(null);
   const [selection, setSelection] = useState(null); // { type: 'room'|'door', id }
-  const [mode, setMode] = useState('select'); // select | add-room | door
+  const [mode, setMode] = useState('select'); // select | add-room | door | token
   const [template, setTemplate] = useState(ROOM_TEMPLATES[0]);
   const [customSize, setCustomSize] = useState({ width: 4, height: 4 });
   const [doorDraft, setDoorDraft] = useState(null); // { roomId, x, y }
   const [newMapName, setNewMapName] = useState('');
+  const [tokenKind, setTokenKind] = useState('enemigo');
+  const [tokenName, setTokenName] = useState('');
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -59,10 +69,17 @@ export default function MapEditorPage() {
 
   const activeFloor = map?.floors.find((f) => f.id === activeFloorId) ?? null;
   const allRooms = useMemo(() => (map ? map.floors.flatMap((f) => f.rooms) : []), [map]);
+  const floorTokens = useMemo(() => {
+    if (!map || !activeFloor) return [];
+    const floorRoomIds = new Set(activeFloor.rooms.map((r) => r.id));
+    return (map.tokens ?? []).filter((t) => floorRoomIds.has(t.roomId));
+  }, [map, activeFloor]);
   const selectedRoom =
     selection?.type === 'room' ? allRooms.find((r) => r.id === selection.id) ?? null : null;
   const selectedDoor =
     selection?.type === 'door' ? map?.doors.find((d) => d.id === selection.id) ?? null : null;
+  const selectedToken =
+    selection?.type === 'token' ? (map?.tokens ?? []).find((t) => t.id === selection.id) ?? null : null;
 
   function templateSize() {
     return template.key === 'libre' ? customSize : { width: template.width, height: template.height };
@@ -79,6 +96,18 @@ export default function MapEditorPage() {
       name: template.key === 'libre' ? 'Sala sin nombre' : template.label.split(' ')[0],
     });
     setSelection({ type: 'room', id: room.id });
+    setMode('select');
+  }
+
+  async function placeToken(target) {
+    const name = tokenName.trim() || TOKEN_KINDS.find((k) => k.key === tokenKind)?.label || 'Marcador';
+    const { token } = await editor.addToken(target.roomId, {
+      kind: tokenKind,
+      name,
+      x: target.x,
+      y: target.y,
+    });
+    setSelection({ type: 'token', id: token.id });
     setMode('select');
   }
 
@@ -295,6 +324,9 @@ export default function MapEditorPage() {
                 <button type="button" onClick={() => { setMode('door'); setSelection(null); }} className={toolButton(mode === 'door')}>
                   Puerta
                 </button>
+                <button type="button" onClick={() => { setMode('token'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'token')}>
+                  Marcador
+                </button>
 
                 {mode === 'add-room' && (
                   <>
@@ -340,11 +372,32 @@ export default function MapEditorPage() {
                       : 'pulsa la casilla de origen dentro de una sala'}
                   </span>
                 )}
+                {mode === 'token' && (
+                  <>
+                    <select
+                      value={tokenKind}
+                      onChange={(e) => setTokenKind(e.target.value)}
+                      className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                    >
+                      {TOKEN_KINDS.map((k) => (
+                        <option key={k.key} value={k.key}>{k.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      value={tokenName}
+                      onChange={(e) => setTokenName(e.target.value)}
+                      placeholder="Nombre (Esqueleto, Cofre…)"
+                      className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
+                    />
+                    <span className="text-xs italic text-bone/50">clic en una sala para colocarlo</span>
+                  </>
+                )}
               </div>
 
               <EditorCanvas
                 floor={activeFloor}
                 doors={map.doors}
+                tokens={floorTokens}
                 selection={selection}
                 mode={mode}
                 doorDraft={doorDraft}
@@ -352,7 +405,9 @@ export default function MapEditorPage() {
                 onSelect={setSelection}
                 onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
                 onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
+                onTokenCellClick={(target) => placeToken(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
+                onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
               />
             </>
           ) : (
@@ -390,6 +445,17 @@ export default function MapEditorPage() {
               onDelete={(doorId) => {
                 setSelection(null);
                 editor.deleteDoor(doorId).catch(() => {});
+              }}
+            />
+          ) : selectedToken ? (
+            <TokenPanel
+              token={selectedToken}
+              roomName={allRooms.find((r) => r.id === selectedToken.roomId)?.name || 'Sala'}
+              busy={busy}
+              onPatch={(tokenId, fields) => editor.patchToken(tokenId, fields).catch(() => {})}
+              onDelete={(tokenId) => {
+                setSelection(null);
+                editor.deleteToken(tokenId).catch(() => {});
               }}
             />
           ) : map ? (

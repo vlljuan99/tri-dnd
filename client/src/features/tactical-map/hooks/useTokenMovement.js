@@ -18,7 +18,7 @@ export function useTokenMovement({ map, setMap, repository, user, role, setSavin
     setMap(updateTokenPosition(map, tokenId, snappedPosition));
 
     try {
-      await repository.updateTokenPosition(map.id, tokenId, snappedPosition);
+      await repository.updateTokenPosition(map, tokenId, snappedPosition);
       return true;
     } catch (error) {
       setMap(previousMap);

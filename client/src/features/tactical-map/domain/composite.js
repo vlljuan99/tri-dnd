@@ -56,8 +56,30 @@ export function composeBoardFromMap(map) {
     }
   }
 
+  // Marcadores preparados (el servidor ya filtró ocultos y salas sin
+  // revelar según el rol), convertidos a tokens del tablero
+  const TOKEN_TYPES = { enemigo: 'enemy', aliado: 'ally', objeto: 'npc', trampa: 'npc' };
+  const TOKEN_COLORS = { enemigo: '#8c2f2f', aliado: '#4a8bd6', objeto: '#b9862f', trampa: '#7a4b9c' };
+  const serverTokens = (map.tokens ?? [])
+    .filter((t) => roomIds.has(t.roomId))
+    .map((t) => ({
+      id: `srv-${t.id}`,
+      serverId: t.id,
+      name: t.hidden ? `${t.name} (oculto)` : t.name,
+      color: TOKEN_COLORS[t.kind] ?? TOKEN_COLORS.enemigo,
+      position: {
+        x: (t.x - minX + 0.5) * map.gridSize,
+        y: 0,
+        z: (t.y - minY + 0.5) * map.gridSize,
+      },
+      size: 1,
+      type: TOKEN_TYPES[t.kind] ?? 'enemy',
+      visible: true,
+    }));
+
   return {
     doors,
+    serverTokens,
     name: map.name,
     floorName: floor.name,
     width: cols * map.gridSize,

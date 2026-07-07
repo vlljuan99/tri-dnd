@@ -29,7 +29,8 @@ function applySavedPositions(map) {
     ...map,
     tokens: map.tokens.map((token) => ({
       ...token,
-      position: saved[token.id] ? { ...saved[token.id], y: 0 } : token.position,
+      // Los marcadores del servidor (serverId) ya traen su posición real
+      position: !token.serverId && saved[token.id] ? { ...saved[token.id], y: 0 } : token.position,
     })),
   };
 }
@@ -68,20 +69,41 @@ export class TestTacticalMapRepository {
           : 'El DM aún no ha revelado ninguna zona del mapa.'
       );
     }
-    const merged = { ...base, ...board, id: `map-${activeMap.id}` };
+    const { serverTokens, ...boardRest } = board;
+    const merged = {
+      ...base,
+      ...boardRest,
+      id: `map-${activeMap.id}`,
+      campaignId,
+      serverMapId: activeMap.id,
+      tokens: [...base.tokens, ...serverTokens],
+    };
     return applyCharacterAvatars(applySavedPositions(merged), characters);
   }
 
-  async updateTokenPosition(mapId, tokenId, position) {
-    const saved = readSavedPositions(mapId);
-    writeSavedPositions(mapId, {
+  // Los marcadores preparados (srv-*) se guardan en el backend, que avisa a
+  // toda la mesa por socket; el token local del jugador sigue en localStorage
+  // hasta que se persistan los personajes por sala.
+  async updateTokenPosition(map, tokenId, position) {
+    const token = map.tokens.find((t) => t.id === tokenId);
+    if (token?.serverId) {
+      const col = Math.floor(position.x / map.gridSize) + (map.origin?.x ?? 0);
+      const row = Math.floor(position.z / map.gridSize) + (map.origin?.y ?? 0);
+      await api(`/campaigns/${map.campaignId}/mapas/${map.serverMapId}/fichas/${token.serverId}`, {
+        method: 'PATCH',
+        body: { x: col, y: row },
+      });
+      return;
+    }
+    const saved = readSavedPositions(map.id);
+    writeSavedPositions(map.id, {
       ...saved,
       [tokenId]: { x: position.x, y: 0, z: position.z },
     });
   }
 
   async updateLocalMap(map, tokenId, position) {
-    await this.updateTokenPosition(map.id, tokenId, position);
+    await this.updateTokenPosition(map, tokenId, position);
     return updateTokenPosition(map, tokenId, position);
   }
 }

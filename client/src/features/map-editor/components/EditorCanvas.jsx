@@ -58,9 +58,17 @@ function DoorMarker({ door, x, y, cell, toPx, selected, onSelect }) {
   );
 }
 
+const TOKEN_COLORS = {
+  enemigo: '#b33939',
+  aliado: '#4a8bd6',
+  objeto: '#c9a86a',
+  trampa: '#8a5fb5',
+};
+
 export default function EditorCanvas({
   floor,
   doors,
+  tokens = [],
   selection,
   mode,
   doorDraft,
@@ -68,10 +76,13 @@ export default function EditorCanvas({
   onSelect,
   onPlaceRoom,
   onDoorCellClick,
+  onTokenCellClick,
   onMoveRoom,
+  onMoveToken,
 }) {
   const [zoom, setZoom] = useState(1);
-  const [drag, setDrag] = useState(null); // { roomId, startX, startY, origX, origY, dx, dy, moved }
+  // { type: 'room'|'token', id, startX, startY, origX, origY, dx, dy, moved }
+  const [drag, setDrag] = useState(null);
   const svgRef = useRef(null);
   const cell = BASE_CELL * zoom;
 
@@ -113,26 +124,29 @@ export default function EditorCanvas({
       onPlaceRoom(cellPos);
     } else if (mode === 'door') {
       if (room) onDoorCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'token') {
+      if (room) onTokenCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
     } else if (!room) {
       onSelect(null);
     }
   }
 
+  function startDrag(e, type, id, origX, origY) {
+    onSelect({ type, id });
+    svgRef.current.setPointerCapture?.(e.pointerId);
+    setDrag({ type, id, startX: e.clientX, startY: e.clientY, origX, origY, dx: 0, dy: 0, moved: false });
+  }
+
   function handleRoomPointerDown(e, room) {
     if (mode !== 'select' || busy) return;
     e.stopPropagation();
-    onSelect({ type: 'room', id: room.id });
-    svgRef.current.setPointerCapture?.(e.pointerId);
-    setDrag({
-      roomId: room.id,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: room.x,
-      origY: room.y,
-      dx: 0,
-      dy: 0,
-      moved: false,
-    });
+    startDrag(e, 'room', room.id, room.x, room.y);
+  }
+
+  function handleTokenPointerDown(e, token) {
+    if (mode !== 'select' || busy) return;
+    e.stopPropagation();
+    startDrag(e, 'token', token.id, token.x, token.y);
   }
 
   function handlePointerMove(e) {
@@ -147,16 +161,25 @@ export default function EditorCanvas({
   function handlePointerUp() {
     if (!drag) return;
     if (drag.moved && (drag.dx !== 0 || drag.dy !== 0)) {
-      onMoveRoom(drag.roomId, { x: drag.origX + drag.dx, y: drag.origY + drag.dy });
+      const next = { x: drag.origX + drag.dx, y: drag.origY + drag.dy };
+      if (drag.type === 'room') onMoveRoom(drag.id, next);
+      else onMoveToken(drag.id, next);
     }
     setDrag(null);
   }
 
   function roomScreenPos(room) {
-    const isDragging = drag && drag.roomId === room.id;
+    const isDragging = drag?.type === 'room' && drag.id === room.id;
     const rx = isDragging ? room.x + drag.dx : room.x;
     const ry = isDragging ? room.y + drag.dy : room.y;
     return { left: toPx.x(rx), top: toPx.y(ry) };
+  }
+
+  function tokenScreenCenter(token) {
+    const isDragging = drag?.type === 'token' && drag.id === token.id;
+    const tx = isDragging ? token.x + drag.dx : token.x;
+    const ty = isDragging ? token.y + drag.dy : token.y;
+    return { cx: toPx.x(tx) + cell / 2, cy: toPx.y(ty) + cell / 2 };
   }
 
   const gridLines = [];
@@ -177,7 +200,11 @@ export default function EditorCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         className={
-          mode === 'add-room' ? 'cursor-copy' : mode === 'door' ? 'cursor-crosshair' : 'cursor-default'
+          mode === 'add-room' || mode === 'token'
+            ? 'cursor-copy'
+            : mode === 'door'
+              ? 'cursor-crosshair'
+              : 'cursor-default'
         }
       >
         <g stroke="#e8dfc9" strokeOpacity={0.07}>{gridLines}</g>
@@ -292,6 +319,41 @@ export default function EditorCanvas({
             );
           }
           return markers;
+        })}
+
+        {/* Marcadores preparados: enemigos, aliados, objetos y trampas */}
+        {tokens.map((token) => {
+          const { cx, cy } = tokenScreenCenter(token);
+          const color = TOKEN_COLORS[token.kind] ?? TOKEN_COLORS.enemigo;
+          const isSelected = selection?.type === 'token' && selection.id === token.id;
+          return (
+            <g
+              key={`token-${token.id}`}
+              onPointerDown={(e) => handleTokenPointerDown(e, token)}
+              className={mode === 'select' ? 'cursor-move' : 'pointer-events-none'}
+              opacity={token.hidden ? 0.55 : 1}
+            >
+              <circle
+                cx={cx}
+                cy={cy}
+                r={cell * 0.34}
+                fill={color}
+                stroke={isSelected ? '#e8c368' : '#14110f'}
+                strokeWidth={isSelected ? 2.5 : 1.5}
+                strokeDasharray={token.hidden ? '3 3' : undefined}
+              />
+              <text
+                x={cx}
+                y={cy + cell * 0.13}
+                textAnchor="middle"
+                fill="#f2ead8"
+                fontSize={cell * 0.36}
+                className="pointer-events-none select-none font-display"
+              >
+                {token.name.charAt(0).toUpperCase()}
+              </text>
+            </g>
+          );
         })}
 
         {/* Primer extremo de una puerta a medio crear */}
