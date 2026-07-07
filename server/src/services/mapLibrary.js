@@ -1,4 +1,5 @@
 import { db } from '../db.js';
+import { computeFloorVision } from './vision.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -290,6 +291,68 @@ export function serializeMapForPlayer(map, userId) {
   for (const t of characterTokens) {
     if (t.user_id === userId) visible.add(t.room_id);
   }
+  const roomById = new Map(rooms.map((r) => [r.id, r]));
+
+  // Niebla fina: con visión 'compartida' o 'individual', dentro de las
+  // salas visibles solo se ve lo que alcanzan los tokens (la del grupo o
+  // solo los del propio usuario). La visión nunca añade salas: solo recorta.
+  // Sin tokens propios (espectador), se ve a nivel de sala.
+  const viewers =
+    map.vision_mode === 'compartida'
+      ? characterTokens
+      : map.vision_mode === 'individual'
+        ? characterTokens.filter((t) => t.user_id === userId)
+        : [];
+  const useFog = (map.vision_mode === 'compartida' || map.vision_mode === 'individual') && viewers.length > 0;
+
+  let visionByFloor = null;
+  if (useFog) {
+    visionByFloor = new Map();
+    for (const floor of floors) {
+      const floorRooms = rooms.filter((r) => r.floor_id === floor.id && visible.has(r.id));
+      const floorViewers = viewers.filter(
+        (t) => roomById.get(t.room_id)?.floor_id === floor.id
+      );
+      if (!floorRooms.length || !floorViewers.length) {
+        visionByFloor.set(floor.id, new Set());
+        continue;
+      }
+      visionByFloor.set(
+        floor.id,
+        computeFloorVision({ rooms: floorRooms, viewers: floorViewers, radius: map.vision_radius })
+      );
+    }
+  }
+
+  const cellVisible = (roomId, x, y) => {
+    if (!useFog) return true;
+    const room = roomById.get(roomId);
+    return visionByFloor.get(room.floor_id)?.has(`${x},${y}`) ?? false;
+  };
+
+  // Con niebla, las casillas de la sala fuera de visión viajan como
+  // desactivadas (el cliente las pinta como vacío); una sala sin ninguna
+  // casilla visible no se envía.
+  const serializeFoggedRoom = (room) => {
+    const base = serializeRoom(room, { forPlayer: true });
+    if (!useFog) return base;
+    const vision = visionByFloor.get(room.floor_id) ?? new Set();
+    const disabled = new Set(base.disabledCells.map(([c, r]) => `${c},${r}`));
+    let anyVisible = false;
+    for (let r = 0; r < room.height; r += 1) {
+      for (let c = 0; c < room.width; c += 1) {
+        if (disabled.has(`${c},${r}`)) continue;
+        if (vision.has(`${room.x + c},${room.y + r}`)) anyVisible = true;
+        else disabled.add(`${c},${r}`);
+      }
+    }
+    if (!anyVisible) return null;
+    return {
+      ...base,
+      disabledCells: [...disabled].map((entry) => entry.split(',').map(Number)),
+    };
+  };
+
   return {
     id: map.id,
     name: map.name,
@@ -300,20 +363,29 @@ export function serializeMapForPlayer(map, userId) {
       position: f.position,
       rooms: rooms
         .filter((r) => r.floor_id === f.id && visible.has(r.id))
-        .map((r) => serializeRoom(r, { forPlayer: true })),
+        .map(serializeFoggedRoom)
+        .filter(Boolean),
     })),
     doors: doors
       .filter(
         (d) =>
           (visible.has(d.from_room_id) || visible.has(d.to_room_id)) &&
-          (d.control === 'jugador' || d.is_open)
+          (d.control === 'jugador' || d.is_open) &&
+          (cellVisible(d.from_room_id, d.from_x, d.from_y) ||
+            cellVisible(d.to_room_id, d.to_x, d.to_y))
       )
       .map(serializeDoor),
     // Un marcador oculto (trampa, tesoro) no existe para el jugador aunque
-    // la sala esté visible
-    tokens: tokens.filter((t) => visible.has(t.room_id) && !t.hidden).map(serializeToken),
+    // la sala esté visible; con niebla, tampoco los que quedan fuera de visión
+    tokens: tokens
+      .filter((t) => visible.has(t.room_id) && !t.hidden && cellVisible(t.room_id, t.x, t.y))
+      .map(serializeToken),
     characterTokens: characterTokens
-      .filter((t) => visible.has(t.room_id))
+      .filter(
+        (t) =>
+          visible.has(t.room_id) &&
+          (t.user_id === userId || cellVisible(t.room_id, t.x, t.y))
+      )
       .map(serializeCharacterToken),
   };
 }
