@@ -18,7 +18,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 
 ## Pendientes
 
-- [ ] **Fase 7.5 — Mesa del DM (editor de campaña) y mapas multi-sala** *(en curso; prioritaria: el resto de la Fase 7 se apoya en su modelo de datos)*
+- [x] **Fase 7.5 — Mesa del DM (editor de campaña) y mapas multi-sala**
   - [x] Modelo de datos (migración v8): `maps` (biblioteca por campaña) → `map_floors` (plantas) → `map_rooms` (salas NxM con forma, suelo, notas y revelado) + `map_doors` (puerta/escalera/portal, control jugador/dm, abierta/cerrada). El mapa único de `game_tables` migrado a un mapa de una sala; `active_map_id` marca cuál está en la mesa
   - [x] **Editor en página aparte** (`/campanas/:id/editor`, solo DM): biblioteca de mapas (crear/renombrar/activar/borrar), plantas en pestañas, lienzo 2D con plantillas de sala (habitación/salón/pasillo/N×M libre), arrastrar salas para combinarlas, puertas entre salas y entre plantas, panel de sala (revelado, notas del DM, suelo subido o generado con IA)
   - [x] **Vista filtrada por rol en servidor** (`GET /mapa-activo`): el DM lo ve todo; el jugador solo salas reveladas, sin notas, y sin puertas del DM cerradas (una puerta secreta cerrada no existe para él). El tablero 3D compone las salas visibles de la planta en un único board
