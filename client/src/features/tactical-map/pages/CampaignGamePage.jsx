@@ -25,6 +25,7 @@ export default function CampaignGamePage() {
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [doorError, setDoorError] = useState('');
   const [floorId, setFloorId] = useState(null);
+  const [playerView, setPlayerView] = useState(false);
 
   // Abrir una puerta (o alternarla, si eres DM). El nuevo estado del mapa
   // llega a todos —incluido quien pulsa— por el evento de socket.
@@ -75,6 +76,7 @@ export default function CampaignGamePage() {
     enabled: Boolean(campaign),
     version: mapVersion,
     floorId,
+    playerView: campaign?.role === 'dm' && playerView,
   });
 
   if (campaignLoading) {
@@ -144,6 +146,8 @@ export default function CampaignGamePage() {
           onOpenDoor={openDoor}
           doorError={doorError}
           onSelectFloor={setFloorId}
+          playerView={playerView}
+          onTogglePlayerView={() => setPlayerView((v) => !v)}
           pings={pings}
           onPing={(world) =>
             sendPing({

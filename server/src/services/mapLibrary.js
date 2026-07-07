@@ -297,8 +297,10 @@ export function serializeMapForPlayer(map, userId) {
   // salas visibles solo se ve lo que alcanzan los tokens (la del grupo o
   // solo los del propio usuario). La visión nunca añade salas: solo recorta.
   // Sin tokens propios (espectador), se ve a nivel de sala.
+  // userId null = vista previa del DM ("ver como jugador"): visión del
+  // grupo entero, sin sala propia añadida
   const viewers =
-    map.vision_mode === 'compartida'
+    map.vision_mode === 'compartida' || (map.vision_mode === 'individual' && userId == null)
       ? characterTokens
       : map.vision_mode === 'individual'
         ? characterTokens.filter((t) => t.user_id === userId)

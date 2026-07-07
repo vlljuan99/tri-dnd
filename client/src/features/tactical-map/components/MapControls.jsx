@@ -6,6 +6,8 @@ export default function MapControls({
   isDm,
   measureMode,
   onToggleMeasureMode,
+  playerView,
+  onTogglePlayerView,
   editorHref,
   onCenter,
   onZoomIn,
@@ -121,6 +123,21 @@ export default function MapControls({
           >
             Editor
           </Link>
+        )}
+        {isDm && (
+          <button
+            type="button"
+            aria-label="Ver el mapa como lo ven los jugadores"
+            aria-pressed={playerView}
+            onClick={onTogglePlayerView}
+            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
+              playerView
+                ? 'border-gold bg-gold/10 text-gold'
+                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
+            }`}
+          >
+            {playerView ? 'Ojo jugador: sí' : 'Ojo jugador'}
+          </button>
         )}
         {isDm && (
           <span className="rounded-sm border border-ember/50 bg-night-900/90 px-3 py-2 font-display text-xs uppercase tracking-widest text-ember">

@@ -41,6 +41,8 @@ export default function TacticalMap({
   onPing,
   pings,
   onSelectFloor,
+  playerView,
+  onTogglePlayerView,
   backToCampaignHref,
   editorHref,
 }) {
@@ -177,6 +179,8 @@ export default function TacticalMap({
         isDm={isDm}
         measureMode={measureMode}
         onToggleMeasureMode={toggleMeasureMode}
+        playerView={playerView}
+        onTogglePlayerView={onTogglePlayerView}
         editorHref={editorHref}
         onCenter={() => sendCameraCommand('center')}
         onZoomIn={() => sendCameraCommand('zoom-in')}

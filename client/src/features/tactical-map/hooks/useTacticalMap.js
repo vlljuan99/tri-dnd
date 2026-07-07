@@ -6,7 +6,7 @@ import { useTokenMovement } from './useTokenMovement.js';
 // gestiona el movimiento de tokens. La edición del mapa (salas, puertas,
 // fondos) vive en el editor de campaña, no aquí. `version` sube cuando el
 // socket avisa de un cambio en el mapa: se refresca sin parpadeo de carga.
-export function useTacticalMap(campaignId, { user, role, enabled = true, version = 0, floorId = null } = {}) {
+export function useTacticalMap(campaignId, { user, role, enabled = true, version = 0, floorId = null, playerView = false } = {}) {
   const repository = useMemo(() => tacticalMapRepository, []);
   const [map, setMap] = useState(null);
   const [loading, setLoading] = useState(Boolean(enabled));
@@ -22,7 +22,7 @@ export function useTacticalMap(campaignId, { user, role, enabled = true, version
     setSaveError('');
 
     repository
-      .getMapByCampaignId(campaignId, { role, floorId })
+      .getMapByCampaignId(campaignId, { role, floorId, playerView })
       .then((loadedMap) => {
         if (cancelled) return;
         loadedOnceRef.current = true;
@@ -41,7 +41,7 @@ export function useTacticalMap(campaignId, { user, role, enabled = true, version
     return () => {
       cancelled = true;
     };
-  }, [campaignId, enabled, floorId, repository, role, user, version]);
+  }, [campaignId, enabled, floorId, playerView, repository, role, user, version]);
 
   const movement = useTokenMovement({
     map,

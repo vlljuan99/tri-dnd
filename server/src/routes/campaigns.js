@@ -153,11 +153,14 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
   // Los personajes sin token aparecen en la primera sala revelada libre
   ensureCharacterTokens(map, req.params.id);
 
+  // El DM puede pedir la vista de los jugadores (?vista=jugador) para
+  // comprobar qué está viendo el grupo realmente
+  const asPlayer = membership.role === 'dm' && req.query.vista === 'jugador';
   res.json({
     map:
-      membership.role === 'dm'
+      membership.role === 'dm' && !asPlayer
         ? serializeFullMap(map, req.params.id)
-        : serializeMapForPlayer(map, req.user.id),
+        : serializeMapForPlayer(map, asPlayer ? null : req.user.id),
   });
 });
 

@@ -39,7 +39,8 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Obstáculos por sala** (migración v12): se pintan en el editor, bloquean el paso y se ven como bloques en el tablero 3D
   - **Niebla fina con línea de visión en servidor** (migración v13): visión por mapa 'sala' (clásica), 'compartida' (lo que ve el grupo) o 'individual' (cada cual lo suyo), con radio en casillas ajustable por el DM en el editor. Paredes y obstáculos bloquean la visión (Bresenham); las casillas fuera de visión viajan como desactivadas y marcadores/personajes/puertas fuera de visión no llegan al socket del jugador. La visión nunca añade salas: recorta sobre el revelado por salas
   - Las trampas y objetos ocultos solo-DM existen desde la Fase 7.5
-  - Mejoras futuras (fase 12/pulido): memoria de zonas ya exploradas en penumbra y "ver como jugador" para el DM
+  - **"Ojo jugador"** en el tablero del DM: alterna su vista completa con la vista filtrada del grupo (`?vista=jugador`) para comprobar qué están viendo
+  - Mejora futura (fase 12/pulido): memoria de zonas ya exploradas en penumbra
 
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus)
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
