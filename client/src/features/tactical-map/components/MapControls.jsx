@@ -19,7 +19,7 @@ export default function MapControls({
   onToggleDrawer,
 }) {
   return (
-    <div className="pointer-events-none flex flex-wrap items-end justify-between gap-2">
+    <div className="pointer-events-none flex w-fit max-w-full flex-wrap items-end gap-2">
       <div className="pointer-events-auto flex flex-wrap gap-2 rounded-sm border border-gold/20 bg-night-900/90 p-2 shadow-xl backdrop-blur">
         <button
           type="button"

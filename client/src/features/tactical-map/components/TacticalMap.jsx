@@ -368,7 +368,7 @@ export default function TacticalMap({
 
       {/* HUD y controles apilados en flujo normal (no cada uno con su propio
           "absolute bottom-X"): así nunca se solapan, tengan la altura que tengan */}
-      <div className="absolute inset-x-3 bottom-3 z-10 flex flex-col gap-2 sm:inset-x-4 sm:bottom-4">
+      <div className="absolute inset-x-3 bottom-3 z-10 flex flex-col gap-1.5 sm:inset-x-4 sm:bottom-4">
         <PlayerHud
           token={hudDisplay}
           combatant={hudCombatant}
