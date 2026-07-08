@@ -82,12 +82,10 @@ export default function TacticalMap({
   const activeToken = activeCombatant?.characterId
     ? map.tokens.find((t) => t.characterId === activeCombatant.characterId) ?? null
     : null;
-  // Es realmente TU turno (para el texto del banner): tu propio personaje,
-  // nunca el DM salvo que además sea el dueño (caso raro, PJ del propio DM)
+  // Es realmente TU turno (para el texto del banner y el botón "Terminar
+  // turno" junto a tu token en la lista): tu propio personaje, nunca el DM
+  // salvo que además sea el dueño (caso raro, PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
-  // Quién puede pulsar "Terminar turno": el dueño, o siempre el DM (puede
-  // controlar el combatiente activo, sea un PJ o un enemigo)
-  const myTurn = Boolean(activeToken) && (isDm || isOwnCharacterTurn);
 
   // Área de movimiento: casillas alcanzables por el combatiente activo con
   // lo que le queda de movimiento (visible para toda la mesa al seleccionar
@@ -229,18 +227,6 @@ export default function TacticalMap({
                 {activeCombatant.actionUsed ? ' · sin acción' : ' · acción lista'}
               </span>
             )}
-            {myTurn && (
-              <button
-                type="button"
-                onClick={async () => {
-                  const resp = await endTurn();
-                  if (resp?.error) window.alert(resp.error);
-                }}
-                className="rounded-sm bg-gold px-2 py-0.5 font-display text-[0.65rem] uppercase tracking-widest text-night-950 hover:bg-gold/90"
-              >
-                Terminar turno
-              </button>
-            )}
             {isDm && (
               <button
                 type="button"
@@ -292,26 +278,6 @@ export default function TacticalMap({
                     : ''
                 }${canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'}`
               : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
-          {selectedToken?.characterId && (
-            <>
-              <Link
-                to={`/personajes/${selectedToken.characterId}`}
-                className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
-              >
-                Ver ficha
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  setInventoryOpen((v) => !v);
-                  setCombatTarget(null);
-                }}
-                className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
-              >
-                Inventario
-              </button>
-            </>
-          )}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
         {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}
@@ -322,46 +288,87 @@ export default function TacticalMap({
         <div className="space-y-1">
           {map.tokens.map((token) => {
             const movable = canMoveToken({ token, user, role });
+            // ¿Es el turno de este token concreto? Para ofrecerle "Terminar
+            // turno" aquí mismo, junto al resto de acciones (dueño o DM)
+            const rowIsActiveTurn = combat.active && activeCombatant?.characterId === token.characterId;
+            const rowCanEndTurn = rowIsActiveTurn && (isDm || token.ownerUserId === user?.id);
             return (
-              <button
+              <div
                 key={token.id}
-                type="button"
-                onClick={() => handleSelectToken(token.id)}
-                aria-pressed={selectedTokenId === token.id}
-                className={`flex w-full flex-col gap-1.5 rounded-sm border px-2 py-2 text-left text-sm ${
-                  selectedTokenId === token.id
-                    ? 'border-gold bg-gold/10 text-gold'
-                    : 'border-transparent text-bone hover:border-bone/20'
+                className={`rounded-sm border ${
+                  selectedTokenId === token.id ? 'border-gold bg-gold/10' : 'border-transparent'
                 }`}
               >
-                <span className="truncate font-medium">{token.name}</span>
-                <div className="flex items-center justify-between gap-2">
-                  {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 ? (
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-12 overflow-hidden rounded-sm bg-night-950">
-                        <span
-                          className={`block h-full ${
-                            token.hp / token.hpMax > 0.5
-                              ? 'bg-moss'
-                              : token.hp / token.hpMax > 0.25
-                                ? 'bg-ochre'
-                                : 'bg-blood'
-                          }`}
-                          style={{ width: `${Math.max(0, Math.min(100, (token.hp / token.hpMax) * 100))}%` }}
-                        />
+                <button
+                  type="button"
+                  onClick={() => handleSelectToken(token.id)}
+                  aria-pressed={selectedTokenId === token.id}
+                  className={`flex w-full flex-col gap-1.5 px-2 py-2 text-left text-sm ${
+                    selectedTokenId === token.id ? 'text-gold' : 'text-bone hover:opacity-80'
+                  }`}
+                >
+                  <span className="truncate font-medium">{token.name}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-1.5 w-12 overflow-hidden rounded-sm bg-night-950">
+                          <span
+                            className={`block h-full ${
+                              token.hp / token.hpMax > 0.5
+                                ? 'bg-moss'
+                                : token.hp / token.hpMax > 0.25
+                                  ? 'bg-ochre'
+                                  : 'bg-blood'
+                            }`}
+                            style={{ width: `${Math.max(0, Math.min(100, (token.hp / token.hpMax) * 100))}%` }}
+                          />
+                        </span>
+                        <span className="font-mono text-[0.65rem] text-bone/60">
+                          {token.hp}/{token.hpMax}
+                        </span>
                       </span>
-                      <span className="font-mono text-[0.65rem] text-bone/60">
-                        {token.hp}/{token.hpMax}
-                      </span>
+                    ) : (
+                      <span className="text-[0.65rem] text-bone/40">—</span>
+                    )}
+                    <span className="text-[0.65rem] uppercase tracking-widest text-bone/55">
+                      {token.speed ? `${Math.floor(token.speed / 5)} cas` : movable ? 'mover' : token.type}
                     </span>
-                  ) : (
-                    <span className="text-[0.65rem] text-bone/40">—</span>
-                  )}
-                  <span className="text-[0.65rem] uppercase tracking-widest text-bone/55">
-                    {token.speed ? `${Math.floor(token.speed / 5)} cas` : movable ? 'mover' : token.type}
-                  </span>
-                </div>
-              </button>
+                  </div>
+                </button>
+                {token.characterId && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2 text-[0.65rem]">
+                    <Link
+                      to={`/personajes/${token.characterId}`}
+                      className="text-gold underline decoration-dotted hover:text-gold/80"
+                    >
+                      Ficha
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTokenId(token.id);
+                        setCombatTarget(null);
+                        setInventoryOpen((v) => (selectedTokenId === token.id ? !v : true));
+                      }}
+                      className="text-gold underline decoration-dotted hover:text-gold/80"
+                    >
+                      Inventario
+                    </button>
+                    {rowCanEndTurn && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const resp = await endTurn();
+                          if (resp?.error) window.alert(resp.error);
+                        }}
+                        className="rounded-sm bg-gold px-1.5 py-0.5 font-display uppercase tracking-widest text-night-950 hover:bg-gold/90"
+                      >
+                        Terminar turno
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
