@@ -59,6 +59,14 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Ciclo de encuentro automático**: al caer el último enemigo, vuelta a modo libre sola; al revelarse un enemigo nuevo en modo libre, turnos reactivados como encuentro fresco (iniciativas y recursos re-tirados). El banner del tablero muestra ronda, turno, movimiento restante y acción, con "Terminar turno" y el alternador del DM tanto en el tablero como en el tracker
   - Siguientes iteraciones: coste de movimiento por camino real (pathing, fase 14) en vez de distancia en línea, y ataques de oportunidad automáticos
 
+- [ ] **Fase 8.6 (en curso)** — Mesa de juego unificada: el tablero como pantalla principal
+  - **Una sola pantalla** (`/campanas/:id`): el tablero táctico ocupa toda la vista, con paneles superpuestos para chat/registro, iniciativa, inventario y notas — nada de navegar entre "mesa" (chat) y "tablero" (mapa) como hasta ahora. `/campanas/:id/tablero` redirige a la nueva pantalla única, que conserva el nombre "Mesa de juego"
+  - **"¡Tu turno!"** destacado en el banner de ronda cuando te toca a ti, frente a "Turno de X" para los demás — reutiliza la economía de turno de la Fase 8.5
+  - **Orden de iniciativa** siempre accesible desde el tablero (ya lo veía cualquier jugador, pero solo en la pestaña de la página de chat, oculta en móvil)
+  - **Ficha de personaje**: enlace directo desde el tablero al personaje seleccionado (el tuyo, o el de cualquiera si eres DM)
+  - **Panel de inventario** aparte del de ataque: objetos usables solo en tu turno (gasta la acción, como atacar), con desglose de cantidad; el DM ve el inventario de cualquiera pero solo su dueño puede usarlo
+  - **Notas privadas por personaje** (migración nueva): varias, con título y fecha de sesión — a diferencia de todo lo demás en la app, ni el DM las ve; solo su dueño
+
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
   - react-img-mapper + Framer Motion para el halo/zoom al hover y transición de entrada a escena
