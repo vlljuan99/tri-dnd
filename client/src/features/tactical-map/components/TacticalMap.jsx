@@ -65,6 +65,7 @@ export default function TacticalMap({
   // --- Economía de turno (Fase 8.5) ---------------------------------
   const combat = useRoom((s) => s.combat);
   const endTurn = useRoom((s) => s.endTurn);
+  const toggleTurnMode = useRoom((s) => s.toggleTurnMode);
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
@@ -223,7 +224,27 @@ export default function TacticalMap({
                 Terminar turno
               </button>
             )}
+            {isDm && (
+              <button
+                type="button"
+                onClick={() => toggleTurnMode()}
+                title="Modo libre: moverse y actuar sin restricción de turno, sin vaciar el tracker"
+                className="rounded-sm border border-bone/25 px-2 py-0.5 text-[0.65rem] uppercase tracking-widest text-bone/70 hover:border-gold hover:text-gold"
+              >
+                Modo libre
+              </button>
+            )}
           </div>
+        )}
+        {!combat.active && isDm && (
+          <button
+            type="button"
+            onClick={() => toggleTurnMode()}
+            title="Activa el modo por turnos: iniciativas nuevas y movimiento/acción solo en tu turno"
+            className="mt-1.5 rounded-sm border border-moss px-2 py-0.5 text-[0.65rem] uppercase tracking-widest text-bone/80 hover:bg-moss/20"
+          >
+            Activar modo por turnos
+          </button>
         )}
         {(map.floors?.length ?? 0) > 1 && (
           <div className="mt-2 flex flex-wrap gap-1">
