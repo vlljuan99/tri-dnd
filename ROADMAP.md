@@ -53,11 +53,11 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Arranque e iniciativa automáticos**: en cuanto hay combatientes con el modo activo, el servidor tira 1d20+DES por cada uno y arranca el orden solo, sin que el DM tenga que teclear nada (se puede ajustar después a mano, como ya se podía)
   - **Fin automático**: al morir el último combatiente de tipo enemigo, se vuelve a movimiento libre solo, con aviso en el chat; el botón del DM sigue disponible para forzarlo antes
   - **Economía de turno** por combatiente: movimiento acumulado (casillas gastadas en el turno, repartibles antes/después de actuar), 1 acción, 1 acción adicional y 1 reacción (esta por ronda, no por turno, utilizable fuera de tu turno) — la reacción se marca a mano con un botón "usar reacción" cuando el DM narra que corresponde, no hay detección automática de disparadores (ataque de oportunidad, etc.)
-  - El bloqueo de movimiento/acción aplica a los **personajes de los jugadores**; los enemigos los sigue moviendo el DM libremente arrastrando su marcador
+  - El bloqueo de movimiento/acción aplica también a los **enemigos**: arrastrar su marcador descuenta su movimiento (velocidad del monstruo del compendio SRD) y se bloquea fuera de su turno o al agotarlo, igual que a un jugador — el DM sigue siendo quien lo arrastra, pero ya no puede moverlo más de la cuenta
   - **Terminar turno**: botón para quien tiene el turno (jugador o DM controlando un enemigo) y para el DM siempre, que fuerza el avance
   - **Área de movimiento visible**: al seleccionar el token del combatiente activo se resaltan en verde las casillas a las que aún llega con el movimiento que le queda, respetando obstáculos y paredes (misma regla Chebyshev que valida el servidor)
   - **Ciclo de encuentro automático**: al caer el último enemigo, vuelta a modo libre sola; al revelarse un enemigo nuevo en modo libre, turnos reactivados como encuentro fresco (iniciativas y recursos re-tirados). El banner del tablero muestra ronda, turno, movimiento restante y acción, con "Terminar turno" y el alternador del DM tanto en el tablero como en el tracker
-  - Siguientes iteraciones: coste de movimiento por camino real (pathing, fase 14) en vez de distancia en línea, y ataques de oportunidad automáticos
+  - Siguiente iteración: coste de movimiento por camino real (pathing, fase 14) en vez de distancia en línea, y ataques de oportunidad automáticos
 
 - [x] **Fase 8.6** — Mesa de juego unificada: el tablero como pantalla principal
   - **Una sola pantalla** (`/campanas/:id`): el tablero táctico ocupa toda la vista, con paneles superpuestos para chat/registro, iniciativa, inventario y notas — nada de navegar entre "mesa" (chat) y "tablero" (mapa) como hasta ahora. `/campanas/:id/tablero` redirige a la nueva pantalla única, que conserva el nombre "Mesa de juego"
@@ -66,6 +66,9 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Ficha de personaje**: enlace directo desde el tablero al personaje seleccionado (el tuyo, o el de cualquiera si eres DM)
   - **Panel de inventario** aparte del de ataque: objetos usables solo en tu turno (gasta la acción, como atacar), con desglose de cantidad; el DM ve el inventario de cualquiera pero solo su dueño puede usarlo
   - **Notas privadas por personaje** (migración nueva): varias, con título y fecha de sesión — a diferencia de todo lo demás en la app, ni el DM las ve; solo su dueño
+  - **HUD de estado permanente** (pulido, tras probarlo en real): retrato, HP, CA, movimiento restante y si ya usaste la acción en una barra compacta que abraza su contenido (no estirada a todo el ancho), apilada en flujo normal con los controles del mapa para que nunca se solapen, en desktop y en móvil
+  - El HUD muestra al **combatiente activo** (para el DM: el enemigo o PJ a quien le toca el turno, no siempre su propio personaje si tiene uno) — Ficha/Inventario se ofrecen para cualquiera mostrado (solo lectura si no es tuyo), Notas solo viendo tu propio personaje
+  - "Modo DM" en la cabecera junto a "EN VIVO" (visible solo al DM); "Ojo jugador" pasa a ser un switch con las dos vistas nombradas ("Vista DM" / "Vista jugador"); botón "Volver" eliminado (redundante con "← Hub")
 
 - [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)

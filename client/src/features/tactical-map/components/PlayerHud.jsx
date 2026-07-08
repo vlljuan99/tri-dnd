@@ -28,7 +28,7 @@ export default function PlayerHud({
   const gated = Boolean(combatActive && combatant); // movimiento/acción solo tienen sentido con el modo activo
 
   return (
-    <div className="pointer-events-auto flex flex-wrap items-center gap-x-4 gap-y-2 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 text-bone shadow-xl backdrop-blur">
+    <div className="pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-2 self-start rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 text-bone shadow-xl backdrop-blur">
       <div className="flex items-center gap-2">
         {token.imageUrl ? (
           <img src={token.imageUrl} alt="" className="h-10 w-10 rounded-full border border-gold/40 object-cover" />
@@ -71,7 +71,7 @@ export default function PlayerHud({
         </span>
       )}
 
-      <div className="ml-auto flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 border-l border-bone/10 pl-3">
         {characterId && (
           <button
             onClick={onOpenSheet}
