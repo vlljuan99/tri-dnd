@@ -723,6 +723,50 @@ export function setupSockets(io) {
       cb?.({ ok: true, ...detail });
     });
 
+    // Usar un objeto del inventario en tu turno (Fase 8.6): gasta la acción,
+    // igual que atacar (no hay acción adicional para objetos por ahora). No
+    // resuelve ningún efecto automático (una poción de curación no cura
+    // sola): solo descuenta cantidad y lo narra, como el resto de la mesa.
+    socket.on('objeto:usar', ({ campaignId, characterId, itemId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const character = db
+        .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ?')
+        .get(characterId, campaignId);
+      if (!character) return cb?.({ error: 'Personaje no encontrado en esta campaña' });
+      if (membership.role !== 'dm' && character.user_id !== user.id) {
+        return cb?.({ error: 'Solo puedes usar objetos de tu propio personaje' });
+      }
+
+      const inventory = JSON.parse(character.inventory || '[]');
+      const item = inventory.find((i) => i.id === itemId);
+      if (!item) return cb?.({ error: 'Objeto no encontrado en el inventario' });
+      if (!item.qty || item.qty < 1) return cb?.({ error: 'No queda ninguno' });
+
+      const actionSpend = trySpendAction(campaignId, character.id);
+      if (!actionSpend.ok) return cb?.({ error: actionSpend.error });
+
+      const nextInventory =
+        item.qty <= 1
+          ? inventory.filter((i) => i.id !== itemId)
+          : inventory.map((i) => (i.id === itemId ? { ...i, qty: i.qty - 1 } : i));
+      db.prepare("UPDATE characters SET inventory = ?, updated_at = datetime('now') WHERE id = ?").run(
+        JSON.stringify(nextInventory),
+        character.id
+      );
+
+      const note = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'system',
+        body: `${character.name} usa ${item.name}.`,
+      });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, remainingQty: item.qty <= 1 ? 0 : item.qty - 1 });
+    });
+
     socket.on('disconnecting', () => {
       for (const campaignId of socket.data.campaigns ?? []) {
         // La sala aún incluye este socket; recalcular tras salir
