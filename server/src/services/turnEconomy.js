@@ -87,9 +87,14 @@ export function ensureTurnStarted(campaignId) {
 
 // Activa el modo por turnos como arranque fresco de encuentro: tira
 // iniciativa para todos los presentes (pisa cualquier valor anterior),
-// resetea recursos y empieza por el primero. Devuelve el orden final.
+// resetea los recursos de todos (incluida la reacción: es una ronda 1
+// nueva) y empieza por el primero. Devuelve el orden final.
 export function activateTurnMode(campaignId) {
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
+  db.prepare(
+    `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
+     reaction_used_round = NULL WHERE campaign_id = ?`
+  ).run(campaignId);
   for (const c of orderedCombatants(campaignId)) {
     db.prepare('UPDATE combatants SET initiative = ? WHERE id = ?').run(rollInitiativeValue(c), c.id);
   }

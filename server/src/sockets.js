@@ -570,6 +570,11 @@ export function setupSockets(io) {
       const resolved = resolveCombatTarget(campaignId, checked.character, target, { melee: Boolean(melee) });
       if (resolved.error) return cb?.({ error: resolved.error });
 
+      // Atacar (tirada + daño) es la acción del turno: se gasta aquí, ya
+      // validado el objetivo, para no penalizar un intento inválido
+      const actionSpend = trySpendAction(campaignId, checked.character.id);
+      if (!actionSpend.ok) return cb?.({ error: actionSpend.error });
+
       const crit = Boolean(roll.crit);
       const hit = crit || (!roll.fumble && Number(roll.total) >= resolved.ac);
 
@@ -631,6 +636,15 @@ export function setupSockets(io) {
             detail.remainingHp = 0;
             detail.defeated = true;
             body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
+            // Sin enemigos que queden, se acabó el encuentro: vuelta a
+            // movimiento libre sola, sin esperar a que el DM lo pulse
+            if (endCombatIfNoEnemiesLeft(campaignId)) {
+              body += ' Sin enemigos: movimiento libre.';
+            } else {
+              // Si seguía siendo su turno (o nadie tenía turno), que el
+              // siguiente combatiente pueda actuar en vez de quedar bloqueada la mesa
+              ensureTurnStarted(campaignId);
+            }
           } else {
             db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
             detail.remainingHp = newHp;

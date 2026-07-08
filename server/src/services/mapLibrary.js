@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { computeFloorVision } from './vision.js';
-import { rollInitiativeValue, ensureTurnStarted } from './turnEconomy.js';
+import { rollInitiativeValue, ensureTurnStarted, activateTurnMode } from './turnEconomy.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -244,7 +244,14 @@ export function spawnRoomEnemies(campaignId, roomIds) {
     insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id);
     added += 1;
   }
-  if (added > 0) ensureTurnStarted(campaignId);
+  if (added > 0) {
+    // Encuentro nuevo: si la mesa había vuelto a modo libre (p. ej. tras
+    // caer el último enemigo), un enemigo nuevo reactiva los turnos con
+    // iniciativas frescas; si ya estaba en turnos, solo arranca si no había orden
+    const table = db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId);
+    if (!table?.combat_active) activateTurnMode(campaignId);
+    else ensureTurnStarted(campaignId);
+  }
   return added;
 }
 
