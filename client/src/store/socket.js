@@ -181,4 +181,29 @@ export const useRoom = create((set, get) => ({
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('combat:end', { campaignId });
   },
+
+  // --- Economía de turno (Fase 8.5) ---------------------------------
+
+  /** Termina el turno del combatiente activo (su dueño, o siempre el DM). */
+  endTurn() {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:end-turn', { campaignId }, resolve));
+  },
+
+  /** Alterna modo por turnos / modo libre (solo DM), sin vaciar el tracker. */
+  toggleTurnMode() {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:toggle-mode', { campaignId }, resolve));
+  },
+
+  /** Marca la reacción ('reaccion') o la acción adicional ('adicional') como gastada. */
+  useResource(combatantId, resource) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:use-resource', { campaignId, combatantId, resource }, resolve)
+    );
+  },
 }));

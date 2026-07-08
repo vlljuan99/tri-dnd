@@ -99,10 +99,11 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
           <div className="flex gap-1">
             {!combat.active ? (
               <button
-                onClick={() => room.startCombat()}
+                onClick={() => room.toggleTurnMode()}
+                title="Activa el modo por turnos: iniciativas nuevas y movimiento/acción solo en tu turno"
                 className="rounded-sm border border-moss px-2 py-0.5 text-xs text-bone hover:bg-moss/20"
               >
-                Iniciar
+                Por turnos
               </button>
             ) : (
               <>
@@ -110,13 +111,21 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                   onClick={() => room.nextTurn()}
                   className="rounded-sm border border-gold/50 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
                 >
-                  Siguiente turno
+                  Siguiente
+                </button>
+                <button
+                  onClick={() => room.toggleTurnMode()}
+                  title="Modo libre: moverse y actuar sin restricción de turno, sin vaciar el tracker"
+                  className="rounded-sm border border-bone/25 px-2 py-0.5 text-xs text-bone/70 hover:text-bone"
+                >
+                  Libre
                 </button>
                 <button
                   onClick={() => room.endCombat()}
+                  title="Termina el combate del todo y vacía el tracker"
                   className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
                 >
-                  Terminar
+                  Fin
                 </button>
               </>
             )}
@@ -132,6 +141,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
           const active = combat.turnId === c.id;
           const mine = c.kind === 'pj' && ownerByCharId[c.characterId] === userId;
           const knowsHp = c.hpCurrent != null && c.hpMax != null;
+          const budget = c.speed ? Math.floor(c.speed / 5) : null;
           return (
             <div
               key={c.id}
@@ -187,6 +197,76 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                     {c.hpCurrent}/{c.hpMax}
                     {c.ac != null && ` · CA ${c.ac}`}
                   </span>
+                </div>
+              )}
+
+              {/* Recursos del turno (Fase 8.5): visibles con el modo por turnos */}
+              {combat.active && active && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-bone/10 pt-1.5">
+                  {c.kind === 'pj' && budget != null && (
+                    <span
+                      className={`rounded-sm border px-1.5 py-0.5 font-mono text-[0.65rem] ${
+                        c.movedSquares >= budget ? 'border-bone/10 text-bone/30' : 'border-moss/60 text-bone/80'
+                      }`}
+                      title="Casillas de movimiento gastadas este turno"
+                    >
+                      Mov {c.movedSquares}/{budget}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[0.65rem] ${
+                      c.actionUsed ? 'border-bone/10 text-bone/30 line-through' : 'border-gold/50 text-gold/90'
+                    }`}
+                    title="La acción del turno (atacar la consume)"
+                  >
+                    Acción
+                  </span>
+                  {(mine || isDm) && !c.bonusUsed ? (
+                    <button
+                      onClick={() => room.useResource(c.id, 'adicional')}
+                      title="Marcar la acción adicional como gastada"
+                      className="rounded-sm border border-ochre/60 px-1.5 py-0.5 text-[0.65rem] text-ochre hover:bg-ochre/10"
+                    >
+                      Adicional
+                    </button>
+                  ) : (
+                    <span
+                      className={`rounded-sm border px-1.5 py-0.5 text-[0.65rem] ${
+                        c.bonusUsed ? 'border-bone/10 text-bone/30 line-through' : 'border-bone/20 text-bone/50'
+                      }`}
+                    >
+                      Adicional
+                    </span>
+                  )}
+                  {(mine || isDm) && (
+                    <button
+                      onClick={async () => {
+                        const resp = await room.endTurn();
+                        if (resp?.error) window.alert(resp.error);
+                      }}
+                      className="ml-auto rounded-sm bg-gold px-2 py-0.5 font-display text-[0.65rem] uppercase tracking-widest text-night-950 hover:bg-gold/90"
+                    >
+                      Terminar turno
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* La reacción se puede gastar fuera de tu turno (una por ronda) */}
+              {combat.active && !active && (mine || isDm) && c.kind === 'pj' && (
+                <div className="mt-1 flex justify-end">
+                  {c.reactionAvailable ? (
+                    <button
+                      onClick={() => room.useResource(c.id, 'reaccion')}
+                      title="Marcar la reacción como gastada (ataque de oportunidad, etc.)"
+                      className="rounded-sm border border-bone/25 px-1.5 py-0.5 text-[0.65rem] text-bone/70 hover:border-gold hover:text-gold"
+                    >
+                      Usar reacción
+                    </button>
+                  ) : (
+                    <span className="rounded-sm border border-bone/10 px-1.5 py-0.5 text-[0.65rem] text-bone/30 line-through">
+                      Reacción
+                    </span>
+                  )}
                 </div>
               )}
               {isDm && editingId === c.id && (
