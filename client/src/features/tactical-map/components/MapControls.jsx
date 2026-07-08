@@ -16,6 +16,9 @@ export default function MapControls({
   onClearSelection,
   onNudgeToken,
   backToCampaignHref,
+  hasOwnCharacter,
+  notesOpen,
+  onToggleNotes,
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-end justify-between gap-2 sm:inset-x-4 sm:bottom-4">
@@ -116,6 +119,21 @@ export default function MapControls({
         </button>
       </div>
       <div className="pointer-events-auto flex items-center gap-2">
+        {hasOwnCharacter && (
+          <button
+            type="button"
+            aria-pressed={notesOpen}
+            onClick={onToggleNotes}
+            title="Tus notas de sesión (privadas, ni el DM las ve)"
+            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
+              notesOpen
+                ? 'border-gold bg-gold/10 text-gold'
+                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
+            }`}
+          >
+            Notas
+          </button>
+        )}
         {isDm && editorHref && (
           <Link
             to={editorHref}

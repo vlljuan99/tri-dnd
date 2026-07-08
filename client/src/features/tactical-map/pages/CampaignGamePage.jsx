@@ -21,6 +21,7 @@ export default function CampaignGamePage() {
     joinRoom(campaignId);
   }, [campaignId, joinRoom]);
   const [campaign, setCampaign] = useState(null);
+  const [campaignCharacters, setCampaignCharacters] = useState([]);
   const [campaignError, setCampaignError] = useState('');
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [doorError, setDoorError] = useState('');
@@ -48,8 +49,11 @@ export default function CampaignGamePage() {
     setCampaignError('');
 
     api(`/campaigns/${campaignId}`)
-      .then(({ campaign: loadedCampaign }) => {
-        if (!cancelled) setCampaign(loadedCampaign);
+      .then(({ campaign: loadedCampaign, characters }) => {
+        if (!cancelled) {
+          setCampaign(loadedCampaign);
+          setCampaignCharacters(characters ?? []);
+        }
       })
       .catch((error) => {
         if (!cancelled) setCampaignError(error.message || 'No se pudo cargar la campaña.');
@@ -158,6 +162,7 @@ export default function CampaignGamePage() {
           }
           backToCampaignHref={`/campanas/${campaignId}`}
           editorHref={`/campanas/${campaignId}/editor`}
+          ownCharacterId={campaignCharacters.find((c) => c.user_id === user?.id)?.id ?? null}
         />
       )}
     </div>
