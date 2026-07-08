@@ -15,6 +15,8 @@ import {
   activateTurnMode,
   deactivateTurnMode,
   trySpendAction,
+  tryUseBonusAction,
+  tryUseReaction,
   endCombatIfNoEnemiesLeft,
 } from './services/turnEconomy.js';
 
@@ -515,6 +517,46 @@ export function setupSockets(io) {
 
       const result = advanceTurn(campaignId);
       if (result.error) return cb?.(result);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    // Marca a mano un recurso del turno como gastado: la acción adicional
+    // (solo en tu turno) o la reacción (una por ronda, utilizable fuera de
+    // tu turno cuando el DM narra que corresponde — sin detección automática).
+    socket.on('combat:use-resource', ({ campaignId, combatantId, resource }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db.prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+
+      if (membership.role !== 'dm') {
+        const owns =
+          row.kind === 'pj' &&
+          row.character_id &&
+          db.prepare('SELECT 1 FROM characters WHERE id = ? AND user_id = ?').get(row.character_id, user.id);
+        if (!owns) return cb?.({ error: 'Ese combatiente no es tuyo' });
+      }
+
+      const result =
+        resource === 'reaccion'
+          ? tryUseReaction(campaignId, row.id)
+          : resource === 'adicional'
+            ? tryUseBonusAction(campaignId, row.id)
+            : { ok: false, error: 'Recurso no válido' };
+      if (!result.ok) return cb?.(result);
+
+      const note = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'system',
+        body:
+          resource === 'reaccion'
+            ? `${row.name} usa su reacción.`
+            : `${row.name} usa su acción adicional.`,
+      });
+      io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
     });

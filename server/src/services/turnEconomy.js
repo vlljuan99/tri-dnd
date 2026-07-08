@@ -192,6 +192,41 @@ export function trySpendAction(campaignId, characterId) {
   return { ok: true };
 }
 
+// Gasta la acción adicional del turno: solo el combatiente activo. Como las
+// aptitudes de clase son texto libre en la ficha, no se valida si la clase
+// realmente otorga una acción adicional: eso lo decide la mesa.
+export function tryUseBonusAction(campaignId, combatantId) {
+  const table = db
+    .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
+  if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es tu turno' };
+  const row = db.prepare('SELECT bonus_used FROM combatants WHERE id = ?').get(combatantId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  if (row.bonus_used) return { ok: false, error: 'Ya has usado tu acción adicional este turno' };
+  db.prepare('UPDATE combatants SET bonus_used = 1 WHERE id = ?').run(combatantId);
+  return { ok: true };
+}
+
+// Gasta la reacción: una por RONDA y utilizable fuera de tu turno (ataques
+// de oportunidad y similares, narrados por el DM — sin detección automática).
+export function tryUseReaction(campaignId, combatantId) {
+  const table = db
+    .prepare('SELECT combat_active, combat_round FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
+  const row = db.prepare('SELECT reaction_used_round FROM combatants WHERE id = ?').get(combatantId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  if (row.reaction_used_round === table.combat_round) {
+    return { ok: false, error: 'Ya has usado tu reacción esta ronda' };
+  }
+  db.prepare('UPDATE combatants SET reaction_used_round = ? WHERE id = ?').run(
+    table.combat_round,
+    combatantId
+  );
+  return { ok: true };
+}
+
 // Si ya no queda ningún combatiente de tipo enemigo, se acabó el encuentro:
 // vuelve a movimiento libre sola. Devuelve true si acaba de desactivarse
 // (para que quien llame decida si avisar por el chat).
