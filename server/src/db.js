@@ -320,6 +320,24 @@ const migrations = [
   ALTER TABLE combatants ADD COLUMN bonus_used INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE combatants ADD COLUMN reaction_used_round INTEGER;
   `,
+
+  // v15 — Fase 8.6: notas privadas por personaje (diario de sesión). A
+  // diferencia de todo lo demás en la app, ni el DM las ve: son del jugador
+  // y punto, se filtran igual que el resto de datos ocultos pero sin
+  // excepción para el DM. session_date es texto libre (el jugador escribe
+  // la fecha de la sesión, no tiene por qué ser la fecha real de creación).
+  `
+  CREATE TABLE character_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT '',
+    session_date TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_character_notes_character ON character_notes(character_id);
+  `,
 ];
 
 export function runMigrations() {
