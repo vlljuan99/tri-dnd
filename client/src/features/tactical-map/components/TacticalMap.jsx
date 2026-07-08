@@ -6,6 +6,7 @@ import { cellKey } from '../domain/cells.js';
 import { useRoom } from '../../../store/socket.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
+import InventoryPanel from './InventoryPanel.jsx';
 import MapControls from './MapControls.jsx';
 
 class CanvasErrorBoundary extends Component {
@@ -56,6 +57,7 @@ export default function TacticalMap({
   const [measureMode, setMeasureMode] = useState(false);
   const [measurePoints, setMeasurePoints] = useState([]);
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -131,10 +133,12 @@ export default function TacticalMap({
         (clicked.characterId && clicked.characterId !== selectedToken?.characterId));
     if (canAttackFrom && attackable) {
       setCombatTarget(clicked);
+      setInventoryOpen(false);
       return;
     }
     setSelectedTokenId(tokenId);
     setCombatTarget(null);
+    setInventoryOpen(false);
   }
 
   function sendCameraCommand(type) {
@@ -278,12 +282,24 @@ export default function TacticalMap({
                 }${canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'}`
               : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
           {selectedToken?.characterId && (
-            <Link
-              to={`/personajes/${selectedToken.characterId}`}
-              className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
-            >
-              Ver ficha
-            </Link>
+            <>
+              <Link
+                to={`/personajes/${selectedToken.characterId}`}
+                className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
+              >
+                Ver ficha
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  setInventoryOpen((v) => !v);
+                  setCombatTarget(null);
+                }}
+                className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
+              >
+                Inventario
+              </button>
+            </>
           )}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
@@ -345,6 +361,16 @@ export default function TacticalMap({
           attacker={selectedToken}
           target={combatTarget}
           onClose={() => setCombatTarget(null)}
+        />
+      )}
+
+      {inventoryOpen && selectedToken?.characterId && (
+        <InventoryPanel
+          token={selectedToken}
+          isOwner={selectedToken.ownerUserId === user?.id}
+          isDm={isDm}
+          combat={combat}
+          onClose={() => setInventoryOpen(false)}
         />
       )}
 
