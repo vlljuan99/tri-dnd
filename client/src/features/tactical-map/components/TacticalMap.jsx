@@ -82,9 +82,12 @@ export default function TacticalMap({
   const activeToken = activeCombatant?.characterId
     ? map.tokens.find((t) => t.characterId === activeCombatant.characterId) ?? null
     : null;
-  const myTurn = Boolean(
-    activeToken && (isDm || canMoveToken({ token: activeToken, user, role }))
-  );
+  // Es realmente TU turno (para el texto del banner): tu propio personaje,
+  // nunca el DM salvo que además sea el dueño (caso raro, PJ del propio DM)
+  const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
+  // Quién puede pulsar "Terminar turno": el dueño, o siempre el DM (puede
+  // controlar el combatiente activo, sea un PJ o un enemigo)
+  const myTurn = Boolean(activeToken) && (isDm || isOwnCharacterTurn);
 
   // Área de movimiento: casillas alcanzables por el combatiente activo con
   // lo que le queda de movimiento (visible para toda la mesa al seleccionar
@@ -208,8 +211,10 @@ export default function TacticalMap({
           <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-sm border border-gold/25 bg-night-950/60 px-2 py-1">
             <span className="font-display text-xs uppercase tracking-widest text-gold/90">
               Ronda {combat.round}
-              {activeCombatant && myTurn && <span className="ml-1 animate-pulse text-blood">· ¡TU TURNO!</span>}
-              {activeCombatant && !myTurn && (
+              {activeCombatant && isOwnCharacterTurn && (
+                <span className="ml-1 animate-pulse text-blood">· ¡TU TURNO!</span>
+              )}
+              {activeCombatant && !isOwnCharacterTurn && (
                 <>
                   {' · turno de '}
                   <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
