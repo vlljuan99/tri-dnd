@@ -224,3 +224,82 @@ charactersRouter.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM characters WHERE id = ?').run(row.id);
   res.json({ ok: true });
 });
+
+// --- Notas privadas del personaje (Fase 8.6) ------------------------------
+// Diario de sesión: varias notas con título y fecha de sesión. A diferencia
+// de todo lo demás en la app, esto es estrictamente del dueño del
+// personaje: getOwned ya rechaza a cualquiera que no sea él, sin excepción
+// para el DM (no hay "isDm" en ningún sitio de este bloque).
+
+function serializeNote(row) {
+  return {
+    id: row.id,
+    characterId: row.character_id,
+    title: row.title,
+    sessionDate: row.session_date,
+    body: row.body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+charactersRouter.get('/:id/notas', (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+  const notes = db
+    .prepare('SELECT * FROM character_notes WHERE character_id = ? ORDER BY id DESC')
+    .all(row.id);
+  res.json({ notes: notes.map(serializeNote) });
+});
+
+charactersRouter.post('/:id/notas', (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+  const { title, sessionDate, body } = req.body ?? {};
+  const info = db
+    .prepare('INSERT INTO character_notes (character_id, title, session_date, body) VALUES (?, ?, ?, ?)')
+    .run(
+      row.id,
+      typeof title === 'string' ? title.trim().slice(0, 120) : '',
+      typeof sessionDate === 'string' ? sessionDate.trim().slice(0, 40) : '',
+      typeof body === 'string' ? body.slice(0, 20000) : ''
+    );
+  const note = db.prepare('SELECT * FROM character_notes WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json({ note: serializeNote(note) });
+});
+
+function getOwnedNote(req, res) {
+  const character = getOwned(req, res);
+  if (!character) return null;
+  const note = db
+    .prepare('SELECT * FROM character_notes WHERE id = ? AND character_id = ?')
+    .get(req.params.noteId, character.id);
+  if (!note) {
+    res.status(404).json({ error: 'Nota no encontrada' });
+    return null;
+  }
+  return note;
+}
+
+charactersRouter.put('/:id/notas/:noteId', (req, res) => {
+  const note = getOwnedNote(req, res);
+  if (!note) return;
+  const { title, sessionDate, body } = req.body ?? {};
+  db.prepare(
+    `UPDATE character_notes SET title = ?, session_date = ?, body = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(
+    typeof title === 'string' ? title.trim().slice(0, 120) : note.title,
+    typeof sessionDate === 'string' ? sessionDate.trim().slice(0, 40) : note.session_date,
+    typeof body === 'string' ? body.slice(0, 20000) : note.body,
+    note.id
+  );
+  const updated = db.prepare('SELECT * FROM character_notes WHERE id = ?').get(note.id);
+  res.json({ note: serializeNote(updated) });
+});
+
+charactersRouter.delete('/:id/notas/:noteId', (req, res) => {
+  const note = getOwnedNote(req, res);
+  if (!note) return;
+  db.prepare('DELETE FROM character_notes WHERE id = ?').run(note.id);
+  res.json({ ok: true });
+});
