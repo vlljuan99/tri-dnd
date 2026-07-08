@@ -1,6 +1,8 @@
 import { Component, useEffect, useMemo, useState } from 'react';
 import { worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
+import { cellKey } from '../domain/cells.js';
+import { useRoom } from '../../../store/socket.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
 import MapControls from './MapControls.jsx';
@@ -59,6 +61,51 @@ export default function TacticalMap({
   );
   const selectedCell = selectedToken ? worldToGrid(selectedToken.position, map.gridSize) : null;
   const isDm = role === 'dm';
+
+  // --- Economía de turno (Fase 8.5) ---------------------------------
+  const combat = useRoom((s) => s.combat);
+  const endTurn = useRoom((s) => s.endTurn);
+  const activeCombatant = combat.active
+    ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
+    : null;
+  // ¿El combatiente activo es un PJ de este usuario? (el DM controla todos)
+  const activeToken = activeCombatant?.characterId
+    ? map.tokens.find((t) => t.characterId === activeCombatant.characterId) ?? null
+    : null;
+  const myTurn = Boolean(
+    activeToken && (isDm || canMoveToken({ token: activeToken, user, role }))
+  );
+
+  // Área de movimiento: casillas alcanzables por el combatiente activo con
+  // lo que le queda de movimiento (visible para toda la mesa al seleccionar
+  // su token). Misma regla que valida el servidor: distancia Chebyshev
+  // dentro del presupuesto, sobre casillas pisables (ni vacío ni obstáculo).
+  const reachableCells = useMemo(() => {
+    if (!combat.active || !activeCombatant?.speed || !activeToken) return [];
+    if (!selectedToken || selectedToken.id !== activeToken.id) return [];
+    const remaining = Math.floor(activeCombatant.speed / 5) - (activeCombatant.movedSquares ?? 0);
+    if (remaining <= 0) return [];
+
+    const blocked = new Set(map.disabledCells.map(([c, r]) => cellKey(c, r)));
+    for (const room of map.rooms ?? []) {
+      for (const [c, r] of room.obstacleCells ?? []) {
+        blocked.add(cellKey(room.col + c, room.row + r));
+      }
+    }
+    const origin = worldToGrid(activeToken.position, map.gridSize);
+    const cols = Math.round(map.width / map.gridSize);
+    const rows = Math.round(map.height / map.gridSize);
+    const cells = [];
+    for (let row = origin.row - remaining; row <= origin.row + remaining; row += 1) {
+      for (let col = origin.col - remaining; col <= origin.col + remaining; col += 1) {
+        if (col < 0 || row < 0 || col >= cols || row >= rows) continue;
+        if (col === origin.col && row === origin.row) continue;
+        if (blocked.has(cellKey(col, row))) continue;
+        cells.push({ col, row });
+      }
+    }
+    return cells;
+  }, [activeCombatant, activeToken, combat.active, map, selectedToken]);
 
   // El objetivo del combate se mantiene fresco con cada refresco del mapa
   // (su HP cambia al recibir daño); si desaparece (ha caído), el panel se cierra
@@ -139,11 +186,45 @@ export default function TacticalMap({
           measureMode={measureMode}
           measurePoints={measurePoints}
           onMeasurePoint={addMeasurePoint}
+          reachableCells={reachableCells}
         />
       </CanvasErrorBoundary>
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
+        {combat.active && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-sm border border-gold/25 bg-night-950/60 px-2 py-1">
+            <span className="font-display text-xs uppercase tracking-widest text-gold/90">
+              Ronda {combat.round}
+              {activeCombatant && (
+                <>
+                  {' · turno de '}
+                  <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
+                    {activeCombatant.name}
+                  </span>
+                </>
+              )}
+            </span>
+            {activeCombatant?.speed != null && (
+              <span className="font-mono text-[0.65rem] text-bone/60">
+                mov {Math.max(0, Math.floor(activeCombatant.speed / 5) - (activeCombatant.movedSquares ?? 0))} cas
+                {activeCombatant.actionUsed ? ' · sin acción' : ' · acción lista'}
+              </span>
+            )}
+            {myTurn && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const resp = await endTurn();
+                  if (resp?.error) window.alert(resp.error);
+                }}
+                className="rounded-sm bg-gold px-2 py-0.5 font-display text-[0.65rem] uppercase tracking-widest text-night-950 hover:bg-gold/90"
+              >
+                Terminar turno
+              </button>
+            )}
+          </div>
+        )}
         {(map.floors?.length ?? 0) > 1 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {map.floors.map((floor) => (

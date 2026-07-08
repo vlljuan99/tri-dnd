@@ -7,6 +7,7 @@ import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
 import MapToken from './MapToken.jsx';
 import MeasureOverlay from './MeasureOverlay.jsx';
+import MovementRange from './MovementRange.jsx';
 import PingMarker from './PingMarker.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
 
@@ -81,6 +82,7 @@ export default function TacticalMapCanvas({
   measureMode = false,
   measurePoints = [],
   onMeasurePoint,
+  reachableCells = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -106,6 +108,7 @@ export default function TacticalMapCanvas({
       />
       <MapFloor map={map} />
       <MapGrid map={map} visible={showGrid} />
+      <MovementRange cells={reachableCells} gridSize={map.gridSize} />
       {(map.doors ?? []).map((door, index) => (
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}
