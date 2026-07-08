@@ -1,4 +1,5 @@
 import { Component, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
@@ -197,7 +198,8 @@ export default function TacticalMap({
           <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-sm border border-gold/25 bg-night-950/60 px-2 py-1">
             <span className="font-display text-xs uppercase tracking-widest text-gold/90">
               Ronda {combat.round}
-              {activeCombatant && (
+              {activeCombatant && myTurn && <span className="ml-1 animate-pulse text-blood">· ¡TU TURNO!</span>}
+              {activeCombatant && !myTurn && (
                 <>
                   {' · turno de '}
                   <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
@@ -275,6 +277,14 @@ export default function TacticalMap({
                     : ''
                 }${canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'}`
               : 'Selecciona un token y pulsa una casilla. Puerta: clic para abrir. Doble clic: ping.'}
+          {selectedToken?.characterId && (
+            <Link
+              to={`/personajes/${selectedToken.characterId}`}
+              className="ml-2 text-gold underline decoration-dotted hover:text-gold/80"
+            >
+              Ver ficha
+            </Link>
+          )}
         </p>
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
         {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}

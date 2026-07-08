@@ -138,6 +138,13 @@ export const useRoom = create((set, get) => ({
     return new Promise((resolve) => socket.emit('combate:danio', { campaignId, ...payload }, resolve));
   },
 
+  /** Usa un objeto del inventario en tu turno; gasta la acción, como atacar. */
+  useItem(characterId, itemId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('objeto:usar', { campaignId, characterId, itemId }, resolve));
+  },
+
   // --- Tracker de iniciativa ---------------------------------------
 
   addCombatant(payload) {
