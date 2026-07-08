@@ -59,7 +59,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Ciclo de encuentro automático**: al caer el último enemigo, vuelta a modo libre sola; al revelarse un enemigo nuevo en modo libre, turnos reactivados como encuentro fresco (iniciativas y recursos re-tirados). El banner del tablero muestra ronda, turno, movimiento restante y acción, con "Terminar turno" y el alternador del DM tanto en el tablero como en el tracker
   - Siguientes iteraciones: coste de movimiento por camino real (pathing, fase 14) en vez de distancia en línea, y ataques de oportunidad automáticos
 
-- [ ] **Fase 8.6 (en curso)** — Mesa de juego unificada: el tablero como pantalla principal
+- [x] **Fase 8.6** — Mesa de juego unificada: el tablero como pantalla principal
   - **Una sola pantalla** (`/campanas/:id`): el tablero táctico ocupa toda la vista, con paneles superpuestos para chat/registro, iniciativa, inventario y notas — nada de navegar entre "mesa" (chat) y "tablero" (mapa) como hasta ahora. `/campanas/:id/tablero` redirige a la nueva pantalla única, que conserva el nombre "Mesa de juego"
   - **"¡Tu turno!"** destacado en el banner de ronda cuando te toca a ti, frente a "Turno de X" para los demás — reutiliza la economía de turno de la Fase 8.5
   - **Orden de iniciativa** siempre accesible desde el tablero (ya lo veía cualquier jugador, pero solo en la pestaña de la página de chat, oculta en móvil)
