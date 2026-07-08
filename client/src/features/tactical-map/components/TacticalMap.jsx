@@ -8,6 +8,7 @@ import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
 import InventoryPanel from './InventoryPanel.jsx';
 import NotesPanel from './NotesPanel.jsx';
+import GameDrawer from './GameDrawer.jsx';
 import MapControls from './MapControls.jsx';
 
 class CanvasErrorBoundary extends Component {
@@ -52,6 +53,7 @@ export default function TacticalMap({
   backToCampaignHref,
   editorHref,
   ownCharacterId,
+  campaignId,
 }) {
   const [selectedTokenId, setSelectedTokenId] = useState(null);
   const [showGrid, setShowGrid] = useState(true);
@@ -61,6 +63,7 @@ export default function TacticalMap({
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -381,6 +384,15 @@ export default function TacticalMap({
         <NotesPanel characterId={ownCharacterId} onClose={() => setNotesOpen(false)} />
       )}
 
+      {drawerOpen && (
+        <GameDrawer
+          campaignId={campaignId}
+          isDm={isDm}
+          userId={user?.id}
+          onClose={() => setDrawerOpen(false)}
+        />
+      )}
+
       <MapControls
         showGrid={showGrid}
         selectedToken={selectedToken}
@@ -403,6 +415,8 @@ export default function TacticalMap({
         hasOwnCharacter={Boolean(ownCharacterId)}
         notesOpen={notesOpen}
         onToggleNotes={() => setNotesOpen((v) => !v)}
+        drawerOpen={drawerOpen}
+        onToggleDrawer={() => setDrawerOpen((v) => !v)}
       />
     </section>
   );

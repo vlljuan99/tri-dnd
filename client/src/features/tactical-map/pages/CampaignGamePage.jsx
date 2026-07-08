@@ -14,6 +14,8 @@ export default function CampaignGamePage() {
   const mapVersion = useRoom((s) => s.mapVersion);
   const pings = useRoom((s) => s.pings);
   const sendPing = useRoom((s) => s.sendPing);
+  const isLive = useRoom((s) => s.isLive);
+  const setLive = useRoom((s) => s.setLive);
 
   // Unirse a la sala de la campaña para recibir 'mapa:actualizado' aunque
   // se llegue al tablero directamente, sin pasar por la mesa
@@ -107,20 +109,34 @@ export default function CampaignGamePage() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gold/20 bg-night-900 px-4 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <Link to={`/campanas/${campaignId}`} className="font-display text-sm text-gold/70 hover:text-gold">
-              Volver a mesa
+            <Link to="/" className="font-display text-sm text-gold/70 hover:text-gold">
+              ← Hub
             </Link>
             <h1 className="truncate font-display text-xl tracking-wide text-gold">
-              {campaign?.name || 'Mapa táctico'}
+              {campaign?.name || 'Mesa de juego'}
             </h1>
+            {isLive && (
+              <span className="flex items-center gap-1.5 rounded-sm border border-ember/60 px-2 py-0.5 text-xs text-ember">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-ember" /> EN VIVO
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-bone/60">
             {user?.displayName || user?.username || 'Usuario'} · {campaign?.role === 'dm' ? 'DM' : 'Jugador'}
           </p>
         </div>
-        <span className="rounded-sm border border-gold/25 px-3 py-1 font-display text-xs uppercase tracking-widest text-gold/80">
-          Tablero cenital
-        </span>
+        {campaign?.role === 'dm' && (
+          <button
+            onClick={() => setLive(!isLive)}
+            className={`rounded-sm border px-3 py-1 font-display text-sm tracking-wide transition-colors ${
+              isLive
+                ? 'border-blood/60 text-blood hover:bg-blood/10'
+                : 'border-moss text-bone hover:bg-moss/20'
+            }`}
+          >
+            {isLive ? 'Cerrar sesión de juego' : 'Abrir sesión de juego'}
+          </button>
+        )}
       </header>
 
       {mapLoading ? (
@@ -135,8 +151,8 @@ export default function CampaignGamePage() {
               Abrir el editor de campaña
             </Link>
           )}
-          <Link to={`/campanas/${campaignId}`} className="text-bone/70 underline">
-            Volver a la campaña
+          <Link to="/" className="text-bone/70 underline">
+            Volver al hub
           </Link>
         </div>
       ) : (
@@ -160,9 +176,10 @@ export default function CampaignGamePage() {
               y: Math.floor(world.z / map.gridSize) + (map.origin?.y ?? 0),
             })
           }
-          backToCampaignHref={`/campanas/${campaignId}`}
+          backToCampaignHref="/"
           editorHref={`/campanas/${campaignId}/editor`}
           ownCharacterId={campaignCharacters.find((c) => c.user_id === user?.id)?.id ?? null}
+          campaignId={campaignId}
         />
       )}
     </div>
