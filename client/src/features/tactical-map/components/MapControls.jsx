@@ -15,12 +15,11 @@ export default function MapControls({
   onToggleGrid,
   onClearSelection,
   onNudgeToken,
-  backToCampaignHref,
   drawerOpen,
   onToggleDrawer,
 }) {
   return (
-    <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-end justify-between gap-2 sm:inset-x-4 sm:bottom-4">
+    <div className="pointer-events-none flex flex-wrap items-end justify-between gap-2">
       <div className="pointer-events-auto flex flex-wrap gap-2 rounded-sm border border-gold/20 bg-night-900/90 p-2 shadow-xl backdrop-blur">
         <button
           type="button"
@@ -142,8 +141,10 @@ export default function MapControls({
         {isDm && (
           <button
             type="button"
-            aria-label="Ver el mapa como lo ven los jugadores"
-            aria-pressed={playerView}
+            role="switch"
+            aria-checked={playerView}
+            aria-label="Alternar entre vista DM y vista jugador"
+            title="Alterna qué ve el tablero: tu vista de DM o la vista filtrada del grupo"
             onClick={onTogglePlayerView}
             className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
               playerView
@@ -151,20 +152,9 @@ export default function MapControls({
                 : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
             }`}
           >
-            {playerView ? 'Ojo jugador: sí' : 'Ojo jugador'}
+            {playerView ? 'Vista jugador' : 'Vista DM'}
           </button>
         )}
-        {isDm && (
-          <span className="rounded-sm border border-ember/50 bg-night-900/90 px-3 py-2 font-display text-xs uppercase tracking-widest text-ember">
-            Modo DM
-          </span>
-        )}
-        <Link
-          to={backToCampaignHref}
-          className="rounded-sm bg-gold px-3 py-2 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"
-        >
-          Volver
-        </Link>
       </div>
     </div>
   );

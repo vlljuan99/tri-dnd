@@ -51,7 +51,6 @@ export default function TacticalMap({
   onSelectFloor,
   playerView,
   onTogglePlayerView,
-  backToCampaignHref,
   editorHref,
   ownCharacterId,
   campaignId,
@@ -89,12 +88,26 @@ export default function TacticalMap({
   // PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
 
-  // --- Barra de estado del propio personaje (HUD) --------------------
-  // El combatiente (HP/CA/recursos del turno) viaja siempre, con o sin modo
-  // por turnos activo: solo el movimiento/acción se muestran condicionados
-  // a que el modo esté encendido (PlayerHud decide eso con combatActive)
+  // --- Barra de estado (HUD) ------------------------------------------
+  // El jugador siempre ve su propio personaje (útil saber tu HP aunque no
+  // sea tu turno). El DM ve al combatiente ACTIVO —enemigo o PJ—, porque es
+  // quien "juega" el turno de verdad: mostrarle siempre su propio PJ (si
+  // tiene uno en esta partida) confundía de quién era el turno.
   const myToken = ownCharacterId ? map.tokens.find((t) => t.characterId === ownCharacterId) ?? null : null;
   const myCombatant = combat.combatants.find((c) => c.characterId === ownCharacterId) ?? null;
+  const hudCombatant = isDm ? activeCombatant ?? myCombatant : myCombatant;
+  const hudCharacterId = hudCombatant?.characterId ?? null;
+  const hudToken = hudCharacterId
+    ? map.tokens.find((t) => t.characterId === hudCharacterId) ?? null
+    : null;
+  // Enemigo activo: sin ficha ni token de personaje, solo nombre + lo que
+  // trae el combatiente (HP/CA/velocidad, ya filtrados para el DM en servidor)
+  const hudDisplay = hudCombatant
+    ? { name: hudToken?.name ?? hudCombatant.name, imageUrl: hudToken?.imageUrl }
+    : null;
+  // Las notas son estrictamente privadas: el botón solo aparece viendo tu
+  // propio personaje, nunca el de otro aunque seas el DM
+  const canSeeHudNotes = Boolean(hudCharacterId) && hudCharacterId === ownCharacterId;
 
   // Área de movimiento: casillas alcanzables por el combatiente activo con
   // lo que le queda de movimiento (visible para toda la mesa al seleccionar
@@ -326,37 +339,23 @@ export default function TacticalMap({
         />
       )}
 
-      {inventoryOpen && myToken && (
+      {inventoryOpen && hudToken && (
         <InventoryPanel
-          token={myToken}
-          isOwner
+          token={hudToken}
+          isOwner={hudToken.ownerUserId === user?.id}
           isDm={isDm}
           combat={combat}
           onClose={() => setInventoryOpen(false)}
         />
       )}
 
-      {notesOpen && ownCharacterId && (
+      {notesOpen && canSeeHudNotes && (
         <NotesPanel characterId={ownCharacterId} onClose={() => setNotesOpen(false)} />
       )}
 
-      {sheetOpen && ownCharacterId && (
-        <CharacterQuickView characterId={ownCharacterId} onClose={() => setSheetOpen(false)} />
+      {sheetOpen && hudCharacterId && (
+        <CharacterQuickView characterId={hudCharacterId} onClose={() => setSheetOpen(false)} />
       )}
-
-      <PlayerHud
-        token={myToken}
-        combatant={myCombatant}
-        combatActive={combat.active}
-        isMyTurn={isOwnCharacterTurn}
-        onEndTurn={async () => {
-          const resp = await endTurn();
-          if (resp?.error) window.alert(resp.error);
-        }}
-        onOpenSheet={() => setSheetOpen(true)}
-        onOpenInventory={() => setInventoryOpen((v) => !v)}
-        onOpenNotes={() => setNotesOpen((v) => !v)}
-      />
 
       {drawerOpen && (
         <GameDrawer
@@ -367,28 +366,53 @@ export default function TacticalMap({
         />
       )}
 
-      <MapControls
-        showGrid={showGrid}
-        selectedToken={selectedToken}
-        isDm={isDm}
-        measureMode={measureMode}
-        onToggleMeasureMode={toggleMeasureMode}
-        playerView={playerView}
-        onTogglePlayerView={onTogglePlayerView}
-        editorHref={editorHref}
-        onCenter={() => sendCameraCommand('center')}
-        onZoomIn={() => sendCameraCommand('zoom-in')}
-        onZoomOut={() => sendCameraCommand('zoom-out')}
-        onToggleGrid={() => setShowGrid((value) => !value)}
-        onClearSelection={() => {
-          setSelectedTokenId(null);
-          setCombatTarget(null);
-        }}
-        onNudgeToken={nudgeSelectedToken}
-        backToCampaignHref={backToCampaignHref}
-        drawerOpen={drawerOpen}
-        onToggleDrawer={() => setDrawerOpen((v) => !v)}
-      />
+      {/* HUD y controles apilados en flujo normal (no cada uno con su propio
+          "absolute bottom-X"): así nunca se solapan, tengan la altura que tengan */}
+      <div className="absolute inset-x-3 bottom-3 z-10 flex flex-col gap-2 sm:inset-x-4 sm:bottom-4">
+        <PlayerHud
+          token={hudDisplay}
+          combatant={hudCombatant}
+          combatActive={combat.active}
+          // El botón de terminar turno es de quien de verdad puede pulsarlo:
+          // el dueño del PJ mostrado, o el DM (controla enemigos y, si hace
+          // falta, PJ ausentes)
+          isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
+          onEndTurn={async () => {
+            const resp = await endTurn();
+            if (resp?.error) window.alert(resp.error);
+          }}
+          // Ficha/Inventario son conceptos de personaje: no existen para un
+          // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
+          // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto
+          characterId={hudCharacterId}
+          canSeeNotes={canSeeHudNotes}
+          onOpenSheet={() => setSheetOpen(true)}
+          onOpenInventory={() => setInventoryOpen((v) => !v)}
+          onOpenNotes={() => setNotesOpen((v) => !v)}
+        />
+
+        <MapControls
+          showGrid={showGrid}
+          selectedToken={selectedToken}
+          isDm={isDm}
+          measureMode={measureMode}
+          onToggleMeasureMode={toggleMeasureMode}
+          playerView={playerView}
+          onTogglePlayerView={onTogglePlayerView}
+          editorHref={editorHref}
+          onCenter={() => sendCameraCommand('center')}
+          onZoomIn={() => sendCameraCommand('zoom-in')}
+          onZoomOut={() => sendCameraCommand('zoom-out')}
+          onToggleGrid={() => setShowGrid((value) => !value)}
+          onClearSelection={() => {
+            setSelectedTokenId(null);
+            setCombatTarget(null);
+          }}
+          onNudgeToken={nudgeSelectedToken}
+          drawerOpen={drawerOpen}
+          onToggleDrawer={() => setDrawerOpen((v) => !v)}
+        />
+      </div>
     </section>
   );
 }

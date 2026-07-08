@@ -116,7 +116,10 @@ export default function CampaignGamePage() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gold/20 bg-night-900 px-4 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <Link to="/" className="font-display text-sm text-gold/70 hover:text-gold">
+            <Link
+              to="/"
+              className="rounded-sm border border-gold/25 px-2.5 py-1 font-display text-sm text-gold/80 hover:border-gold hover:text-gold"
+            >
               ← Hub
             </Link>
             <h1 className="truncate font-display text-xl tracking-wide text-gold">
@@ -125,6 +128,11 @@ export default function CampaignGamePage() {
             {isDm && isLive && (
               <span className="flex items-center gap-1.5 rounded-sm border border-ember/60 px-2 py-0.5 text-xs text-ember">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-ember" /> EN VIVO
+              </span>
+            )}
+            {isDm && (
+              <span className="rounded-sm border border-ember/50 bg-night-900/90 px-2 py-0.5 font-display text-xs uppercase tracking-widest text-ember">
+                Modo DM
               </span>
             )}
           </div>
@@ -136,10 +144,11 @@ export default function CampaignGamePage() {
           {combat.active && activeCombatant && (
             <span className="font-display text-sm uppercase tracking-widest text-gold/90">
               Ronda {combat.round}
+              {' · '}
               {isMyTurn ? (
-                <span className="ml-1.5 animate-pulse text-blood">¡TU TURNO!</span>
+                <span className="animate-pulse text-blood">¡TU TURNO!</span>
               ) : (
-                <span className="ml-1.5 text-bone/70">
+                <span className="text-bone/70">
                   turno de{' '}
                   <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
                     {activeCombatant.name}
@@ -200,7 +209,6 @@ export default function CampaignGamePage() {
               y: Math.floor(world.z / map.gridSize) + (map.origin?.y ?? 0),
             })
           }
-          backToCampaignHref="/"
           editorHref={`/campanas/${campaignId}/editor`}
           ownCharacterId={ownCharacterId}
           campaignId={campaignId}

@@ -7,6 +7,8 @@ export default function PlayerHud({
   combatant,
   combatActive,
   isMyTurn,
+  characterId,
+  canSeeNotes,
   onEndTurn,
   onOpenSheet,
   onOpenInventory,
@@ -26,7 +28,7 @@ export default function PlayerHud({
   const gated = Boolean(combatActive && combatant); // movimiento/acción solo tienen sentido con el modo activo
 
   return (
-    <div className="absolute inset-x-3 bottom-20 z-10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 text-bone shadow-xl backdrop-blur sm:inset-x-4 sm:bottom-24">
+    <div className="pointer-events-auto flex flex-wrap items-center gap-x-4 gap-y-2 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 text-bone shadow-xl backdrop-blur">
       <div className="flex items-center gap-2">
         {token.imageUrl ? (
           <img src={token.imageUrl} alt="" className="h-10 w-10 rounded-full border border-gold/40 object-cover" />
@@ -70,24 +72,30 @@ export default function PlayerHud({
       )}
 
       <div className="ml-auto flex flex-wrap items-center gap-1.5">
-        <button
-          onClick={onOpenSheet}
-          className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
-        >
-          Ficha
-        </button>
-        <button
-          onClick={onOpenInventory}
-          className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
-        >
-          Inventario
-        </button>
-        <button
-          onClick={onOpenNotes}
-          className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
-        >
-          Notas
-        </button>
+        {characterId && (
+          <button
+            onClick={onOpenSheet}
+            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+          >
+            Ficha
+          </button>
+        )}
+        {characterId && (
+          <button
+            onClick={onOpenInventory}
+            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+          >
+            Inventario
+          </button>
+        )}
+        {canSeeNotes && (
+          <button
+            onClick={onOpenNotes}
+            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+          >
+            Notas
+          </button>
+        )}
         {isMyTurn && (
           <button
             onClick={onEndTurn}
