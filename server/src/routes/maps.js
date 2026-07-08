@@ -21,6 +21,7 @@ import {
   spawnRoomEnemies,
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyIfActive, notifyCombat } from '../services/liveMap.js';
+import { trySpendEnemyMovement } from '../services/turnEconomy.js';
 
 // Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
 // sockets de la campaña para que recarguen su vista (ya filtrada por rol)
@@ -508,6 +509,13 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       return res.status(400).json({ error: 'El marcador debe quedar en una casilla activa de una sala' });
     }
     roomId = targetRoom.id;
+
+    // Con el modo por turnos activo, arrastrar un enemigo también gasta su
+    // movimiento y se bloquea fuera de su turno o al agotarlo — misma
+    // economía que un jugador, para que el DM no lo mueva más de la cuenta.
+    const distance = Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
+    const spend = trySpendEnemyMovement(req.params.campaignId, token.id, distance);
+    if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
 
   db.prepare('UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ? WHERE id = ?').run(
@@ -520,6 +528,8 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     token.id
   );
   touchAndNotify(map);
+  // El movimiento gastado se refleja en vivo en el tracker/HUD del DM
+  if (x !== undefined || y !== undefined) notifyCombat(map.campaign_id);
 
   const updated = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(token.id);
   res.json({ token: serializeToken(updated) });

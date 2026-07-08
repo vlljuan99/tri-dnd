@@ -10,6 +10,7 @@ import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import {
   orderedCombatants,
   rollInitiativeValue,
+  monsterSpeedFeet,
   startTurnFor,
   ensureTurnStarted,
   activateTurnMode,
@@ -81,7 +82,13 @@ function combatantView(row, { isDm, round }) {
     const c = db.prepare('SELECT hp_current, hp_max, ac, speed FROM characters WHERE id = ?').get(row.character_id);
     if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac, speed: c.speed });
   } else if (row.kind === 'enemigo' && isDm) {
-    Object.assign(base, { hpCurrent: row.hp_current, hpMax: row.hp_max, ac: row.ac, monsterIndex: row.monster_index });
+    Object.assign(base, {
+      hpCurrent: row.hp_current,
+      hpMax: row.hp_max,
+      ac: row.ac,
+      monsterIndex: row.monster_index,
+      speed: monsterSpeedFeet(row.monster_index),
+    });
   }
   return base;
 }

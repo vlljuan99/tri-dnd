@@ -49,6 +49,22 @@ export function rollInitiativeValue(row) {
   return rollD20() + dexModifierForCombatant(row);
 }
 
+// Velocidad a pie de un monstruo del compendio SRD (p. ej. "30 ft." → 30).
+// null si no tiene monster_index o no trae ese dato: la mesa decide a mano.
+export function monsterSpeedFeet(monsterIndex) {
+  if (!monsterIndex) return null;
+  const entry = db
+    .prepare("SELECT data FROM srd_entries WHERE category = 'monsters' AND idx = ?")
+    .get(monsterIndex);
+  if (!entry) return null;
+  try {
+    const match = /(\d+)/.exec(JSON.parse(entry.data).speed?.walk ?? '');
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function orderedCombatants(campaignId) {
   return db
     .prepare('SELECT * FROM combatants WHERE campaign_id = ? ORDER BY initiative DESC, id ASC')
@@ -189,6 +205,36 @@ export function trySpendAction(campaignId, characterId) {
   if (!check.gated) return { ok: true };
   if (check.combatant.action_used) return { ok: false, error: 'Ya has usado tu acción este turno' };
   db.prepare('UPDATE combatants SET action_used = 1 WHERE id = ?').run(check.combatant.id);
+  return { ok: true };
+}
+
+// Gasta movimiento de un enemigo arrastrado por el DM en el tablero: misma
+// economía que un jugador (presupuesto por turno, bloqueado fuera de su
+// turno), pero identificado por su marcador de mapa y con la velocidad del
+// monstruo del compendio SRD en vez de characters.speed. Si el marcador aún
+// no tiene combatiente (no ha entrado al tracker) no hay economía que
+// aplicar: se mueve libre, como cualquier objeto/aliado del editor.
+export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
+  const combatant = db
+    .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ? AND kind = 'enemigo'")
+    .get(campaignId, mapTokenId);
+  if (!combatant) return { ok: true };
+
+  const table = db
+    .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active || squares <= 0) return { ok: true };
+  if (table.combat_turn_id !== combatant.id) {
+    return { ok: false, error: 'No es el turno de este enemigo' };
+  }
+
+  const budget = Math.floor((monsterSpeedFeet(combatant.monster_index) ?? 30) / 5);
+  const nextTotal = combatant.moved_squares + squares;
+  if (nextTotal > budget) {
+    const left = Math.max(0, budget - combatant.moved_squares);
+    return { ok: false, error: `Sin movimiento suficiente (le quedan ${left} casillas este turno)` };
+  }
+  db.prepare('UPDATE combatants SET moved_squares = ? WHERE id = ?').run(nextTotal, combatant.id);
   return { ok: true };
 }
 
