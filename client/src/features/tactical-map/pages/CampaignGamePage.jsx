@@ -29,6 +29,13 @@ export default function CampaignGamePage() {
   const [doorError, setDoorError] = useState('');
   const [floorId, setFloorId] = useState(null);
   const [playerView, setPlayerView] = useState(false);
+  const combat = useRoom((s) => s.combat);
+  const isDm = campaign?.role === 'dm';
+  const ownCharacterId = campaignCharacters.find((c) => c.user_id === user?.id)?.id ?? null;
+  const activeCombatant = combat.active
+    ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
+    : null;
+  const isMyTurn = Boolean(activeCombatant && ownCharacterId && activeCombatant.characterId === ownCharacterId);
 
   // Abrir una puerta (o alternarla, si eres DM). El nuevo estado del mapa
   // llega a todos —incluido quien pulsa— por el evento de socket.
@@ -115,28 +122,45 @@ export default function CampaignGamePage() {
             <h1 className="truncate font-display text-xl tracking-wide text-gold">
               {campaign?.name || 'Mesa de juego'}
             </h1>
-            {isLive && (
+            {isDm && isLive && (
               <span className="flex items-center gap-1.5 rounded-sm border border-ember/60 px-2 py-0.5 text-xs text-ember">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-ember" /> EN VIVO
               </span>
             )}
           </div>
           <p className="mt-1 text-xs text-bone/60">
-            {user?.displayName || user?.username || 'Usuario'} · {campaign?.role === 'dm' ? 'DM' : 'Jugador'}
+            {user?.displayName || user?.username || 'Usuario'} · {isDm ? 'DM' : 'Jugador'}
           </p>
         </div>
-        {campaign?.role === 'dm' && (
-          <button
-            onClick={() => setLive(!isLive)}
-            className={`rounded-sm border px-3 py-1 font-display text-sm tracking-wide transition-colors ${
-              isLive
-                ? 'border-blood/60 text-blood hover:bg-blood/10'
-                : 'border-moss text-bone hover:bg-moss/20'
-            }`}
-          >
-            {isLive ? 'Cerrar sesión de juego' : 'Abrir sesión de juego'}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {combat.active && activeCombatant && (
+            <span className="font-display text-sm uppercase tracking-widest text-gold/90">
+              Ronda {combat.round}
+              {isMyTurn ? (
+                <span className="ml-1.5 animate-pulse text-blood">¡TU TURNO!</span>
+              ) : (
+                <span className="ml-1.5 text-bone/70">
+                  turno de{' '}
+                  <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
+                    {activeCombatant.name}
+                  </span>
+                </span>
+              )}
+            </span>
+          )}
+          {isDm && (
+            <button
+              onClick={() => setLive(!isLive)}
+              className={`rounded-sm border px-3 py-1 font-display text-sm tracking-wide transition-colors ${
+                isLive
+                  ? 'border-blood/60 text-blood hover:bg-blood/10'
+                  : 'border-moss text-bone hover:bg-moss/20'
+              }`}
+            >
+              {isLive ? 'Cerrar sesión de juego' : 'Abrir sesión de juego'}
+            </button>
+          )}
+        </div>
       </header>
 
       {mapLoading ? (
@@ -178,7 +202,7 @@ export default function CampaignGamePage() {
           }
           backToCampaignHref="/"
           editorHref={`/campanas/${campaignId}/editor`}
-          ownCharacterId={campaignCharacters.find((c) => c.user_id === user?.id)?.id ?? null}
+          ownCharacterId={ownCharacterId}
           campaignId={campaignId}
         />
       )}

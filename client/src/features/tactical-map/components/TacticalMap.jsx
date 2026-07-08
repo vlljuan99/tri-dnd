@@ -1,5 +1,4 @@
 import { Component, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
@@ -9,6 +8,8 @@ import AttackPanel from './AttackPanel.jsx';
 import InventoryPanel from './InventoryPanel.jsx';
 import NotesPanel from './NotesPanel.jsx';
 import GameDrawer from './GameDrawer.jsx';
+import PlayerHud from './PlayerHud.jsx';
+import CharacterQuickView from './CharacterQuickView.jsx';
 import MapControls from './MapControls.jsx';
 
 class CanvasErrorBoundary extends Component {
@@ -63,6 +64,7 @@ export default function TacticalMap({
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
@@ -82,10 +84,17 @@ export default function TacticalMap({
   const activeToken = activeCombatant?.characterId
     ? map.tokens.find((t) => t.characterId === activeCombatant.characterId) ?? null
     : null;
-  // Es realmente TU turno (para el texto del banner y el botón "Terminar
-  // turno" junto a tu token en la lista): tu propio personaje, nunca el DM
-  // salvo que además sea el dueño (caso raro, PJ del propio DM)
+  // Es realmente TU turno (para el HUD y el botón "Terminar turno"): tu
+  // propio personaje, nunca el DM salvo que además sea el dueño (caso raro,
+  // PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
+
+  // --- Barra de estado del propio personaje (HUD) --------------------
+  // El combatiente (HP/CA/recursos del turno) viaja siempre, con o sin modo
+  // por turnos activo: solo el movimiento/acción se muestran condicionados
+  // a que el modo esté encendido (PlayerHud decide eso con combatActive)
+  const myToken = ownCharacterId ? map.tokens.find((t) => t.characterId === ownCharacterId) ?? null : null;
+  const myCombatant = combat.combatants.find((c) => c.characterId === ownCharacterId) ?? null;
 
   // Área de movimiento: casillas alcanzables por el combatiente activo con
   // lo que le queda de movimiento (visible para toda la mesa al seleccionar
@@ -205,39 +214,15 @@ export default function TacticalMap({
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
-        {combat.active && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-sm border border-gold/25 bg-night-950/60 px-2 py-1">
-            <span className="font-display text-xs uppercase tracking-widest text-gold/90">
-              Ronda {combat.round}
-              {activeCombatant && isOwnCharacterTurn && (
-                <span className="ml-1 animate-pulse text-blood">· ¡TU TURNO!</span>
-              )}
-              {activeCombatant && !isOwnCharacterTurn && (
-                <>
-                  {' · turno de '}
-                  <span className={activeCombatant.kind === 'enemigo' ? 'text-blood' : 'text-bone'}>
-                    {activeCombatant.name}
-                  </span>
-                </>
-              )}
-            </span>
-            {activeCombatant?.speed != null && (
-              <span className="font-mono text-[0.65rem] text-bone/60">
-                mov {Math.max(0, Math.floor(activeCombatant.speed / 5) - (activeCombatant.movedSquares ?? 0))} cas
-                {activeCombatant.actionUsed ? ' · sin acción' : ' · acción lista'}
-              </span>
-            )}
-            {isDm && (
-              <button
-                type="button"
-                onClick={() => toggleTurnMode()}
-                title="Modo libre: moverse y actuar sin restricción de turno, sin vaciar el tracker"
-                className="rounded-sm border border-bone/25 px-2 py-0.5 text-[0.65rem] uppercase tracking-widest text-bone/70 hover:border-gold hover:text-gold"
-              >
-                Modo libre
-              </button>
-            )}
-          </div>
+        {combat.active && isDm && (
+          <button
+            type="button"
+            onClick={() => toggleTurnMode()}
+            title="Modo libre: moverse y actuar sin restricción de turno, sin vaciar el tracker"
+            className="mt-1.5 rounded-sm border border-bone/25 px-2 py-0.5 text-[0.65rem] uppercase tracking-widest text-bone/70 hover:border-gold hover:text-gold"
+          >
+            Modo libre
+          </button>
         )}
         {!combat.active && isDm && (
           <button
@@ -288,87 +273,46 @@ export default function TacticalMap({
         <div className="space-y-1">
           {map.tokens.map((token) => {
             const movable = canMoveToken({ token, user, role });
-            // ¿Es el turno de este token concreto? Para ofrecerle "Terminar
-            // turno" aquí mismo, junto al resto de acciones (dueño o DM)
-            const rowIsActiveTurn = combat.active && activeCombatant?.characterId === token.characterId;
-            const rowCanEndTurn = rowIsActiveTurn && (isDm || token.ownerUserId === user?.id);
             return (
-              <div
+              <button
                 key={token.id}
-                className={`rounded-sm border ${
-                  selectedTokenId === token.id ? 'border-gold bg-gold/10' : 'border-transparent'
+                type="button"
+                onClick={() => handleSelectToken(token.id)}
+                aria-pressed={selectedTokenId === token.id}
+                className={`flex w-full flex-col gap-1.5 rounded-sm border px-2 py-2 text-left text-sm ${
+                  selectedTokenId === token.id
+                    ? 'border-gold bg-gold/10 text-gold'
+                    : 'border-transparent text-bone hover:border-bone/20'
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => handleSelectToken(token.id)}
-                  aria-pressed={selectedTokenId === token.id}
-                  className={`flex w-full flex-col gap-1.5 px-2 py-2 text-left text-sm ${
-                    selectedTokenId === token.id ? 'text-gold' : 'text-bone hover:opacity-80'
-                  }`}
-                >
-                  <span className="truncate font-medium">{token.name}</span>
-                  <div className="flex items-center justify-between gap-2">
-                    {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-12 overflow-hidden rounded-sm bg-night-950">
-                          <span
-                            className={`block h-full ${
-                              token.hp / token.hpMax > 0.5
-                                ? 'bg-moss'
-                                : token.hp / token.hpMax > 0.25
-                                  ? 'bg-ochre'
-                                  : 'bg-blood'
-                            }`}
-                            style={{ width: `${Math.max(0, Math.min(100, (token.hp / token.hpMax) * 100))}%` }}
-                          />
-                        </span>
-                        <span className="font-mono text-[0.65rem] text-bone/60">
-                          {token.hp}/{token.hpMax}
-                        </span>
+                <span className="truncate font-medium">{token.name}</span>
+                <div className="flex items-center justify-between gap-2">
+                  {Number.isInteger(token.hp) && Number.isInteger(token.hpMax) && token.hpMax > 0 ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-12 overflow-hidden rounded-sm bg-night-950">
+                        <span
+                          className={`block h-full ${
+                            token.hp / token.hpMax > 0.5
+                              ? 'bg-moss'
+                              : token.hp / token.hpMax > 0.25
+                                ? 'bg-ochre'
+                                : 'bg-blood'
+                          }`}
+                          style={{ width: `${Math.max(0, Math.min(100, (token.hp / token.hpMax) * 100))}%` }}
+                        />
                       </span>
-                    ) : (
-                      <span className="text-[0.65rem] text-bone/40">—</span>
-                    )}
-                    <span className="text-[0.65rem] uppercase tracking-widest text-bone/55">
-                      {token.speed ? `${Math.floor(token.speed / 5)} cas` : movable ? 'mover' : token.type}
+                      <span className="font-mono text-[0.65rem] text-bone/60">
+                        {token.hp}/{token.hpMax}
+                      </span>
                     </span>
-                  </div>
-                </button>
-                {token.characterId && (
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2 text-[0.65rem]">
-                    <Link
-                      to={`/personajes/${token.characterId}`}
-                      className="text-gold underline decoration-dotted hover:text-gold/80"
-                    >
-                      Ficha
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTokenId(token.id);
-                        setCombatTarget(null);
-                        setInventoryOpen((v) => (selectedTokenId === token.id ? !v : true));
-                      }}
-                      className="text-gold underline decoration-dotted hover:text-gold/80"
-                    >
-                      Inventario
-                    </button>
-                    {rowCanEndTurn && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const resp = await endTurn();
-                          if (resp?.error) window.alert(resp.error);
-                        }}
-                        className="rounded-sm bg-gold px-1.5 py-0.5 font-display uppercase tracking-widest text-night-950 hover:bg-gold/90"
-                      >
-                        Terminar turno
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <span className="text-[0.65rem] text-bone/40">—</span>
+                  )}
+                  <span className="text-[0.65rem] uppercase tracking-widest text-bone/55">
+                    {token.speed ? `${Math.floor(token.speed / 5)} cas` : movable ? 'mover' : token.type}
+                  </span>
+                </div>
+              </button>
             );
           })}
         </div>
@@ -382,10 +326,10 @@ export default function TacticalMap({
         />
       )}
 
-      {inventoryOpen && selectedToken?.characterId && (
+      {inventoryOpen && myToken && (
         <InventoryPanel
-          token={selectedToken}
-          isOwner={selectedToken.ownerUserId === user?.id}
+          token={myToken}
+          isOwner
           isDm={isDm}
           combat={combat}
           onClose={() => setInventoryOpen(false)}
@@ -395,6 +339,24 @@ export default function TacticalMap({
       {notesOpen && ownCharacterId && (
         <NotesPanel characterId={ownCharacterId} onClose={() => setNotesOpen(false)} />
       )}
+
+      {sheetOpen && ownCharacterId && (
+        <CharacterQuickView characterId={ownCharacterId} onClose={() => setSheetOpen(false)} />
+      )}
+
+      <PlayerHud
+        token={myToken}
+        combatant={myCombatant}
+        combatActive={combat.active}
+        isMyTurn={isOwnCharacterTurn}
+        onEndTurn={async () => {
+          const resp = await endTurn();
+          if (resp?.error) window.alert(resp.error);
+        }}
+        onOpenSheet={() => setSheetOpen(true)}
+        onOpenInventory={() => setInventoryOpen((v) => !v)}
+        onOpenNotes={() => setNotesOpen((v) => !v)}
+      />
 
       {drawerOpen && (
         <GameDrawer
@@ -424,9 +386,6 @@ export default function TacticalMap({
         }}
         onNudgeToken={nudgeSelectedToken}
         backToCampaignHref={backToCampaignHref}
-        hasOwnCharacter={Boolean(ownCharacterId)}
-        notesOpen={notesOpen}
-        onToggleNotes={() => setNotesOpen((v) => !v)}
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((v) => !v)}
       />

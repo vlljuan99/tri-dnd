@@ -16,9 +16,6 @@ export default function MapControls({
   onClearSelection,
   onNudgeToken,
   backToCampaignHref,
-  hasOwnCharacter,
-  notesOpen,
-  onToggleNotes,
   drawerOpen,
   onToggleDrawer,
 }) {
@@ -134,21 +131,6 @@ export default function MapControls({
         >
           Mesa
         </button>
-        {hasOwnCharacter && (
-          <button
-            type="button"
-            aria-pressed={notesOpen}
-            onClick={onToggleNotes}
-            title="Tus notas de sesión (privadas, ni el DM las ve)"
-            className={`min-h-10 rounded-sm border px-3 font-display text-sm tracking-wide ${
-              notesOpen
-                ? 'border-gold bg-gold/10 text-gold'
-                : 'border-bone/15 text-bone hover:border-gold hover:text-gold'
-            }`}
-          >
-            Notas
-          </button>
-        )}
         {isDm && editorHref && (
           <Link
             to={editorHref}
