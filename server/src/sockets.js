@@ -127,7 +127,13 @@ function resolveCombatTarget(campaignId, attackerCharacter, target, { melee }) {
          WHERE t.id = ? AND f.map_id = ?`
       )
       .get(target.id, mapId);
-    if (!row || row.hidden || !row.revealed) return { error: 'Objetivo no encontrado' };
+    if (!row || row.hidden) return { error: 'Objetivo no encontrado' };
+    // Misma regla que la vista del jugador: la sala vale como visible si está
+    // revelada o si es donde está su propio personaje ahora mismo (nunca
+    // pierde de vista su sala aunque el DM no la haya marcado revelada)
+    if (!row.revealed && row.room_id !== attacker.room_id) {
+      return { error: 'Objetivo no encontrado' };
+    }
     if (row.kind !== 'enemigo' && row.kind !== 'aliado') return { error: 'Eso no se puede atacar' };
     const combatant = db
       .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
