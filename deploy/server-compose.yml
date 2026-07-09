@@ -1,0 +1,27 @@
+# Compose de TriDnD compartiendo Caddy con el stack de tilestudio en
+# /opt/tilestudio. No arranca su propio Caddy — usa el reverse proxy del
+# stack vecino vía la red externa tilestudio_default.
+#
+# Layout esperado en /opt/tridnd/:
+#   docker-compose.yml   (este archivo)
+#   app.env               (vars de la app: JWT_SECRET, OPENAI_API_KEY, GOOGLE_API_KEY)
+#   data/                 (volumen: sqlite db, uploads, jwt-secret)
+#   src.tar.gz             (lo sube el deploy)
+
+name: tridnd
+
+services:
+  app:
+    image: tridnd:latest
+    container_name: tridnd-app
+    restart: unless-stopped
+    env_file:
+      - app.env
+    volumes:
+      - ./data:/app/server/data
+    networks:
+      - tilestudio_default
+
+networks:
+  tilestudio_default:
+    external: true

@@ -1,0 +1,71 @@
+name: Deploy to Hetzner
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hetzner
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build source tarball
+        run: |
+          tar --exclude='./.git' \
+              --exclude='./.github' \
+              --exclude='./node_modules' \
+              --exclude='./client/node_modules' \
+              --exclude='./server/node_modules' \
+              --exclude='./client/dist' \
+              --exclude='./server/data' \
+              --exclude='./server/.env' \
+              --exclude='./deploy/server-compose.yml' \
+              --exclude='./deploy/build-on-server.sh' \
+              --exclude='./deploy/tridnd.caddy' \
+              -czf "${RUNNER_TEMP}/src.tar.gz" .
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_SSH_KEY }}
+
+      - name: Trust host key
+        run: ssh-keyscan -H 167.233.99.156 >> ~/.ssh/known_hosts
+
+      - name: Upload tarball + deploy files
+        run: |
+          scp "${RUNNER_TEMP}/src.tar.gz" root@167.233.99.156:/opt/tridnd/src.tar.gz
+          scp deploy/server-compose.yml root@167.233.99.156:/opt/tridnd/docker-compose.yml
+          scp deploy/build-on-server.sh root@167.233.99.156:/opt/tridnd/build-on-server.sh
+          scp deploy/tridnd.caddy root@167.233.99.156:/opt/tilestudio/sites/tridnd.caddy
+
+      - name: Build image and restart container
+        run: |
+          ssh root@167.233.99.156 \
+            'chmod +x /opt/tridnd/build-on-server.sh && /opt/tridnd/build-on-server.sh'
+
+      - name: Reload Caddy
+        run: |
+          ssh root@167.233.99.156 \
+            'docker exec tilestudio-caddy-1 caddy reload --config /etc/caddy/Caddyfile'
+
+      # ── Smoke test — verify the app is up after deploy ────────────
+      # Retries for up to 60 s to allow the container to finish starting.
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://tridnd.167-233-99-156.sslip.io/)
+            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://tridnd.167-233-99-156.sslip.io/api/health)
+            if [ "$STATUS" = "200" ] && [ "$HEALTH" = "200" ]; then
+              echo "Smoke test passed (attempt $i): / → $STATUS, /api/health → $HEALTH"
+              exit 0
+            fi
+            echo "Attempt $i: / → $STATUS, /api/health → $HEALTH — retrying in 10 s..."
+            sleep 10
+          done
+          echo "Smoke test FAILED after 60 s"
+          exit 1

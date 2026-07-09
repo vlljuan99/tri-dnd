@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -29,6 +32,17 @@ app.use('/api/campaigns/:campaignId/mundo', worldRouter);
 app.use('/api/campaigns', campaignsRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
+
+// En producción, la imagen sirve el build del cliente (client/dist) desde el
+// propio servidor Express — un solo contenedor, un solo puerto detrás de Caddy.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
+if (fs.existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST));
+  app.get(/^(?!\/uploads).*/, (req, res) => {
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+  });
+}
 
 const server = http.createServer(app);
 

@@ -2,7 +2,7 @@
 
 Mesa de juego virtual de D&D 5e para un grupo de ~4-6 amigos: fichas de personaje siempre a mano (también en el móvil, en partidas presenciales), sesiones online con chat, tiradas compartidas, tracker de iniciativa y mapa táctico con niebla de guerra. La voz va aparte (Discord); esta app no la gestiona.
 
-**Alcance actual: solo local.** No hay que preocuparse por despliegue (VPS Hetzner + Caddy) hasta que el usuario lo pida explícitamente en una fase futura separada.
+**Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights, gestionado por Caddy en `/opt/tilestudio`) en `https://tridnd.167-233-99-156.sslip.io`, sin dominio propio todavía. El redeploy se lanza a mano desde GitHub Actions (`workflow_dispatch`, no en cada push) — ver "Despliegue" en [ROADMAP.md](ROADMAP.md) y los archivos en `deploy/` y `.github/workflows/deploy.yml`. El desarrollo del día a día sigue siendo local (`npm run dev`).
 
 ## Decisiones de producto ya confirmadas (no volver a preguntar)
 

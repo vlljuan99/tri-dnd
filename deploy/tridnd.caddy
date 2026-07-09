@@ -1,0 +1,7 @@
+tridnd.167-233-99-156.sslip.io {
+	encode gzip
+	reverse_proxy tridnd-app:4000
+	request_body {
+		max_size 25MB
+	}
+}
