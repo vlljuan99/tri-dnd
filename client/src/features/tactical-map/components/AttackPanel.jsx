@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../../api.js';
 import {
   abilityModifier,
@@ -226,57 +227,97 @@ export default function AttackPanel({ attacker, target, onClose }) {
                 </button>
               </div>
 
-              {/* Desglose del ataque: dados + bonificador = total contra la CA */}
-              {fb?.type === 'attack' && (
-                <div className="mt-2 rounded-sm border border-bone/10 bg-night-900/70 p-2 text-xs">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <D20Chips roll={fb.roll} />
-                    {fb.roll.modifier !== 0 && (
-                      <span className="font-mono text-bone/70">{formatModifier(fb.roll.modifier)}</span>
-                    )}
-                    <span className="font-mono">
-                      = <strong className="text-base">{fb.roll.total}</strong>
-                    </span>
-                    <span className="text-bone/50">contra CA {fb.ac}</span>
-                    <span
-                      className={`font-display uppercase tracking-widest ${
-                        fb.hit ? 'text-gold' : 'text-bone/50'
+              <AnimatePresence mode="wait">
+                {/* Paso 1 — ¿impacta?: dados + bonificador = total contra la CA */}
+                {fb?.type === 'attack' && (
+                  <motion.div
+                    key="attack"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className={`mt-2 rounded-sm border p-2 ${
+                      fb.hit ? 'border-gold/40 bg-gold/5' : 'border-bone/10 bg-night-900/70'
+                    }`}
+                  >
+                    <p className="mb-1.5 font-display text-[0.65rem] uppercase tracking-widest text-bone/40">
+                      Paso 1 · ¿impacta?
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <D20Chips roll={fb.roll} />
+                      {fb.roll.modifier !== 0 && (
+                        <span className="font-mono text-bone/70">{formatModifier(fb.roll.modifier)}</span>
+                      )}
+                      <span className="font-mono text-bone/70">
+                        = <strong className="font-display text-xl text-bone">{fb.roll.total}</strong>
+                      </span>
+                      <span className="text-bone/50">contra CA {fb.ac}</span>
+                    </div>
+                    <motion.p
+                      initial={{ scale: 0.6, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.1 }}
+                      className={`mt-1.5 font-display text-lg uppercase tracking-widest ${
+                        fb.hit ? 'text-gold' : 'text-bone/40'
                       }`}
                     >
-                      {fb.hit ? `→ ¡impacta${fb.crit ? ' (crítico)' : ''}!` : '→ falla'}
-                    </span>
-                  </div>
-                  {fb.hit && (
-                    <button
-                      onClick={() => damage(row)}
-                      disabled={busy}
-                      className="mt-2 rounded-sm bg-blood/80 px-3 py-1 text-xs font-medium text-bone hover:bg-blood disabled:opacity-40"
-                    >
-                      Tirar daño{fb.crit ? ' crítico' : ''}
-                    </button>
-                  )}
-                </div>
-              )}
+                      {fb.hit ? `¡Impacta${fb.crit ? ' — crítico!' : '!'}` : 'Falla'}
+                    </motion.p>
+                    {fb.hit && (
+                      <button
+                        onClick={() => damage(row)}
+                        disabled={busy}
+                        className="mt-2 w-full rounded-sm bg-blood/80 px-3 py-1.5 text-xs font-medium text-bone hover:bg-blood disabled:opacity-40"
+                      >
+                        Paso 2 → Tirar daño{fb.crit ? ' crítico' : ''}
+                      </button>
+                    )}
+                  </motion.div>
+                )}
 
-              {/* Resultado del daño: cuánta vida quita y cuánta le queda */}
-              {fb?.type === 'damage' && (
-                <div className="mt-2 rounded-sm border border-blood/25 bg-night-900/70 p-2 text-xs">
-                  <span className="font-mono text-blood">−{fb.damage} HP</span>
-                  {Number.isInteger(fb.remainingHp) && Number.isInteger(fb.maxHp) && (
-                    <span className="ml-2 text-bone/70">
-                      {target.name} queda en{' '}
-                      <span className="font-mono">
-                        {Math.max(0, fb.remainingHp)}/{fb.maxHp} HP
-                      </span>
-                    </span>
-                  )}
-                  {fb.defeated && (
-                    <span className="ml-2 font-display uppercase tracking-widest text-gold">
-                      ¡cae derrotado!
-                    </span>
-                  )}
-                </div>
-              )}
+                {/* Paso 2 — daño: cuánta vida quita y cuánta le queda */}
+                {fb?.type === 'damage' && (
+                  <motion.div
+                    key="damage"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="mt-2 rounded-sm border border-blood/40 bg-blood/5 p-2"
+                  >
+                    <p className="mb-1.5 font-display text-[0.65rem] uppercase tracking-widest text-bone/40">
+                      Paso 2 · daño
+                    </p>
+                    <div className="flex items-baseline gap-2">
+                      <motion.span
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 14 }}
+                        className="font-display text-2xl leading-none text-blood"
+                      >
+                        −{fb.damage}
+                      </motion.span>
+                      <span className="text-xs text-bone/50">HP</span>
+                    </div>
+                    {Number.isInteger(fb.remainingHp) && Number.isInteger(fb.maxHp) && (
+                      <p className="mt-1 text-xs text-bone/70">
+                        {target.name} queda en{' '}
+                        <span className="font-mono">
+                          {Math.max(0, fb.remainingHp)}/{fb.maxHp} HP
+                        </span>
+                      </p>
+                    )}
+                    {fb.defeated && (
+                      <motion.p
+                        initial={{ scale: 0.6, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.15 }}
+                        className="mt-1.5 font-display text-base uppercase tracking-widest text-gold"
+                      >
+                        ¡Cae derrotado!
+                      </motion.p>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}

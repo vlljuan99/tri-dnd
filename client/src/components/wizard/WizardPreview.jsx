@@ -1,4 +1,5 @@
 import { ABILITIES, abilityModifier, formatModifier, PRIMARY_ABILITY, estimateHitPoints } from '../../lib/dnd.js';
+import StatTooltip from '../StatTooltip.jsx';
 
 /**
  * Vista previa compacta de la ficha durante el asistente.
@@ -37,7 +38,9 @@ export default function WizardPreview({ char, classDisplayName, raceName, classD
                 isPrimary ? 'border-gold/50 bg-gold/10' : 'border-bone/10 bg-night-950/50'
               }`}
             >
-              <div className="text-[10px] uppercase tracking-wider text-bone/50">{a.short}</div>
+              <StatTooltip stat={a.key} as="div" className="text-[10px] uppercase tracking-wider text-bone/50">
+                {a.short}
+              </StatTooltip>
               <div className="font-mono text-sm">{score}</div>
               <div className="font-mono text-xs text-bone/60">{formatModifier(mod)}</div>
             </div>
@@ -46,9 +49,9 @@ export default function WizardPreview({ char, classDisplayName, raceName, classD
       </div>
 
       <div className="flex flex-wrap gap-2 text-xs">
-        <span className="rounded-sm border border-blood/30 bg-blood/5 px-2 py-1">HP {hpEstimate}</span>
-        <span className="rounded-sm border border-bone/15 px-2 py-1">CA {acEstimate}</span>
-        <span className="rounded-sm border border-bone/15 px-2 py-1">Velocidad {char.speed} pies</span>
+        <StatTooltip stat="hp" className="rounded-sm border border-blood/30 bg-blood/5 px-2 py-1">HP {hpEstimate}</StatTooltip>
+        <StatTooltip stat="ca" className="rounded-sm border border-bone/15 px-2 py-1">CA {acEstimate}</StatTooltip>
+        <StatTooltip stat="velocidad" className="rounded-sm border border-bone/15 px-2 py-1">Velocidad {char.speed} pies</StatTooltip>
       </div>
 
       {char.skill_proficiencies.length > 0 && (

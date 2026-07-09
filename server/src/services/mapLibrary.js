@@ -64,9 +64,10 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     hp: Number.isInteger(row.combatant_hp) ? row.combatant_hp : null,
     hpMax: Number.isInteger(row.combatant_hp_max) ? row.combatant_hp_max : null,
     // Jefe (personaje kind='boss') enlazado, si lo hay: se pinta con su
-    // avatar en vez del marcador genérico
+    // avatar en vez del marcador genérico. Sin jefe, un monstruo del
+    // compendio usa la imagen personalizada que el DM le puso en el bestiario
     characterId: row.character_id ?? null,
-    avatarUrl: row.boss_avatar_path ?? null,
+    avatarUrl: row.boss_avatar_path ?? row.monster_avatar_path ?? null,
     // Igual que en la puerta: skill público (sabes qué tiras), dc secreto
     // hasta resolver el intento de interactuar (trampa/objeto).
     skill: row.skill ?? null,
@@ -145,8 +146,11 @@ function loadCharacterTokens(mapId) {
 // Se llama al servir el mapa activo: si no hay salas reveladas, el
 // personaje espera fuera del tablero sin token.
 export function ensureCharacterTokens(map, campaignId) {
+  // Solo PJ: un jefe (kind='boss') asignado por error a una campaña no debe
+  // aparecer solo en el tablero como si fuera un personaje jugador — los
+  // jefes se colocan a mano en el editor, enlazados a un marcador 'enemigo'.
   const characters = db
-    .prepare('SELECT id FROM characters WHERE campaign_id = ?')
+    .prepare("SELECT id FROM characters WHERE campaign_id = ? AND kind = 'pj'")
     .all(campaignId);
   if (!characters.length) return;
 
@@ -305,19 +309,24 @@ function loadMapContents(map) {
     .all(map.id);
   const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ? ORDER BY id').all(map.id);
   // El HP de los enemigos llega del combatiente enlazado del tracker; si el
-  // marcador está enlazado a un jefe (personaje kind='boss'), se trae su avatar
+  // marcador está enlazado a un jefe (personaje kind='boss'), se trae su
+  // avatar, y si es un monstruo del compendio, la imagen personalizada que
+  // el DM de la campaña le haya puesto en el bestiario
   const tokens = db
     .prepare(
       `SELECT t.*, cb.hp_current AS combatant_hp, cb.hp_max AS combatant_hp_max,
-              boss.avatar_path AS boss_avatar_path
+              boss.avatar_path AS boss_avatar_path,
+              mi.avatar_path AS monster_avatar_path
        FROM map_tokens t
        JOIN map_rooms r ON r.id = t.room_id
        JOIN map_floors f ON f.id = r.floor_id
        LEFT JOIN combatants cb ON cb.map_token_id = t.id AND cb.campaign_id = ?
        LEFT JOIN characters boss ON boss.id = t.character_id
+       LEFT JOIN campaigns cp ON cp.id = ?
+       LEFT JOIN monster_images mi ON mi.user_id = cp.dm_user_id AND mi.monster_idx = t.monster_index
        WHERE f.map_id = ? ORDER BY t.id`
     )
-    .all(map.campaign_id, map.id);
+    .all(map.campaign_id, map.campaign_id, map.id);
   return { floors, rooms, doors, tokens };
 }
 

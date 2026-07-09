@@ -5,6 +5,7 @@ import { validateRaza } from './StepRaza.jsx';
 import { validateCaracteristicas } from './StepCaracteristicas.jsx';
 import { validateCompetencias } from './StepCompetencias.jsx';
 import HelpBlock from './HelpBlock.jsx';
+import StatTooltip from '../StatTooltip.jsx';
 
 export function collectWarnings(char, classDetail) {
   const warnings = [];
@@ -72,7 +73,7 @@ export default function StepResumen({ char, classDetail, raceName, campaigns, on
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {ABILITIES.map((a) => (
           <div key={a.key} className="rounded-sm border border-bone/10 bg-night-950/50 p-2 text-center">
-            <p className="text-xs text-bone/50">{a.short}</p>
+            <StatTooltip stat={a.key} as="p" className="text-xs text-bone/50">{a.short}</StatTooltip>
             <p className="font-mono text-lg text-bone">{char.abilities[a.key]}</p>
             <p className="font-mono text-xs text-bone/60">{formatModifier(abilityModifier(char.abilities[a.key]))}</p>
           </div>
@@ -80,10 +81,10 @@ export default function StepResumen({ char, classDetail, raceName, campaigns, on
       </div>
 
       <div className="flex flex-wrap gap-2 text-sm">
-        <span className="rounded-sm border border-blood/30 bg-blood/5 px-2.5 py-1.5">Puntos de golpe: {hpMax}</span>
-        <span className="rounded-sm border border-bone/15 px-2.5 py-1.5">Clase de armadura: {ac}</span>
-        <span className="rounded-sm border border-bone/15 px-2.5 py-1.5">Velocidad: {char.speed} pies</span>
-        <span className="rounded-sm border border-bone/15 px-2.5 py-1.5">Competencia: {formatModifier(proficiencyBonus(char.level))}</span>
+        <StatTooltip stat="hp" className="rounded-sm border border-blood/30 bg-blood/5 px-2.5 py-1.5">Puntos de golpe: {hpMax}</StatTooltip>
+        <StatTooltip stat="ca" className="rounded-sm border border-bone/15 px-2.5 py-1.5">Clase de armadura: {ac}</StatTooltip>
+        <StatTooltip stat="velocidad" className="rounded-sm border border-bone/15 px-2.5 py-1.5">Velocidad: {char.speed} pies</StatTooltip>
+        <StatTooltip stat="competencia" className="rounded-sm border border-bone/15 px-2.5 py-1.5">Competencia: {formatModifier(proficiencyBonus(char.level))}</StatTooltip>
       </div>
       <HelpBlock title="¿De dónde salen los puntos de golpe y la clase de armadura?">
         Puntos de golpe = dado de golpe de {CLASS_NAMES[char.class_index] ?? 'tu clase'} + modificador

@@ -22,6 +22,8 @@ import { useRoom } from '../store/socket.js';
 import SrdPicker from '../components/SrdPicker.jsx';
 import RollCard from '../components/RollCard.jsx';
 import WeaponRow from '../components/WeaponRow.jsx';
+import StatTooltip from '../components/StatTooltip.jsx';
+import { saveStat, skillStat } from '../lib/statGlossary.js';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 
@@ -40,10 +42,11 @@ function Card({ title, action, children }) {
   );
 }
 
-function NumberField({ label, value, onChange, min = 0, max = 999, disabled, mono = true }) {
+function NumberField({ label, value, onChange, min = 0, max = 999, disabled, mono = true, stat }) {
+  const labelSpan = <span className="text-xs uppercase tracking-wider text-bone/50">{label}</span>;
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wider text-bone/50">{label}</span>
+      {stat ? <StatTooltip stat={stat}>{labelSpan}</StatTooltip> : labelSpan}
       <input
         type="number"
         value={value}
@@ -318,7 +321,9 @@ export default function CharacterSheetPage() {
           </label>
           <NumberField label="Nivel" value={char.level} min={1} max={20} disabled={ro} onChange={(v) => patch({ level: v })} />
           <div className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wider text-bone/50">Competencia</span>
+            <StatTooltip stat="competencia" className="text-xs uppercase tracking-wider text-bone/50">
+              Competencia
+            </StatTooltip>
             <span className="rounded-sm border border-bone/10 bg-night-950 px-2 py-1.5 text-center font-mono text-gold">
               {formatModifier(prof)}
             </span>
@@ -344,7 +349,9 @@ export default function CharacterSheetPage() {
       <Card title="Vitales">
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
           <div className="col-span-3 rounded-sm border border-blood/40 bg-blood/5 p-2">
-            <div className="mb-1 text-center text-xs uppercase tracking-wider text-bone/50">Puntos de golpe</div>
+            <StatTooltip stat="hp" as="div" className="mb-1 text-center text-xs uppercase tracking-wider text-bone/50">
+              Puntos de golpe
+            </StatTooltip>
             <div className="flex items-center justify-center gap-2">
               <button
                 onClick={() => patch({ hp_current: Math.max(-99, char.hp_current - 1) })}
@@ -381,10 +388,11 @@ export default function CharacterSheetPage() {
               </button>
             </div>
           </div>
-          <NumberField label="HP temp." value={char.hp_temp} disabled={ro} onChange={(v) => patch({ hp_temp: v })} />
-          <NumberField label="CA" value={char.ac} max={40} disabled={ro} onChange={(v) => patch({ ac: v })} />
-          <NumberField label="Velocidad" value={char.speed} max={300} disabled={ro} onChange={(v) => patch({ speed: v })} />
+          <NumberField stat="hp-temp" label="HP temp." value={char.hp_temp} disabled={ro} onChange={(v) => patch({ hp_temp: v })} />
+          <NumberField stat="ca" label="CA" value={char.ac} max={40} disabled={ro} onChange={(v) => patch({ ac: v })} />
+          <NumberField stat="velocidad" label="Velocidad" value={char.speed} max={300} disabled={ro} onChange={(v) => patch({ speed: v })} />
           <NumberField
+            stat="darkvision"
             label="Visión oscuridad"
             value={char.darkvision}
             max={30}
@@ -425,7 +433,9 @@ export default function CharacterSheetPage() {
                   }
                   className="w-full border-none bg-transparent text-center font-mono text-xl text-bone focus:outline-none"
                 />
-                <div className="font-mono text-sm text-bone/60">{formatModifier(mod)}</div>
+                <StatTooltip stat={a.key} as="div" className="font-mono text-sm text-bone/60">
+                  {formatModifier(mod)}
+                </StatTooltip>
               </div>
             );
           })}
@@ -457,7 +467,9 @@ export default function CharacterSheetPage() {
                     onClick={() => rollCheck(`Salvación de ${a.name}`, bonus)}
                     className="flex flex-1 items-baseline justify-between rounded-sm px-1 py-0.5 text-left hover:bg-gold/10"
                   >
-                    <span className="text-sm">{a.name}</span>
+                    <StatTooltip {...saveStat(a.name)} focusable={false} className="text-sm">
+                      {a.name}
+                    </StatTooltip>
                     <span className="font-mono text-sm text-bone/80">{formatModifier(bonus)}</span>
                   </button>
                 </li>
@@ -489,9 +501,13 @@ export default function CharacterSheetPage() {
                     onClick={() => rollCheck(sk.name, bonus)}
                     className="flex flex-1 items-baseline justify-between rounded-sm px-1 py-0.5 text-left hover:bg-gold/10"
                   >
-                    <span className="text-sm">
+                    <StatTooltip
+                      {...skillStat(sk.name, ABILITIES.find((a) => a.key === sk.ability).name)}
+                      focusable={false}
+                      className="text-sm"
+                    >
                       {sk.name} <span className="text-xs text-bone/40">({ABILITIES.find((a) => a.key === sk.ability).short})</span>
-                    </span>
+                    </StatTooltip>
                     <span className="font-mono text-sm text-bone/80">{formatModifier(bonus)}</span>
                   </button>
                 </li>
@@ -638,7 +654,8 @@ export default function CharacterSheetPage() {
       >
         {char.class_index && (
           <p className="mb-2 text-xs text-bone/50">
-            Ataque de conjuro {formatModifier(spellAttackBonus(char))} · CD de salvación {spellSaveDC(char)}
+            <StatTooltip stat="ataque-conjuro">Ataque de conjuro</StatTooltip> {formatModifier(spellAttackBonus(char))} ·{' '}
+            <StatTooltip stat="cd-conjuro">CD de salvación</StatTooltip> {spellSaveDC(char)}
           </p>
         )}
         {(char.spells.known ?? []).length === 0 ? (

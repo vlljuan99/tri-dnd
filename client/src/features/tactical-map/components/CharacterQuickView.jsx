@@ -10,6 +10,7 @@ import {
 import { castSpellRoll } from '../../../lib/spellcasting.js';
 import { useRoom } from '../../../store/socket.js';
 import WeaponRow from '../../../components/WeaponRow.jsx';
+import StatTooltip from '../../../components/StatTooltip.jsx';
 
 /**
  * Ficha en modal de consulta rápida (Fase 8.6, pulido): pensada para mirar y
@@ -90,13 +91,15 @@ export default function CharacterQuickView({ characterId, onClose }) {
             </div>
 
             <div className="mb-3 flex flex-wrap gap-2 text-sm">
-              <span className="rounded-sm border border-blood/40 bg-blood/5 px-2 py-1 font-mono">
+              <StatTooltip stat="hp" className="rounded-sm border border-blood/40 bg-blood/5 px-2 py-1 font-mono">
                 HP {char.hp_current}/{char.hp_max}
-              </span>
-              <span className="rounded-sm border border-bone/15 px-2 py-1 font-mono">CA {char.ac}</span>
-              <span className="rounded-sm border border-bone/15 px-2 py-1 font-mono">
+              </StatTooltip>
+              <StatTooltip stat="ca" className="rounded-sm border border-bone/15 px-2 py-1 font-mono">
+                CA {char.ac}
+              </StatTooltip>
+              <StatTooltip stat="velocidad" className="rounded-sm border border-bone/15 px-2 py-1 font-mono">
                 {char.speed} pies ({Math.floor((char.speed ?? 0) / 5)} cas)
-              </span>
+              </StatTooltip>
             </div>
 
             <section className="mb-3">
@@ -118,7 +121,8 @@ export default function CharacterQuickView({ characterId, onClose }) {
                   Hechizos preparados
                 </h3>
                 <p className="mb-1.5 text-xs text-bone/50">
-                  Ataque {formatModifier(spellAttackBonus(char))} · CD {spellSaveDC(char)}
+                  <StatTooltip stat="ataque-conjuro">Ataque</StatTooltip> {formatModifier(spellAttackBonus(char))} ·{' '}
+                  <StatTooltip stat="cd-conjuro">CD</StatTooltip> {spellSaveDC(char)}
                 </p>
                 <ul className="space-y-1.5">
                   {preparedSpells.map((spell) => (

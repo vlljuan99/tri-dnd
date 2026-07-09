@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
-import SrdPicker from '../../../components/SrdPicker.jsx';
+import BestiaryBrowser from '../../../components/BestiaryBrowser.jsx';
 import { useMapEditor } from '../hooks/useMapEditor.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
@@ -456,13 +456,13 @@ export default function MapEditorPage() {
                       placeholder="Nombre (Esqueleto, Cofre…)"
                       className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
                     />
-                    {tokenKind === 'enemigo' && !tokenBossId && (
+                    {tokenKind === 'enemigo' && (
                       <button
                         type="button"
                         onClick={() => setShowMonsterPicker(true)}
                         className="rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10"
                       >
-                        {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Compendio…'}
+                        {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Bestiario…'}
                       </button>
                     )}
                     {tokenMonster && tokenKind === 'enemigo' && (
@@ -628,12 +628,17 @@ export default function MapEditorPage() {
       </div>
 
       {showMonsterPicker && (
-        <SrdPicker
-          title="Elegir monstruo del compendio"
-          category="monsters"
-          onPick={(entry) => {
-            setTokenMonster({ index: entry.index, name: entry.name });
-            if (!tokenName.trim()) setTokenName(entry.name);
+        <BestiaryBrowser
+          onBossesChanged={setBosses}
+          onPick={(pick) => {
+            if (pick.type === 'boss') {
+              setTokenBossId(String(pick.id));
+              setTokenMonster(null);
+            } else {
+              setTokenMonster({ index: pick.index, name: pick.name });
+              setTokenBossId('');
+            }
+            if (!tokenName.trim()) setTokenName(pick.name);
             setShowMonsterPicker(false);
           }}
           onClose={() => setShowMonsterPicker(false)}

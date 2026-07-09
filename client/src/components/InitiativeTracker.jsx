@@ -5,6 +5,7 @@ import { abilityModifier } from '../lib/dnd.js';
 import { rollPool } from '../lib/dice.js';
 import SrdPicker from './SrdPicker.jsx';
 import MonsterStatBlock from './MonsterStatBlock.jsx';
+import StatTooltip from './StatTooltip.jsx';
 
 function hpRatioColor(ratio) {
   if (ratio > 0.5) return 'bg-moss';
@@ -152,7 +153,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                   {c.name}
                 </span>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <span className="font-mono text-xs text-bone/50">Ini {c.initiative}</span>
+                  <StatTooltip stat="iniciativa" className="font-mono text-xs text-bone/50">Ini {c.initiative}</StatTooltip>
                   {mine && !isDm && (
                     <button
                       onClick={() => rollOwnInitiative(c)}
@@ -193,9 +194,15 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                   <div className="flex-1">
                     <HpBar current={c.hpCurrent} max={c.hpMax} />
                   </div>
-                  <span className="shrink-0 font-mono text-xs text-bone/50">
-                    {c.hpCurrent}/{c.hpMax}
-                    {c.ac != null && ` · CA ${c.ac}`}
+                  <span className="flex shrink-0 items-center gap-1 font-mono text-xs text-bone/50">
+                    <StatTooltip stat="hp">
+                      {c.hpCurrent}/{c.hpMax}
+                    </StatTooltip>
+                    {c.ac != null && (
+                      <>
+                        ·<StatTooltip stat="ca">CA {c.ac}</StatTooltip>
+                      </>
+                    )}
                   </span>
                 </div>
               )}
@@ -204,39 +211,41 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
               {combat.active && active && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-bone/10 pt-1.5">
                   {c.kind === 'pj' && budget != null && (
-                    <span
+                    <StatTooltip
+                      stat="mov"
                       className={`rounded-sm border px-1.5 py-0.5 font-mono text-[0.65rem] ${
                         c.movedSquares >= budget ? 'border-bone/10 text-bone/30' : 'border-moss/60 text-bone/80'
                       }`}
-                      title="Casillas de movimiento gastadas este turno"
                     >
                       Mov {c.movedSquares}/{budget}
-                    </span>
+                    </StatTooltip>
                   )}
-                  <span
+                  <StatTooltip
+                    stat="accion"
                     className={`rounded-sm border px-1.5 py-0.5 text-[0.65rem] ${
                       c.actionUsed ? 'border-bone/10 text-bone/30 line-through' : 'border-gold/50 text-gold/90'
                     }`}
-                    title="La acción del turno (atacar la consume)"
                   >
                     Acción
-                  </span>
+                  </StatTooltip>
                   {(mine || isDm) && !c.bonusUsed ? (
-                    <button
-                      onClick={() => room.useResource(c.id, 'adicional')}
-                      title="Marcar la acción adicional como gastada"
-                      className="rounded-sm border border-ochre/60 px-1.5 py-0.5 text-[0.65rem] text-ochre hover:bg-ochre/10"
-                    >
-                      Adicional
-                    </button>
+                    <StatTooltip stat="adicional" focusable={false}>
+                      <button
+                        onClick={() => room.useResource(c.id, 'adicional')}
+                        className="rounded-sm border border-ochre/60 px-1.5 py-0.5 text-[0.65rem] text-ochre hover:bg-ochre/10"
+                      >
+                        Adicional
+                      </button>
+                    </StatTooltip>
                   ) : (
-                    <span
+                    <StatTooltip
+                      stat="adicional"
                       className={`rounded-sm border px-1.5 py-0.5 text-[0.65rem] ${
                         c.bonusUsed ? 'border-bone/10 text-bone/30 line-through' : 'border-bone/20 text-bone/50'
                       }`}
                     >
                       Adicional
-                    </span>
+                    </StatTooltip>
                   )}
                   {(mine || isDm) && (
                     <button
@@ -255,17 +264,18 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
               {combat.active && !active && (mine || isDm) && c.kind === 'pj' && (
                 <div className="mt-1 flex justify-end">
                   {c.reactionAvailable ? (
-                    <button
-                      onClick={() => room.useResource(c.id, 'reaccion')}
-                      title="Marcar la reacción como gastada (ataque de oportunidad, etc.)"
-                      className="rounded-sm border border-bone/25 px-1.5 py-0.5 text-[0.65rem] text-bone/70 hover:border-gold hover:text-gold"
-                    >
-                      Usar reacción
-                    </button>
+                    <StatTooltip stat="reaccion" focusable={false}>
+                      <button
+                        onClick={() => room.useResource(c.id, 'reaccion')}
+                        className="rounded-sm border border-bone/25 px-1.5 py-0.5 text-[0.65rem] text-bone/70 hover:border-gold hover:text-gold"
+                      >
+                        Usar reacción
+                      </button>
+                    </StatTooltip>
                   ) : (
-                    <span className="rounded-sm border border-bone/10 px-1.5 py-0.5 text-[0.65rem] text-bone/30 line-through">
+                    <StatTooltip stat="reaccion" className="rounded-sm border border-bone/10 px-1.5 py-0.5 text-[0.65rem] text-bone/30 line-through">
                       Reacción
-                    </span>
+                    </StatTooltip>
                   )}
                 </div>
               )}

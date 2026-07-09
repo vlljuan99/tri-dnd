@@ -6,6 +6,7 @@ import HubPage from './pages/HubPage.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import CharacterSheetPage from './pages/CharacterSheetPage.jsx';
 import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
+import CampaignWizardPage from './pages/CampaignWizardPage.jsx';
 import ParchmentShell from './components/ParchmentShell.jsx';
 import DiceOverlay from './components/DiceOverlay.jsx';
 
@@ -82,6 +83,7 @@ export default function App() {
           }
         />
         <Route path="/campanas/:id/tablero" element={<RedirectToCampaign />} />
+        <Route path="/campanas/:id/asistente" element={<CampaignWizardPage />} />
         <Route
           path="/campanas/:id/mundo"
           element={

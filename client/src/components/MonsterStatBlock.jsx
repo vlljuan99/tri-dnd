@@ -3,14 +3,15 @@ import { api } from '../api.js';
 import { useRoom } from '../store/socket.js';
 import { formatModifier } from '../lib/dnd.js';
 import { rollAttack, rollDamage } from '../lib/dice.js';
+import StatTooltip from './StatTooltip.jsx';
 
 const ABILITY_FIELDS = [
-  ['strength', 'FUE'],
-  ['dexterity', 'DES'],
-  ['constitution', 'CON'],
-  ['intelligence', 'INT'],
-  ['wisdom', 'SAB'],
-  ['charisma', 'CAR'],
+  ['strength', 'FUE', 'str'],
+  ['dexterity', 'DES', 'dex'],
+  ['constitution', 'CON', 'con'],
+  ['intelligence', 'INT', 'int'],
+  ['wisdom', 'SAB', 'wis'],
+  ['charisma', 'CAR', 'cha'],
 ];
 
 function abilityMod(score) {
@@ -62,7 +63,9 @@ function ActionRow({ action, monsterName, onRoll }) {
     .map((d) => ({ parsed: parseDamageDice(d.damage_dice), typeName: d.damage_type?.name ?? '' }))
     .filter((d) => d.parsed);
   const damageOptions = explicitDamage.length > 0 ? explicitDamage : extractDamageFromDesc(action.desc);
-  const canRoll = canAttack || damageOptions.length > 0;
+  // Sin onRoll (p. ej. en el bestiario del editor, sin mesa activa) la
+  // acción se muestra solo como texto, sin botones de tirada
+  const canRoll = Boolean(onRoll) && (canAttack || damageOptions.length > 0);
 
   return (
     <div className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
@@ -140,6 +143,64 @@ function ActionRow({ action, monsterName, onRoll }) {
 }
 
 /**
+ * Contenido presentacional de la ficha de un monstruo del SRD:
+ * características, CA/PG/velocidad, rasgos y acciones. Con `onRoll` las
+ * acciones ofrecen botones de tirada; sin él (bestiario del editor, sin mesa
+ * activa) se muestran solo como texto.
+ */
+export function MonsterStatsContent({ data, monsterName, onRoll = null }) {
+  return (
+    <>
+      <div className="mb-3 grid grid-cols-3 gap-2 text-center text-sm sm:grid-cols-6">
+        {ABILITY_FIELDS.map(([key, short, statKey]) => (
+          <div key={key} className="rounded-sm border border-bone/15 py-1.5">
+            <StatTooltip stat={statKey} as="div" className="text-xs uppercase tracking-wider text-bone/50">
+              {short}
+            </StatTooltip>
+            <div className="font-mono">
+              {data[key]} ({formatModifier(abilityMod(data[key]))})
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-bone/60">
+        <StatTooltip stat="ca">CA {data.armor_class?.[0]?.value ?? '—'}</StatTooltip>
+        <StatTooltip stat="hp">
+          PG {data.hit_points}
+          {data.hit_dice ? ` (${data.hit_dice})` : ''}
+        </StatTooltip>
+        {data.speed && (
+          <StatTooltip stat="velocidad">
+            Vel. {Object.entries(data.speed).map(([k, v]) => `${k} ${v}`).join(', ')}
+          </StatTooltip>
+        )}
+      </div>
+
+      {data.special_abilities?.length > 0 && (
+        <div className="mb-3 space-y-1.5">
+          <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Rasgos</h3>
+          {data.special_abilities.map((a, i) => (
+            <div key={i} className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
+              <span className="font-medium">{a.name}</span>
+              {a.desc && <p className="mt-0.5 text-xs text-bone/60">{a.desc}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.actions?.length > 0 && (
+        <div className="space-y-1.5">
+          <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Acciones</h3>
+          {data.actions.map((a, i) => (
+            <ActionRow key={i} action={a} monsterName={monsterName} onRoll={onRoll} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
  * Ficha de un enemigo del compendio SRD para el DM: estadísticas básicas y
  * botones para tirar sus ataques (impacto y daño, con ventaja/desventaja y
  * crítico), compartidos en el registro de la mesa como cualquier otra tirada.
@@ -178,51 +239,7 @@ export default function MonsterStatBlock({ index, name, onClose }) {
         {error && <p className="py-6 text-center text-blood">{error}</p>}
         {!data && !error && <p className="py-6 text-center text-bone/50">Cargando…</p>}
 
-        {data && (
-          <>
-            <div className="mb-3 grid grid-cols-3 gap-2 text-center text-sm sm:grid-cols-6">
-              {ABILITY_FIELDS.map(([key, short]) => (
-                <div key={key} className="rounded-sm border border-bone/15 py-1.5">
-                  <div className="text-xs uppercase tracking-wider text-bone/50">{short}</div>
-                  <div className="font-mono">
-                    {data[key]} ({formatModifier(abilityMod(data[key]))})
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-bone/60">
-              <span>CA {data.armor_class?.[0]?.value ?? '—'}</span>
-              <span>
-                PG {data.hit_points}
-                {data.hit_dice ? ` (${data.hit_dice})` : ''}
-              </span>
-              {data.speed && (
-                <span>Vel. {Object.entries(data.speed).map(([k, v]) => `${k} ${v}`).join(', ')}</span>
-              )}
-            </div>
-
-            {data.special_abilities?.length > 0 && (
-              <div className="mb-3 space-y-1.5">
-                <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Rasgos</h3>
-                {data.special_abilities.map((a, i) => (
-                  <div key={i} className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
-                    <span className="font-medium">{a.name}</span>
-                    {a.desc && <p className="mt-0.5 text-xs text-bone/60">{a.desc}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {data.actions?.length > 0 && (
-              <div className="space-y-1.5">
-                <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Acciones</h3>
-                {data.actions.map((a, i) => (
-                  <ActionRow key={i} action={a} monsterName={name} onRoll={onRoll} />
-                ))}
-              </div>
-            )}
-          </>
-        )}
+        {data && <MonsterStatsContent data={data} monsterName={name} onRoll={onRoll} />}
       </div>
     </div>
   );

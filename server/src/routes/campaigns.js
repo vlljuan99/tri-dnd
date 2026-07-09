@@ -49,6 +49,8 @@ function serializeCampaign(row, role) {
     objectives: JSON.parse(row.objectives || '[]'),
     hasWorldMap: Boolean(row.has_world_map),
     worldMapUrl: row.world_map_url ?? null,
+    status: row.status,
+    wizardStep: row.wizard_step,
   };
 }
 
@@ -72,37 +74,18 @@ campaignsRouter.get('/', (req, res) => {
   res.json({ campaigns: rows.map((r) => serializeCampaign(r, r.role)) });
 });
 
+// Nace como borrador con lo mínimo (nombre genérico según el tipo elegido);
+// el asistente guiado (/campanas/:id/asistente) rellena el resto paso a
+// paso, igual que un personaje nuevo nace en borrador para el asistente de PJ.
 campaignsRouter.post('/', (req, res) => {
-  const { name, description, maxPlayers, lore, objectives, hasWorldMap } = req.body ?? {};
-  if (typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'La campaña necesita un nombre' });
-  }
-  if (maxPlayers !== undefined && maxPlayers !== null && !(Number.isInteger(maxPlayers) && maxPlayers >= 1 && maxPlayers <= 20)) {
-    return res.status(400).json({ error: 'Número de plazas no válido' });
-  }
-  if (lore !== undefined && (typeof lore !== 'string' || lore.length > 5000)) {
-    return res.status(400).json({ error: 'Lore no válido' });
-  }
-  if (objectives !== undefined && !(Array.isArray(objectives) && objectives.length <= 30 && objectives.every((o) => typeof o === 'string'))) {
-    return res.status(400).json({ error: 'Objetivos no válidos' });
-  }
-  const cleanObjectives = (objectives ?? []).map((o) => o.trim().slice(0, 200)).filter(Boolean);
+  const isAdventure = Boolean(req.body?.hasWorldMap);
 
   const create = db.transaction(() => {
     const info = db
       .prepare(
-        'INSERT INTO campaigns (name, description, dm_user_id, invite_code, max_players, lore, objectives, has_world_map) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        "INSERT INTO campaigns (name, dm_user_id, invite_code, has_world_map, status) VALUES (?, ?, ?, ?, 'draft')"
       )
-      .run(
-        name.trim().slice(0, 80),
-        typeof description === 'string' ? description.slice(0, 2000) : '',
-        req.user.id,
-        generateInviteCode(),
-        maxPlayers ?? null,
-        typeof lore === 'string' ? lore : '',
-        JSON.stringify(cleanObjectives),
-        hasWorldMap ? 1 : 0
-      );
+      .run(isAdventure ? 'Nueva aventura' : 'Nueva escaramuza', req.user.id, generateInviteCode(), isAdventure ? 1 : 0);
     const id = info.lastInsertRowid;
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
     // combat_active nace en 1: el modo por turnos está activo por defecto
@@ -168,10 +151,17 @@ campaignsRouter.patch('/:id', (req, res) => {
     return res.status(403).json({ error: 'Solo el DM puede editar la campaña' });
   }
 
-  const { lore, objectives, maxPlayers, hasWorldMap } = req.body ?? {};
+  const { name, lore, objectives, maxPlayers, hasWorldMap, status, wizardStep } = req.body ?? {};
   const sets = [];
   const values = [];
 
+  if (name !== undefined) {
+    if (typeof name !== 'string' || !name.trim() || name.length > 80) {
+      return res.status(400).json({ error: 'La campaña necesita un nombre' });
+    }
+    sets.push('name = ?');
+    values.push(name.trim());
+  }
   if (lore !== undefined) {
     if (typeof lore !== 'string' || lore.length > 5000) {
       return res.status(400).json({ error: 'Lore no válido' });
@@ -196,6 +186,24 @@ campaignsRouter.patch('/:id', (req, res) => {
   if (hasWorldMap !== undefined) {
     sets.push('has_world_map = ?');
     values.push(hasWorldMap ? 1 : 0);
+  }
+  if (wizardStep !== undefined) {
+    if (!(Number.isInteger(wizardStep) && wizardStep >= 0 && wizardStep <= 10)) {
+      return res.status(400).json({ error: 'Paso del asistente no válido' });
+    }
+    sets.push('wizard_step = ?');
+    values.push(wizardStep);
+  }
+  if (status !== undefined) {
+    if (status !== 'draft' && status !== 'complete') {
+      return res.status(400).json({ error: 'Estado no válido' });
+    }
+    // Terminar el asistente exige al menos un nombre ya guardado
+    if (status === 'complete' && !(name ?? row.name)?.trim()) {
+      return res.status(400).json({ error: 'La campaña necesita un nombre para terminar el asistente' });
+    }
+    sets.push('status = ?');
+    values.push(status);
   }
 
   if (sets.length) {

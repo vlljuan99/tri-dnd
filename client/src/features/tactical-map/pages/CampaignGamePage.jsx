@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import { useAuth } from '../../../store/auth.js';
 import { useRoom } from '../../../store/socket.js';
@@ -171,6 +171,13 @@ export default function CampaignGamePage() {
         </Link>
       </div>
     );
+  }
+
+  // Campaña sin terminar el asistente guiado: solo el DM puede llegar aquí
+  // (es el único miembro de un borrador) y vuelve a él en vez de ver una
+  // mesa a medio montar.
+  if (campaign?.status === 'draft') {
+    return <Navigate to={`/campanas/${campaignId}/asistente`} replace />;
   }
 
   // Mientras el DM no ha abierto la sesión, el jugador ve el lore/objetivos

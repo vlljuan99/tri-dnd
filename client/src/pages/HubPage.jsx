@@ -1,49 +1,30 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 
-// Lista funcional de campañas. La escena ilustrada de mapa de mundo con
-// localizaciones seleccionables llega en la fase 9.
+// Hub de campañas: crearlas es un asistente guiado (como los personajes),
+// no un formulario de una sola pantalla — aquí solo se elige el tipo y se
+// entra al asistente con el borrador recién creado.
 export default function HubPage() {
   const [campaigns, setCampaigns] = useState(null);
-  const [newName, setNewName] = useState('');
-  const [maxPlayers, setMaxPlayers] = useState('');
-  const [lore, setLore] = useState('');
-  const [objectives, setObjectives] = useState('');
-  const [hasWorldMap, setHasWorldMap] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   useEffect(() => {
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch((e) => setError(e.message));
   }, []);
 
-  async function createCampaign(e) {
-    e.preventDefault();
-    if (!newName.trim()) return;
+  async function createCampaign(hasWorldMap) {
+    setCreating(true);
     setError('');
     try {
-      const { campaign } = await api('/campaigns', {
-        method: 'POST',
-        body: {
-          name: newName,
-          maxPlayers: maxPlayers.trim() ? Number(maxPlayers) : null,
-          lore,
-          objectives: objectives
-            .split('\n')
-            .map((s) => s.trim())
-            .filter(Boolean),
-          hasWorldMap,
-        },
-      });
-      setCampaigns((cs) => [campaign, ...(cs ?? [])]);
-      setNewName('');
-      setMaxPlayers('');
-      setLore('');
-      setObjectives('');
-      setHasWorldMap(false);
+      const { campaign } = await api('/campaigns', { method: 'POST', body: { hasWorldMap } });
+      navigate(`/campanas/${campaign.id}/asistente`);
     } catch (err) {
       setError(err.message);
+      setCreating(false);
     }
   }
 
@@ -79,57 +60,27 @@ export default function HubPage() {
       <h2 className="mb-6 font-display text-3xl font-semibold text-ink">Tus campañas</h2>
 
       <div className="mb-8 grid gap-3 sm:grid-cols-2">
-        <form
-          onSubmit={createCampaign}
-          className="flex flex-col gap-2 rounded-md border border-ink/15 bg-parchment-100/40 p-3"
-        >
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Nueva campaña (serás el DM)"
-            required
-            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
-          />
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={maxPlayers}
-            onChange={(e) => setMaxPlayers(e.target.value)}
-            placeholder="Plazas (sin límite si se deja vacío)"
-            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
-          />
-          <textarea
-            value={lore}
-            onChange={(e) => setLore(e.target.value)}
-            placeholder="Lore de apertura (se enseña a los jugadores al entrar)"
-            rows={3}
-            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
-          />
-          <textarea
-            value={objectives}
-            onChange={(e) => setObjectives(e.target.value)}
-            placeholder="Objetivos, uno por línea"
-            rows={3}
-            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
-          />
-          <label className="flex items-center gap-2 text-sm text-ink/80">
-            <input
-              type="checkbox"
-              checked={hasWorldMap}
-              onChange={(e) => setHasWorldMap(e.target.checked)}
-              className="h-4 w-4 accent-ochre"
-            />
-            Forma parte de un mapa de mundo (viajarás entre ubicaciones)
-          </label>
+        <div className="flex flex-col gap-2 rounded-md border border-ink/15 bg-parchment-100/40 p-3">
+          <p className="text-sm text-ink/70">Crear una campaña abre un asistente guiado, paso a paso.</p>
           <button
-            type="submit"
-            disabled={!newName.trim()}
-            className="rounded-sm bg-ember px-4 py-2 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40 disabled:hover:bg-ember"
+            type="button"
+            onClick={() => createCampaign(false)}
+            disabled={creating}
+            title="Un solo tablero, para partidas rápidas sin lore ni objetivos"
+            className="rounded-sm bg-ember px-4 py-2 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40"
           >
-            Crear
+            + Nueva escaramuza
           </button>
-        </form>
+          <button
+            type="button"
+            onClick={() => createCampaign(true)}
+            disabled={creating}
+            title="Lore, objetivos y un mapa de mundo con varios tableros enlazados"
+            className="rounded-sm border border-ink/30 px-4 py-2 font-display tracking-wide text-ink hover:bg-ink/5 disabled:opacity-40"
+          >
+            + Nueva campaña
+          </button>
+        </div>
         <form onSubmit={joinCampaign} className="flex gap-2">
           <input
             value={joinCode}
@@ -162,14 +113,20 @@ export default function HubPage() {
             <li key={c.id} className="rounded-md border border-ink/20 bg-parchment-100/70 p-4 shadow-sm">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-display text-lg font-semibold text-ink">{c.name}</span>
-                {c.isLive && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-ember">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-ember" /> en vivo
+                {c.status === 'draft' ? (
+                  <span className="shrink-0 rounded-sm border border-ochre/50 bg-ochre/10 px-1.5 py-0.5 font-mono text-xs text-ochre">
+                    Borrador
                   </span>
+                ) : (
+                  c.isLive && (
+                    <span className="flex items-center gap-1 text-xs font-medium text-ember">
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-ember" /> en vivo
+                    </span>
+                  )
                 )}
               </div>
               <p className="mt-1 text-sm text-ink/70">
-                {c.role === 'dm' ? 'Eres el DM' : 'Jugador'}
+                {c.role === 'dm' ? 'Eres el DM' : 'Jugador'} · {c.hasWorldMap ? 'Campaña' : 'Escaramuza'}
                 {c.role === 'dm' && (
                   <>
                     {' · invitación: '}
@@ -179,18 +136,18 @@ export default function HubPage() {
               </p>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <Link
-                  to={`/campanas/${c.id}`}
+                  to={c.status === 'draft' ? `/campanas/${c.id}/asistente` : `/campanas/${c.id}`}
                   className="inline-block rounded-sm bg-ochre px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ochre/90"
                 >
-                  Ir a la mesa de juego
+                  {c.status === 'draft' ? 'Continuar asistente' : 'Ir a la mesa de juego'}
                 </Link>
                 <div className="flex items-center gap-2">
-                  {c.role === 'dm' && c.hasWorldMap && (
+                  {c.role === 'dm' && c.status === 'complete' && (
                     <Link
-                      to={`/campanas/${c.id}/mundo`}
+                      to={c.hasWorldMap ? `/campanas/${c.id}/mundo` : `/campanas/${c.id}/editor`}
                       className="rounded-sm border border-ochre/50 px-2 py-1.5 text-xs text-ochre hover:bg-ochre/10"
                     >
-                      Mapa de mundo
+                      {c.hasWorldMap ? 'Mapa de mundo' : 'Editor'}
                     </Link>
                   )}
                   {c.role === 'dm' && (

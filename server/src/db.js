@@ -416,6 +416,40 @@ const migrations = [
   ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'pj' CHECK (kind IN ('pj', 'boss'));
   ALTER TABLE map_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
   `,
+
+  // v21 — Hub de campañas: creación guiada como los personajes. status
+  // 'draft' nace al pulsar crear, antes de rellenar nada; el DM la completa
+  // paso a paso (autoguardado) y "termina" el asistente cuando pone
+  // status='complete'. Las campañas ya existentes nacen 'complete' (no
+  // pasaron por el asistente, no hace falta que lo hagan). wizard_step
+  // recuerda en qué paso se quedó, igual que characters.wizard_step.
+  `
+  ALTER TABLE campaigns ADD COLUMN status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('draft', 'complete'));
+  ALTER TABLE campaigns ADD COLUMN wizard_step INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  // v22 — Bestiario del DM (adelanto de la Fase 11): favoritos del compendio
+  // por usuario (monstruos hoy; category/idx genéricos para reutilizarlo con
+  // hechizos o equipo en el buscador de la Fase 11) e imagen personalizada
+  // por monstruo del SRD (subida o generada con IA una vez y reutilizada en
+  // cada marcador del tablero, en vez de regenerarla cada vez).
+  `
+  CREATE TABLE srd_favorites (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    idx TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, category, idx)
+  );
+
+  CREATE TABLE monster_images (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    monster_idx TEXT NOT NULL,
+    avatar_path TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, monster_idx)
+  );
+  `,
 ];
 
 export function runMigrations() {

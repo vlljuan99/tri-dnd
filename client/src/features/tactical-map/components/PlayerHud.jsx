@@ -1,3 +1,5 @@
+import StatTooltip from '../../../components/StatTooltip.jsx';
+
 // Barra de estado permanente del propio personaje (Fase 8.6, pulido):
 // lo que se mira constantemente en tu turno —vida, movimiento restante,
 // si ya has actuado— vive aquí, siempre visible, en vez de mezclado con
@@ -41,34 +43,37 @@ export default function PlayerHud({
       </div>
 
       {hasHp && (
-        <div className="flex items-center gap-1.5">
+        <StatTooltip stat="hp" className="flex items-center gap-1.5">
           <div className="h-2.5 w-24 overflow-hidden rounded-sm bg-night-950">
             <div className={`h-full ${hpColor}`} style={{ width: `${hpRatio * 100}%` }} />
           </div>
           <span className="font-mono text-xs text-bone/70">
             {hp}/{hpMax}
           </span>
-        </div>
+        </StatTooltip>
       )}
 
       {ac != null && (
-        <span className="rounded-sm border border-bone/15 px-1.5 py-0.5 font-mono text-xs text-bone/70">CA {ac}</span>
+        <StatTooltip stat="ca" className="rounded-sm border border-bone/15 px-1.5 py-0.5 font-mono text-xs text-bone/70">
+          CA {ac}
+        </StatTooltip>
       )}
 
       {gated && budget != null && (
-        <span className="font-mono text-xs text-bone/70">
+        <StatTooltip stat="mov" className="font-mono text-xs text-bone/70">
           Mov {remaining}/{budget} cas
-        </span>
+        </StatTooltip>
       )}
 
       {gated && (
-        <span
+        <StatTooltip
+          stat="accion"
           className={`font-display text-xs uppercase tracking-widest ${
             combatant.actionUsed ? 'text-bone/30 line-through' : 'text-gold'
           }`}
         >
           Acción
-        </span>
+        </StatTooltip>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5 border-l border-bone/10 pl-3">

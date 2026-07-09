@@ -80,11 +80,16 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Jefes/bosses como personaje** (migración v20, `characters.kind` 'pj'/'boss', `map_tokens.character_id`): en vez de un sistema de plantillas aparte, el DM crea un jefe desde la sección de Personajes ("+ Crear jefe"), que nace ya completo (sin pasar por el asistente guiado de PJ) y reutiliza toda la ficha — stats, avatar subido o generado por IA, notas. Al colocar un marcador `enemigo` en el editor de mapas, el DM elige entre el compendio SRD o uno de sus jefes; `spawnRoomEnemies` toma HP/CA de la ficha del jefe (prioridad sobre el SRD) y el tablero pinta su avatar en vez del marcador genérico
 - [x] **Fase 8.9** — Mapa de campaña (mapa de mundo): una capa por encima del tablero
   - **Modelo de datos** (migración v19): `campaigns.has_world_map`/`world_map_url` (el lore reutiliza `campaigns.lore` de la v18), tabla `world_locations` (nombre, `x`/`y` en % sobre la imagen, `lore`, `map_id` REFERENCES maps ON DELETE SET NULL) y `game_tables.current_location_id` (ubicación actual del grupo, se limpia a mano al borrar la ubicación, como `active_map_id`)
-  - **Creación de campaña**: nuevo check "Forma parte de un mapa de mundo" en el Hub; `PATCH /campaigns/:id` para editar lore/objetivos/plazas/mundo después
+  - `PATCH /campaigns/:id` para editar lore/objetivos/plazas/mundo después de creada (el check de creación original se sustituyó por el asistente guiado de la Fase 8.10)
   - **Editor del mundo en página propia** (`/campanas/:id/mundo`, solo DM, `features/world-map/`): sube o genera con IA una imagen de región (`generateWorldMapImage`, prompt de cartografía de fantasía, no cenital de batalla), coloca ubicaciones clicando la imagen, las arrastra para recolocarlas, y por ubicación edita nombre, lore y el tablero enlazado de la biblioteca de mapas
   - **Router `world.js`** con guardas por ruta: el GET lo consulta cualquier miembro (todas las ubicaciones visibles en esta fase, sin ocultas); imagen/ubicaciones/`POST /viajar` son solo del DM. Viajar fija la ubicación actual y activa el mapa enlazado reutilizando la lógica de `activar`, y emite `mapa:actualizado` + `mundo:actualizado`
   - **Flujo en la mesa** (`CampaignGamePage`, máquina de pantallas): lore de campaña → mapa de mundo (solo el DM viaja; el jugador consulta) → lore de la ubicación con las especificaciones del tablero → tablero. Si ya hay ubicación activa se salta directo al tablero, con un botón "Mapa de mundo" en la cabecera para volver. Si la campaña no forma parte de un mapa, todo funciona como antes
-- [ ] **Fase 9** — Hub de campañas + Campamento (escenas de menú fijo con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
+- [x] **Fase 8.10** — Hub de campañas con creación guiada (escaramuza/campaña)
+  - **Campañas como borrador** (migración v21, `campaigns.status` 'draft'/'complete', `wizard_step`): igual que un personaje, una campaña nueva nace en borrador y el DM la completa paso a paso con autoguardado (`CampaignWizardPage`, `/campanas/:id/asistente`); las campañas ya existentes nacen `complete` de serie, no necesitan pasar por el asistente
+  - **Dos tipos al crear**: "Escaramuza" (un solo tablero, sin mundo) pasa por 2 pasos (Identidad, Resumen); "Campaña" (`has_world_map=true`) añade Lore y Objetivos (4 pasos) — el tipo se fija al crear y no cambia dentro del asistente. Al terminar, la escaramuza va al editor de mapas y la campaña al editor de mundo (Fase 8.9)
+  - **Hub reorganizado**: los dos botones de creación abren el asistente directo (nada de formulario largo en la propia lista); cada tarjeta muestra "Borrador" si aún no se terminó (con enlace para retomarlo), y un botón "Editor" (mapas) o "Mapa de mundo" para el DM según el tipo
+  - Si alguien llega a la mesa de una campaña sin terminar el asistente, se le redirige de vuelta a él en vez de ver una mesa a medio montar
+- [ ] **Fase 9** — Campamento (escena de menú ilustrada con hotspots y focus) *(pospuesta: se retoma más adelante, se adelanta la Fase 10)*
   - Sustituye las listas actuales de `HubPage` por la escena ilustrada estilo "menú de misión" (Suikoden/Kingdom Hearts)
   - react-img-mapper + Framer Motion para el halo/zoom al hover y transición de entrada a escena
   - Diseño del Campamento: mapa de región con hoguera central, tiendas (ficha propia/compañeros), camino a la mesa, diario de campaña, cofre/inventario
@@ -92,16 +97,30 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 - [ ] **Fase 10 (en curso)** — Vista rápida "modo presencial"
   - HP, CA, ataques con tirada directa, inventario y hechizos desde el móvil sin sala online activa
 
+- [ ] **Fase 10.5** — Percepción, trampas y visión de NPCs
+  - Tirada de percepción para descubrir trampas ocultas dentro del alcance de visión del personaje (visión + bonificador de percepción)
+  - Ver el rango de visión/detección de NPCs y enemigos sobre el tablero
+
 - [ ] **Fase 11** — Buscador de compendio + comandos de chat (`/r 1d20+4`)
   - Buscador rápido con filtros sobre hechizos, monstruos, equipo y condiciones ya sincronizados
   - Aprovechar para completar la traducción al español de hechizos y monstruos (pendiente desde la fase 1)
   - Comandos de tirada directamente en el chat de la mesa
+  - Caché de imágenes de enemigos generadas por IA: al crear un enemigo del compendio, la imagen se guarda y se reutiliza en vez de regenerarla cada vez
 
-- [ ] **Fase 12** — Fuentes de luz dinámicas en el mapa (opcional, si el tiempo lo permite)
-  - Dos niveles: revelado-pero-en-penumbra vs. iluminado, combinado con la niebla de guerra
+- [ ] **Fase 12** — Fuentes de luz dinámicas, clima y oscuridad en el mapa (opcional, si el tiempo lo permite)
+  - Dos niveles de luz: revelado-pero-en-penumbra vs. iluminado, combinado con la niebla de guerra
+  - Clima (por azar o elegido por el master) como capa visual/ambiental sobre el tablero
+  - Oscuridad dependiente de raza, atributos u objetos del personaje (más allá del campo manual de visión en la oscuridad ya existente)
+
+- [ ] **Fase 12.5** — Minimapa y casilla de evento
+  - Minimapa de la planta/sala activa para orientarse en tableros grandes
+  - Casilla de evento con animación de dado; el master elige las opciones/resultado posibles
 
 - [ ] **Fase 13** — Aplicar la dirección de diseño y atmósfera de forma consistente en toda la app
   - Auditoría visual completa: paleta nocturna de mesa vs. paleta cálida de campamento, tipografías (Cinzel/Alegreya/JetBrains Mono), evitar clichés genéricos de IA
+  - Explicación de atributos al pasar el ratón (hover) en la ficha de personaje
+  - Música ambiental asociada a casillas o situaciones del tablero, con **integración con Spotify**: el DM enlaza su cuenta (Premium, OAuth) y la mesa controla remotamente el dispositivo Spotify que ya tenga activo (play/pausa/playlist/volumen) — no requiere que la partida sea presencial, el sonido llega por donde el DM ya lo esté compartiendo (Discord u otro)
+  - Sonido de "BRUH" al sacar una pifia (grabar a Dani)
 
 - [ ] **Fase 14** — Pulido y pruebas en local
   - Sesión de prueba completa con el grupo real, recoger fricciones antes de plantear el despliegue
