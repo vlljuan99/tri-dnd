@@ -7,6 +7,15 @@ import { AVATAR_UPLOADS_DIR } from '../config.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
 import { notifyCampaignMap } from '../services/liveMap.js';
+import { buildMeta } from '../services/srdShape.js';
+import {
+  customCategorySupported,
+  isCustomIndex,
+  customIdFromIndex,
+  listCustomRows,
+  getCustomRow,
+  serializeCustomEntry,
+} from '../services/customLibrary.js';
 
 export const srdRouter = Router();
 srdRouter.use(requireAuth);
@@ -24,39 +33,6 @@ const CATEGORIES = new Set([
   'spells',
   'weapon-properties',
 ]);
-
-// Resumen mínimo por categoría para pintar listados sin descargar el detalle
-function buildMeta(category, data) {
-  if (category === 'spells') {
-    return {
-      level: data.level,
-      school: data.school?.index,
-      concentration: data.concentration,
-      ritual: data.ritual,
-      attackType: data.attack_type ?? null,
-      hasDamage: Boolean(data.damage),
-      dc: data.dc?.dc_type?.index ?? null,
-    };
-  }
-  if (category === 'equipment') {
-    return {
-      equipmentCategory: data.equipment_category?.index,
-      damage: data.damage
-        ? { dice: data.damage.damage_dice, type: data.damage.damage_type?.index }
-        : null,
-      twoHandedDamage: data.two_handed_damage
-        ? { dice: data.two_handed_damage.damage_dice, type: data.two_handed_damage.damage_type?.index }
-        : null,
-      properties: (data.properties ?? []).map((p) => p.index),
-      weaponRange: data.weapon_range ?? null,
-      armorClass: data.armor_class ?? null,
-    };
-  }
-  if (category === 'monsters') {
-    return { cr: data.challenge_rating, type: data.type, hp: data.hit_points, ac: data.armor_class?.[0]?.value };
-  }
-  return undefined;
-}
 
 function toEntry(row, { full = false } = {}) {
   const data = JSON.parse(row.data);
@@ -277,12 +253,40 @@ srdRouter.get('/:category', (req, res) => {
        ORDER BY COALESCE(name_es, name_en) LIMIT 400`
     )
     .all(...params);
-  res.json({ results: attachMonsterUserData(rows.map((r) => toEntry(r)), req.user.id) });
+  let results = attachMonsterUserData(rows.map((r) => toEntry(r)), req.user.id);
+
+  // Biblioteca propia del DM (objetos/hechizos): se mezcla con el compendio
+  // salvo que se pida explícitamente solo una de las dos fuentes con ?fuente.
+  // El filtro de clase de los hechizos no aplica al contenido propio (no tiene
+  // lista de clases): los hechizos propios se muestran siempre.
+  const fuente = req.query.fuente;
+  if (customCategorySupported(category) && fuente !== 'srd') {
+    const maxLevel = Number(req.query.maxLevel);
+    const custom = listCustomRows(req.user.id, category, {
+      q,
+      cat: category === 'equipment' && typeof req.query.cat === 'string' ? req.query.cat : null,
+      maxLevel: Number.isInteger(maxLevel) ? maxLevel : null,
+    }).map((row) => serializeCustomEntry(row, category));
+    if (fuente === 'propios') results = custom;
+    else results = [...custom, ...results];
+  }
+  res.json({ results });
 });
 
-// Detalle de una entrada, con datos completos del SRD
+// Detalle de una entrada, con datos completos del SRD o de la biblioteca propia
 srdRouter.get('/:category/:idx', (req, res) => {
   const { category, idx } = req.params;
+
+  if (isCustomIndex(idx)) {
+    if (!customCategorySupported(category)) {
+      return res.status(404).json({ error: 'Entrada no encontrada' });
+    }
+    const id = customIdFromIndex(idx);
+    const row = id != null && getCustomRow(req.user.id, category, id);
+    if (!row) return res.status(404).json({ error: 'Entrada no encontrada' });
+    return res.json(serializeCustomEntry(row, category, { full: true }));
+  }
+
   const row = db
     .prepare('SELECT * FROM srd_entries WHERE category = ? AND idx = ?')
     .get(category, idx);

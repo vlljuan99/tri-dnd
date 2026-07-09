@@ -49,6 +49,7 @@ export function serializeDoor(row, { forPlayer = false } = {}) {
 }
 
 export function serializeToken(row, { forPlayer = false } = {}) {
+  const loot = JSON.parse(row.loot || '[]');
   return {
     id: row.id,
     roomId: row.room_id,
@@ -72,6 +73,12 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     // hasta resolver el intento de interactuar (trampa/objeto).
     skill: row.skill ?? null,
     dc: forPlayer ? undefined : row.dc ?? null,
+    // Variantes por instancia y botín (Fases 17/20): información de DM. El
+    // jugador nunca ve los stats retocados de un enemigo ni su botín antes de
+    // saquearlo; `hasLoot` sí viaja para poder pintar un marcador saqueable.
+    overrides: forPlayer ? undefined : JSON.parse(row.overrides || '{}'),
+    loot: forPlayer ? undefined : loot,
+    hasLoot: loot.length > 0,
   };
 }
 
@@ -244,8 +251,8 @@ export function spawnRoomEnemies(campaignId, roomIds) {
       .map((r) => r.map_token_id)
   );
   const insert = db.prepare(
-    `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac, monster_index, map_token_id)
-     VALUES (?, 'enemigo', ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac, monster_index, map_token_id, overrides)
+     VALUES (?, 'enemigo', ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   let added = 0;
@@ -280,10 +287,17 @@ export function spawnRoomEnemies(campaignId, roomIds) {
         }
       }
     }
+    // Variante por instancia (miniboss, Fase 17): los stats de ESTE marcador
+    // mandan sobre el jefe/SRD. Se copian al combatiente para que el bloque
+    // de estadísticas del DM aplique también los deltas de ataque/daño.
+    const overrides = JSON.parse(enemy.overrides || '{}');
+    if (Number.isInteger(overrides.hp)) hp = overrides.hp;
+    if (Number.isInteger(overrides.ac)) ac = overrides.ac;
+
     // Iniciativa tirada sola (1d20+DES del monstruo), como cualquier otro
     // combatiente que se une con el modo por turnos activo
     const initiative = rollInitiativeValue({ kind: 'enemigo', monster_index: enemy.monster_index });
-    insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id);
+    insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id, enemy.overrides || '{}');
     added += 1;
   }
   if (added > 0) {

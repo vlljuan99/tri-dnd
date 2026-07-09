@@ -17,8 +17,27 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null); // { success, dc, opened }
+  const [looted, setLooted] = useState(null); // [{name, qty}] tras saquear
 
-  const skill = target.skill ? SKILLS.find((s) => s.index === target.skill) : null;
+  // Un marcador de botín se saquea (pasa al inventario), no se "interactúa"
+  const isLoot = type === 'token' && target.hasLoot;
+  const skill = !isLoot && target.skill ? SKILLS.find((s) => s.index === target.skill) : null;
+
+  async function loot() {
+    setBusy(true);
+    setError('');
+    try {
+      const resp = await api(`/campaigns/${campaignId}/marcadores/${target.serverId}/saquear`, {
+        method: 'POST',
+        body: { characterId },
+      });
+      setLooted(resp.looted ?? []);
+    } catch (e) {
+      setError(e.message || 'No se pudo saquear.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!skill) return;
@@ -88,6 +107,39 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
 
       {error && <p className="mb-2 text-xs text-blood">{error}</p>}
 
+      {isLoot ? (
+        looted ? (
+          <div className="rounded-sm border border-gold/20 bg-night-950/60 p-2 text-sm">
+            <p className="font-display uppercase tracking-widest text-gold">¡Saqueado!</p>
+            <ul className="mt-1 space-y-0.5 text-xs text-bone/80">
+              {looted.length === 0 ? (
+                <li className="italic text-bone/50">No había nada.</li>
+              ) : (
+                looted.map((l, i) => (
+                  <li key={i}>
+                    {l.name}
+                    {l.qty > 1 ? ` ×${l.qty}` : ''}
+                  </li>
+                ))
+              )}
+            </ul>
+            <p className="mt-1 text-[0.65rem] text-bone/40">Añadido a tu inventario.</p>
+          </div>
+        ) : (
+          <>
+            <p className="mb-2 text-sm text-bone/70">Botín a tus pies.</p>
+            <button
+              onClick={loot}
+              disabled={busy}
+              className="w-full rounded-sm border border-gold/50 px-3 py-1.5 text-sm text-gold hover:bg-gold/10 disabled:opacity-40"
+            >
+              Saquear
+            </button>
+            <p className="mt-2 text-[0.65rem] text-bone/40">Pasa a tu inventario. No gasta la acción del turno.</p>
+          </>
+        )
+      ) : (
+        <>
       {!result && (
         <>
           {skill ? (
@@ -130,9 +182,11 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
         </div>
       )}
 
-      <p className="mt-2 text-[0.65rem] text-bone/40">
-        Interactuar gasta la acción del turno, tanto si lo consigues como si no.
-      </p>
+          <p className="mt-2 text-[0.65rem] text-bone/40">
+            Interactuar gasta la acción del turno, tanto si lo consigues como si no.
+          </p>
+        </>
+      )}
     </div>
   );
 }

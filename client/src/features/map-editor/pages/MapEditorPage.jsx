@@ -10,10 +10,14 @@ import TokenPanel from '../components/TokenPanel.jsx';
 
 const TOKEN_KINDS = [
   { key: 'enemigo', label: 'Enemigo' },
-  { key: 'aliado', label: 'Aliado' },
+  { key: 'aliado', label: 'Aliado / PNJ' },
   { key: 'objeto', label: 'Objeto' },
   { key: 'trampa', label: 'Trampa' },
 ];
+
+// Marcadores que pueden enlazarse a una ficha de personaje del DM (kind='boss'):
+// un enemigo importante o un PNJ aliado toman su avatar y sus stats.
+const CHARACTER_LINKABLE = new Set(['enemigo', 'aliado']);
 
 // Plantillas de sala para combinar piezas: habitaciones, salones y pasillos
 const ROOM_TEMPLATES = [
@@ -111,7 +115,7 @@ export default function MapEditorPage() {
   }
 
   async function placeToken(target) {
-    const boss = tokenKind === 'enemigo' ? bosses.find((b) => b.id === Number(tokenBossId)) : null;
+    const boss = CHARACTER_LINKABLE.has(tokenKind) ? bosses.find((b) => b.id === Number(tokenBossId)) : null;
     const name =
       tokenName.trim() ||
       boss?.name ||
@@ -439,10 +443,8 @@ export default function MapEditorPage() {
                       value={tokenKind}
                       onChange={(e) => {
                         setTokenKind(e.target.value);
-                        if (e.target.value !== 'enemigo') {
-                          setTokenMonster(null);
-                          setTokenBossId('');
-                        }
+                        setTokenMonster(null);
+                        setTokenBossId('');
                       }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
@@ -475,13 +477,15 @@ export default function MapEditorPage() {
                         ✕
                       </button>
                     )}
-                    {tokenKind === 'enemigo' && bosses.length > 0 && !tokenMonster && (
+                    {CHARACTER_LINKABLE.has(tokenKind) && bosses.length > 0 && !tokenMonster && (
                       <select
                         value={tokenBossId}
                         onChange={(e) => setTokenBossId(e.target.value)}
                         className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                       >
-                        <option value="">— o un jefe tuyo —</option>
+                        <option value="">
+                          {tokenKind === 'aliado' ? '— enlazar un PNJ —' : '— o un jefe tuyo —'}
+                        </option>
                         {bosses.map((b) => (
                           <option key={b.id} value={b.id}>{b.name}</option>
                         ))}

@@ -351,6 +351,11 @@ export default function CampaignGamePage() {
               Abrir el editor de campaña
             </Link>
           )}
+          {campaign?.role === 'dm' && (
+            <Link to={`/campanas/${campaignId}/gestion`} className="text-gold underline">
+              Gestión de la campaña
+            </Link>
+          )}
           <Link to="/" className="text-bone/70 underline">
             Volver al hub
           </Link>

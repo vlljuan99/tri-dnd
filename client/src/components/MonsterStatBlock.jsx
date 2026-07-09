@@ -57,12 +57,18 @@ const DAMAGE_TYPE_ES = {
   thunder: 'trueno',
 };
 
-function ActionRow({ action, monsterName, onRoll }) {
+function ActionRow({ action, monsterName, onRoll, overrides = {} }) {
+  // Variante por instancia (miniboss): +/- al impacto y al daño de la acción
+  const atkDelta = Number.isInteger(overrides.attackBonus) ? overrides.attackBonus : 0;
+  const dmgDelta = Number.isInteger(overrides.damageBonus) ? overrides.damageBonus : 0;
   const canAttack = Number.isInteger(action.attack_bonus);
+  const attackBonus = canAttack ? action.attack_bonus + atkDelta : null;
   const explicitDamage = (action.damage ?? [])
     .map((d) => ({ parsed: parseDamageDice(d.damage_dice), typeName: d.damage_type?.name ?? '' }))
     .filter((d) => d.parsed);
-  const damageOptions = explicitDamage.length > 0 ? explicitDamage : extractDamageFromDesc(action.desc);
+  const damageOptions = (explicitDamage.length > 0 ? explicitDamage : extractDamageFromDesc(action.desc)).map(
+    (d) => ({ ...d, parsed: { ...d.parsed, modifier: d.parsed.modifier + dmgDelta } })
+  );
   // Sin onRoll (p. ej. en el bestiario del editor, sin mesa activa) la
   // acción se muestra solo como texto, sin botones de tirada
   const canRoll = Boolean(onRoll) && (canAttack || damageOptions.length > 0);
@@ -71,7 +77,12 @@ function ActionRow({ action, monsterName, onRoll }) {
     <div className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="font-medium text-bone">{action.name}</span>
-        {canAttack && <span className="font-mono text-xs text-bone/60">{formatModifier(action.attack_bonus)}</span>}
+        {canAttack && (
+          <span className="font-mono text-xs text-bone/60">
+            {formatModifier(attackBonus)}
+            {atkDelta !== 0 && <span className="ml-1 text-gold/70">(var.)</span>}
+          </span>
+        )}
       </div>
       {action.desc && <p className="mt-0.5 text-xs text-bone/60">{action.desc}</p>}
       {canRoll && (
@@ -80,21 +91,21 @@ function ActionRow({ action, monsterName, onRoll }) {
             <>
               <button
                 onClick={() =>
-                  onRoll(rollAttack(action.attack_bonus, { advantage: 'dis', label: action.name, actorName: monsterName }))
+                  onRoll(rollAttack(attackBonus, { advantage: 'dis', label: action.name, actorName: monsterName }))
                 }
                 className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
               >
                 Desv.
               </button>
               <button
-                onClick={() => onRoll(rollAttack(action.attack_bonus, { label: action.name, actorName: monsterName }))}
+                onClick={() => onRoll(rollAttack(attackBonus, { label: action.name, actorName: monsterName }))}
                 className="rounded-sm border border-gold/50 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
               >
                 Atacar
               </button>
               <button
                 onClick={() =>
-                  onRoll(rollAttack(action.attack_bonus, { advantage: 'adv', label: action.name, actorName: monsterName }))
+                  onRoll(rollAttack(attackBonus, { advantage: 'adv', label: action.name, actorName: monsterName }))
                 }
                 className="rounded-sm border border-moss px-2 py-0.5 text-xs text-bone/90 hover:bg-moss/20"
               >
@@ -148,7 +159,11 @@ function ActionRow({ action, monsterName, onRoll }) {
  * acciones ofrecen botones de tirada; sin él (bestiario del editor, sin mesa
  * activa) se muestran solo como texto.
  */
-export function MonsterStatsContent({ data, monsterName, onRoll = null }) {
+export function MonsterStatsContent({ data, monsterName, onRoll = null, overrides = {} }) {
+  const ovHp = Number.isInteger(overrides.hp) ? overrides.hp : null;
+  const ovAc = Number.isInteger(overrides.ac) ? overrides.ac : null;
+  const baseAc = data.armor_class?.[0]?.value ?? '—';
+  const traits = Array.isArray(overrides.traits) ? overrides.traits : [];
   return (
     <>
       <div className="mb-3 grid grid-cols-3 gap-2 text-center text-sm sm:grid-cols-6">
@@ -164,22 +179,35 @@ export function MonsterStatsContent({ data, monsterName, onRoll = null }) {
         ))}
       </div>
       <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-bone/60">
-        <StatTooltip stat="ca">CA {data.armor_class?.[0]?.value ?? '—'}</StatTooltip>
-        <StatTooltip stat="hp">
-          PG {data.hit_points}
-          {data.hit_dice ? ` (${data.hit_dice})` : ''}
+        <StatTooltip stat="ca">
+          CA {ovAc ?? baseAc}
+          {ovAc != null && ovAc !== baseAc && <span className="ml-1 text-gold/70">(var.)</span>}
         </StatTooltip>
-        {data.speed && (
+        <StatTooltip stat="hp">
+          PG {ovHp ?? data.hit_points}
+          {ovHp != null ? <span className="ml-1 text-gold/70">(var.)</span> : data.hit_dice ? ` (${data.hit_dice})` : ''}
+        </StatTooltip>
+        {(Number.isInteger(overrides.speed) || data.speed) && (
           <StatTooltip stat="velocidad">
-            Vel. {Object.entries(data.speed).map(([k, v]) => `${k} ${v}`).join(', ')}
+            Vel.{' '}
+            {Number.isInteger(overrides.speed)
+              ? `${overrides.speed} pies`
+              : Object.entries(data.speed).map(([k, v]) => `${k} ${v}`).join(', ')}
           </StatTooltip>
         )}
       </div>
 
-      {data.special_abilities?.length > 0 && (
+      {(data.special_abilities?.length > 0 || traits.length > 0) && (
         <div className="mb-3 space-y-1.5">
           <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Rasgos</h3>
-          {data.special_abilities.map((a, i) => (
+          {traits.map((t, i) => (
+            <div key={`ov-${i}`} className="rounded-sm border border-gold/25 bg-gold/5 p-2">
+              <span className="font-medium text-gold/90">{t.name}</span>
+              <span className="ml-1 text-[0.65rem] uppercase tracking-widest text-gold/50">variante</span>
+              {t.desc && <p className="mt-0.5 text-xs text-bone/60">{t.desc}</p>}
+            </div>
+          ))}
+          {(data.special_abilities ?? []).map((a, i) => (
             <div key={i} className="rounded-sm border border-bone/10 bg-night-950/50 p-2">
               <span className="font-medium">{a.name}</span>
               {a.desc && <p className="mt-0.5 text-xs text-bone/60">{a.desc}</p>}
@@ -192,7 +220,7 @@ export function MonsterStatsContent({ data, monsterName, onRoll = null }) {
         <div className="space-y-1.5">
           <h3 className="font-display text-sm uppercase tracking-widest text-gold/70">Acciones</h3>
           {data.actions.map((a, i) => (
-            <ActionRow key={i} action={a} monsterName={monsterName} onRoll={onRoll} />
+            <ActionRow key={i} action={a} monsterName={monsterName} onRoll={onRoll} overrides={overrides} />
           ))}
         </div>
       )}
@@ -205,7 +233,7 @@ export function MonsterStatsContent({ data, monsterName, onRoll = null }) {
  * botones para tirar sus ataques (impacto y daño, con ventaja/desventaja y
  * crítico), compartidos en el registro de la mesa como cualquier otra tirada.
  */
-export default function MonsterStatBlock({ index, name, onClose }) {
+export default function MonsterStatBlock({ index, name, onClose, overrides = {} }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const sendRoll = useRoom((s) => s.sendRoll);
@@ -239,7 +267,7 @@ export default function MonsterStatBlock({ index, name, onClose }) {
         {error && <p className="py-6 text-center text-blood">{error}</p>}
         {!data && !error && <p className="py-6 text-center text-bone/50">Cargando…</p>}
 
-        {data && <MonsterStatsContent data={data} monsterName={name} onRoll={onRoll} />}
+        {data && <MonsterStatsContent data={data} monsterName={name} onRoll={onRoll} overrides={overrides} />}
       </div>
     </div>
   );

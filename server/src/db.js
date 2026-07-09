@@ -450,6 +450,71 @@ const migrations = [
     PRIMARY KEY (user_id, monster_idx)
   );
   `,
+
+  // v23 — Fase 15: biblioteca del DM (objetos y hechizos propios). Por
+  // usuario (no por campaña): una colección reutilizable en cualquier
+  // campaña. `data` guarda un JSON con la MISMA forma que una entrada del
+  // SRD (equipment/spells) para reutilizar el serializador `buildMeta`, el
+  // detalle y el consumo desde la ficha sin formato paralelo; en los
+  // listados/detalle del compendio se mezclan con index sintético
+  // `custom:<id>` y bandera `custom: true`.
+  `
+  CREATE TABLE custom_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_custom_items_user ON custom_items(user_id);
+
+  CREATE TABLE custom_spells (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_custom_spells_user ON custom_spells(user_id);
+  `,
+
+  // v24 — Fase 21: secciones dinámicas de la ficha. El jugador crea bloques
+  // propios (título + tipo texto/lista/srd + contenido) para organizar la
+  // ficha a su gusto; una sola columna JSON en characters, sin tablas
+  // aparte. Un bloque 'srd' enlaza entradas del compendio por index.
+  `
+  ALTER TABLE characters ADD COLUMN custom_sections TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v25 — Fase 16: asignación de contenido de la biblioteca del DM a una
+  // campaña. content_type distingue objeto/hechizo; content_id apunta a
+  // custom_items/custom_spells. El marcador NPC no necesita esquema nuevo:
+  // reutiliza un marcador 'aliado' enlazado a un personaje del DM
+  // (map_tokens.character_id, v20), evitando reconstruir el CHECK de kind.
+  `
+  CREATE TABLE campaign_library (
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    content_type TEXT NOT NULL CHECK (content_type IN ('objeto', 'hechizo')),
+    content_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (campaign_id, content_type, content_id)
+  );
+  `,
+
+  // v26 — Fase 17 (variantes por instancia / minibosses) y Fase 20 (botín).
+  // overrides: JSON por marcador con stats de ESTA instancia concreta
+  //   { hp, ac, speed, attackBonus, damageBonus, traits: [{name, desc}] };
+  //   se aplican con prioridad sobre el SRD/jefe al aparecer el enemigo y se
+  //   copian al combatiente para que el bloque de estadísticas del DM los use.
+  // loot: JSON con la tabla de botín del enemigo (objetos con probabilidad);
+  //   al morir se tira y se deja un marcador 'objeto' saqueable con lo caído.
+  `
+  ALTER TABLE map_tokens ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE map_tokens ADD COLUMN loot TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE combatants ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 export function runMigrations() {

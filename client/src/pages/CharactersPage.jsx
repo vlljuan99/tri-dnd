@@ -96,6 +96,13 @@ export default function CharactersPage() {
           >
             + Crear jefe
           </button>
+          <Link
+            to="/biblioteca"
+            title="Tus objetos y hechizos propios, reutilizables en cualquier campaña"
+            className="rounded-sm border border-ink/30 px-4 py-2 font-display tracking-wide text-ink hover:bg-ink/5"
+          >
+            Biblioteca
+          </Link>
         </div>
       </div>
 

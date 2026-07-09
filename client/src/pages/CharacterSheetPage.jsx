@@ -26,6 +26,7 @@ import StatTooltip from '../components/StatTooltip.jsx';
 import { saveStat, skillStat } from '../lib/statGlossary.js';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
+import CustomSections from '../components/CustomSections.jsx';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -732,6 +733,13 @@ export default function CharacterSheetPage() {
           />
         </Card>
       </div>
+
+      {/* Secciones propias del jugador (Fase 21) */}
+      <CustomSections
+        sections={char.custom_sections}
+        ro={ro}
+        onChange={(next) => patch({ custom_sections: next })}
+      />
 
       {/* Selectores de compendio */}
       {picker === 'weapon' && (

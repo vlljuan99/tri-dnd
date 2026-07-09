@@ -13,6 +13,8 @@ import {
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
+import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
+import { lootMarkerInto } from '../services/loot.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -229,6 +231,95 @@ campaignsRouter.delete('/:id', (req, res) => {
     db.prepare('DELETE FROM campaigns WHERE id = ?').run(row.id);
   })();
   res.json({ ok: true });
+});
+
+// --- Panel de gestión del DM (Fase 16) ------------------------------------
+// NPCs/jefes de la campaña y biblioteca (objetos/hechizos) asignada a ella.
+
+function requireDm(req, res) {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) {
+    res.status(404).json({ error: 'Campaña no encontrada' });
+    return null;
+  }
+  if (row.dm_user_id !== req.user.id) {
+    res.status(403).json({ error: 'Solo el DM gestiona la campaña' });
+    return null;
+  }
+  return row;
+}
+
+const LIBRARY_CATEGORY = { objetos: 'equipment', hechizos: 'spells' };
+const LIBRARY_CONTENT_TYPE = { objetos: 'objeto', hechizos: 'hechizo' };
+
+campaignsRouter.get('/:id/gestion', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+
+  // Personajes del DM (kind='boss'): sirven como jefes hostiles y como PNJ.
+  // `assigned` = ya vinculado a esta campaña (characters.campaign_id).
+  const characters = db
+    .prepare(
+      `SELECT id, name, level, hp_max, ac, avatar_path AS avatarUrl, campaign_id
+       FROM characters WHERE user_id = ? AND kind = 'boss' ORDER BY name`
+    )
+    .all(req.user.id)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      level: c.level,
+      hpMax: c.hp_max,
+      ac: c.ac,
+      avatarUrl: c.avatarUrl,
+      assigned: c.campaign_id === campaign.id,
+      otherCampaign: c.campaign_id != null && c.campaign_id !== campaign.id,
+    }));
+
+  const assignedIds = {
+    objeto: new Set(
+      db.prepare("SELECT content_id FROM campaign_library WHERE campaign_id = ? AND content_type = 'objeto'").all(campaign.id).map((r) => r.content_id)
+    ),
+    hechizo: new Set(
+      db.prepare("SELECT content_id FROM campaign_library WHERE campaign_id = ? AND content_type = 'hechizo'").all(campaign.id).map((r) => r.content_id)
+    ),
+  };
+  const serializeLib = (tipo) =>
+    listCustomRows(req.user.id, LIBRARY_CATEGORY[tipo]).map((row) => ({
+      ...serializeCustomEntry(row, LIBRARY_CATEGORY[tipo]),
+      assigned: assignedIds[LIBRARY_CONTENT_TYPE[tipo]].has(row.id),
+    }));
+
+  res.json({
+    characters,
+    library: { objetos: serializeLib('objetos'), hechizos: serializeLib('hechizos') },
+  });
+});
+
+campaignsRouter.put('/:id/biblioteca/:tipo/:contentId', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  const contentType = LIBRARY_CONTENT_TYPE[req.params.tipo];
+  if (!contentType) return res.status(404).json({ error: 'Tipo desconocido' });
+  const category = LIBRARY_CATEGORY[req.params.tipo];
+  const contentId = Number(req.params.contentId);
+  // Solo contenido propio del DM
+  const owned = listCustomRows(req.user.id, category).some((r) => r.id === contentId);
+  if (!owned) return res.status(404).json({ error: 'Entrada no encontrada' });
+  db.prepare(
+    'INSERT OR IGNORE INTO campaign_library (campaign_id, content_type, content_id) VALUES (?, ?, ?)'
+  ).run(campaign.id, contentType, contentId);
+  res.json({ ok: true, assigned: true });
+});
+
+campaignsRouter.delete('/:id/biblioteca/:tipo/:contentId', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  const contentType = LIBRARY_CONTENT_TYPE[req.params.tipo];
+  if (!contentType) return res.status(404).json({ error: 'Tipo desconocido' });
+  db.prepare(
+    'DELETE FROM campaign_library WHERE campaign_id = ? AND content_type = ? AND content_id = ?'
+  ).run(campaign.id, contentType, Number(req.params.contentId));
+  res.json({ ok: true, assigned: false });
 });
 
 // Mapa activo de la mesa, filtrado según el rol: el DM lo ve entero; el
@@ -479,6 +570,53 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
     dc: !isDm && door.skill ? door.dc : undefined,
     map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map, req.user.id),
   });
+});
+
+// Saquear un marcador de botín (Fase 20): un personaje adyacente pasa su
+// contenido a su inventario y el marcador desaparece. No cuesta acción (es
+// saqueo, no combate); solo exige estar al lado, como abrir una puerta.
+campaignsRouter.post('/:id/marcadores/:tokenId/saquear', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+
+  const activeMapId = getActiveMapId(req.params.id);
+  const token = activeMapId
+    ? db
+        .prepare(
+          `SELECT t.*, r.floor_id, r.revealed FROM map_tokens t
+           JOIN map_rooms r ON r.id = t.room_id
+           JOIN map_floors f ON f.id = r.floor_id
+           WHERE t.id = ? AND f.map_id = ?`
+        )
+        .get(req.params.tokenId, activeMapId)
+    : undefined;
+  if (!token || token.hidden) return res.status(404).json({ error: 'Botín no encontrado' });
+  const loot = JSON.parse(token.loot || '[]');
+  if (!Array.isArray(loot) || !loot.length) {
+    return res.status(400).json({ error: 'Ahí no hay nada que saquear' });
+  }
+
+  const character = db
+    .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ? AND user_id = ?')
+    .get(req.body?.characterId, req.params.id, req.user.id);
+  if (!character) return res.status(400).json({ error: 'Personaje no válido' });
+
+  const charToken = db
+    .prepare(
+      `SELECT t.*, r.floor_id FROM map_character_tokens t JOIN map_rooms r ON r.id = t.room_id
+       WHERE t.map_id = ? AND t.character_id = ?`
+    )
+    .get(activeMapId, character.id);
+  if (!charToken) return res.status(400).json({ error: 'Tu personaje no está en el tablero' });
+  const adjacent =
+    charToken.floor_id === token.floor_id &&
+    Math.max(Math.abs(token.x - charToken.x), Math.abs(token.y - charToken.y)) <= 1;
+  if (!adjacent) return res.status(400).json({ error: 'Tienes que estar al lado del botín' });
+
+  const looted = lootMarkerInto(token, character);
+  touchMap(activeMapId);
+  notifyCampaignMap(req.params.id);
+  res.json({ ok: true, looted });
 });
 
 // Interactuar con un marcador de trampa/objeto del mapa activo: cuesta la

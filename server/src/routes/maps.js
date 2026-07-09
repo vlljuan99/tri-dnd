@@ -476,14 +476,15 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
       .get(monsterIndex);
     if (monster) monsterIdx = monster.idx;
   }
-  // Un enemigo puede enlazarse a un "jefe" (ficha completa del DM) en vez
-  // de/además de un monstruo del compendio; solo bosses del propio DM
+  // Un enemigo puede enlazarse a un "jefe" (ficha completa del DM) y un
+  // aliado a un PNJ (misma ficha kind='boss', pero amistoso): en ambos casos
+  // el marcador toma su avatar y sus stats. Solo personajes del propio DM.
   let bossId = null;
-  if (kind === 'enemigo' && characterId != null) {
+  if ((kind === 'enemigo' || kind === 'aliado') && characterId != null) {
     const boss = db
       .prepare("SELECT id FROM characters WHERE id = ? AND user_id = ? AND kind = 'boss'")
       .get(characterId, req.user.id);
-    if (!boss) return res.status(400).json({ error: 'Jefe no válido' });
+    if (!boss) return res.status(400).json({ error: 'Personaje no válido' });
     bossId = boss.id;
   }
   const isHidden = hidden !== undefined ? Number(Boolean(hidden)) : kind === 'trampa' ? 1 : 0;
@@ -504,7 +505,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   const token = map && getToken(map.id, req.params.tokenId);
   if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
 
-  const { name, x, y, hidden, kind, dc, skill } = req.body ?? {};
+  const { name, x, y, hidden, kind, dc, skill, overrides, loot } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
   }
@@ -516,6 +517,24 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   }
   if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
     return res.status(400).json({ error: 'Habilidad no válida' });
+  }
+  // Variante por instancia (Fase 17) y botín (Fase 20): JSON del propio DM,
+  // validado por encima y acotado en tamaño.
+  let overridesJson;
+  if (overrides !== undefined) {
+    if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) {
+      return res.status(400).json({ error: 'Variantes no válidas' });
+    }
+    overridesJson = JSON.stringify(overrides);
+    if (overridesJson.length > 8000) return res.status(400).json({ error: 'Variantes demasiado largas' });
+  }
+  let lootJson;
+  if (loot !== undefined) {
+    if (!Array.isArray(loot) || loot.length > 40) {
+      return res.status(400).json({ error: 'Botín no válido' });
+    }
+    lootJson = JSON.stringify(loot);
+    if (lootJson.length > 12000) return res.status(400).json({ error: 'Botín demasiado largo' });
   }
 
   // Al moverlo puede cambiar de sala: se busca la sala de la misma planta
@@ -549,7 +568,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   }
 
   db.prepare(
-    'UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ? WHERE id = ?'
+    'UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ?, overrides = ?, loot = ? WHERE id = ?'
   ).run(
     roomId,
     name !== undefined ? name.trim().slice(0, 60) : token.name,
@@ -559,6 +578,8 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     kind ?? token.kind,
     dc !== undefined ? dc : token.dc,
     skill !== undefined ? skill : token.skill,
+    overridesJson !== undefined ? overridesJson : token.overrides,
+    lootJson !== undefined ? lootJson : token.loot,
     token.id
   );
   touchAndNotify(map);

@@ -1,17 +1,89 @@
 import { useEffect, useState } from 'react';
 import { SKILLS } from '../../../lib/dnd.js';
+import SrdPicker from '../../../components/SrdPicker.jsx';
 
 const inputClass =
   'w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none';
 const labelClass = 'block text-[0.65rem] uppercase tracking-widest text-bone/50';
 
-const KIND_LABELS = { enemigo: 'Enemigo', aliado: 'Aliado', objeto: 'Objeto', trampa: 'Trampa' };
+const KIND_LABELS = { enemigo: 'Enemigo', aliado: 'Aliado / PNJ', objeto: 'Objeto', trampa: 'Trampa' };
+
+const genId = () =>
+  (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `loot-${Date.now()}-${Math.random()}`);
+
+// Campo numérico de override: vacío = usar el valor del SRD/jefe
+function OverrideNumber({ label, value, onChange, placeholder }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className={labelClass}>{label}</span>
+      <input
+        type="number"
+        value={value ?? ''}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        className={`${inputClass} text-center font-mono`}
+      />
+    </label>
+  );
+}
 
 // Panel lateral del marcador seleccionado (enemigo, aliado, objeto o trampa)
 export default function TokenPanel({ token, roomName, busy, onPatch, onDelete }) {
   const [name, setName] = useState(token.name);
+  // Variante por instancia (miniboss) y botín: estado local editable
+  const [overrides, setOverrides] = useState(token.overrides ?? {});
+  const [loot, setLoot] = useState(token.loot ?? []);
+  const [lootPicker, setLootPicker] = useState(false);
+  const [lootText, setLootText] = useState('');
 
-  useEffect(() => setName(token.name), [token]);
+  useEffect(() => {
+    setName(token.name);
+    setOverrides(token.overrides ?? {});
+    setLoot(token.loot ?? []);
+  }, [token]);
+
+  const isEnemy = token.kind === 'enemigo';
+  const setOv = (k, v) => setOverrides((o) => ({ ...o, [k]: v }));
+
+  function saveOverrides(next = overrides) {
+    // Se limpian los campos vacíos/no numéricos para no guardar ruido
+    const clean = {};
+    for (const k of ['hp', 'ac', 'speed', 'attackBonus', 'damageBonus']) {
+      if (Number.isInteger(next[k])) clean[k] = next[k];
+    }
+    if (Array.isArray(next.traits) && next.traits.length) clean.traits = next.traits;
+    onPatch(token.id, { overrides: clean });
+  }
+
+  function addTrait() {
+    const next = { ...overrides, traits: [...(overrides.traits ?? []), { name: 'Rasgo', desc: '' }] };
+    setOverrides(next);
+    saveOverrides(next);
+  }
+  function patchTrait(i, fields) {
+    const traits = (overrides.traits ?? []).map((t, idx) => (idx === i ? { ...t, ...fields } : t));
+    setOverrides((o) => ({ ...o, traits }));
+  }
+  function removeTrait(i) {
+    const next = { ...overrides, traits: (overrides.traits ?? []).filter((_, idx) => idx !== i) };
+    setOverrides(next);
+    saveOverrides(next);
+  }
+
+  // --- Botín ---
+  function saveLoot(next) {
+    setLoot(next);
+    onPatch(token.id, { loot: next });
+  }
+  function addLootEntry(entry) {
+    saveLoot([...loot, entry]);
+  }
+  function patchLoot(id, fields) {
+    saveLoot(loot.map((l) => (l.id === id ? { ...l, ...fields } : l)));
+  }
+  function removeLoot(id) {
+    saveLoot(loot.filter((l) => l.id !== id));
+  }
 
   return (
     <div className="space-y-4 p-3">
@@ -58,6 +130,150 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete })
           ))}
         </div>
       </div>
+
+      {/* Variante por instancia (miniboss, Fase 17): solo enemigos */}
+      {isEnemy && (
+        <div className="rounded-sm border border-gold/15 bg-night-950/40 p-2">
+          <p className={labelClass}>Variante de esta instancia (miniboss)</p>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            Sobrescribe los stats de este enemigo concreto sin crear otra ficha. Vacío = usar los del
+            compendio/jefe. Se aplica al aparecer en el tablero.
+          </p>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <OverrideNumber label="PG" value={overrides.hp} onChange={(v) => setOv('hp', v)} placeholder="SRD" />
+            <OverrideNumber label="CA" value={overrides.ac} onChange={(v) => setOv('ac', v)} placeholder="SRD" />
+            <OverrideNumber label="Vel (pies)" value={overrides.speed} onChange={(v) => setOv('speed', v)} placeholder="SRD" />
+            <OverrideNumber label="Ataque +" value={overrides.attackBonus} onChange={(v) => setOv('attackBonus', v)} placeholder="0" />
+            <OverrideNumber label="Daño +" value={overrides.damageBonus} onChange={(v) => setOv('damageBonus', v)} placeholder="0" />
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => saveOverrides()}
+            className="mt-2 w-full rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+          >
+            Guardar variante
+          </button>
+
+          <div className="mt-3">
+            <div className="flex items-center justify-between">
+              <span className={labelClass}>Rasgos añadidos</span>
+              <button type="button" onClick={addTrait} className="text-xs text-gold/80 hover:text-gold">
+                + Rasgo
+              </button>
+            </div>
+            {(overrides.traits ?? []).map((t, i) => (
+              <div key={i} className="mt-1.5 rounded-sm border border-bone/10 p-1.5">
+                <div className="flex gap-1">
+                  <input
+                    value={t.name}
+                    onChange={(e) => patchTrait(i, { name: e.target.value })}
+                    onBlur={() => saveOverrides()}
+                    placeholder="Nombre del rasgo"
+                    className="flex-1 rounded-sm border border-bone/15 bg-night-950 px-2 py-1 text-xs text-bone"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeTrait(i)}
+                    aria-label="Quitar rasgo"
+                    className="px-1 text-bone/40 hover:text-blood"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <textarea
+                  value={t.desc}
+                  onChange={(e) => patchTrait(i, { desc: e.target.value })}
+                  onBlur={() => saveOverrides()}
+                  rows={2}
+                  placeholder="Qué hace (texto libre)"
+                  className="mt-1 w-full resize-y rounded-sm border border-bone/15 bg-night-950 px-2 py-1 text-xs text-bone"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Botín (Fase 20): solo enemigos */}
+      {isEnemy && (
+        <div className="rounded-sm border border-gold/15 bg-night-950/40 p-2">
+          <div className="flex items-center justify-between">
+            <p className={labelClass}>Botín al derrotarlo</p>
+            <button type="button" onClick={() => setLootPicker(true)} className="text-xs text-gold/80 hover:text-gold">
+              + Del compendio
+            </button>
+          </div>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            Al caer, se tira cada objeto por su probabilidad y queda un botín saqueable para los jugadores.
+          </p>
+
+          {loot.length > 0 && (
+            <ul className="mt-2 space-y-1.5">
+              {loot.map((l) => (
+                <li key={l.id} className="rounded-sm border border-bone/10 p-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="flex-1 truncate text-xs text-bone">{l.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeLoot(l.id)}
+                      aria-label="Quitar del botín"
+                      className="px-1 text-bone/40 hover:text-blood"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 text-[0.65rem] text-bone/60">
+                    <label className="flex items-center gap-1">
+                      Cantidad
+                      <input
+                        type="number"
+                        min={1}
+                        value={l.qty}
+                        onChange={(e) => patchLoot(l.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                        className="w-12 rounded-sm border border-bone/15 bg-night-950 px-1 py-0.5 text-center font-mono text-bone"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1">
+                      Prob. %
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={l.chance}
+                        onChange={(e) =>
+                          patchLoot(l.id, { chance: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })
+                        }
+                        className="w-14 rounded-sm border border-bone/15 bg-night-950 px-1 py-0.5 text-center font-mono text-bone"
+                      />
+                    </label>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form
+            className="mt-2 flex gap-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!lootText.trim()) return;
+              addLootEntry({ id: genId(), name: lootText.trim(), source: 'text', index: null, qty: 1, chance: 100 });
+              setLootText('');
+            }}
+          >
+            <input
+              value={lootText}
+              onChange={(e) => setLootText(e.target.value)}
+              placeholder="Añadir a mano (Oro, gema…)"
+              className="flex-1 rounded-sm border border-bone/15 bg-night-950 px-2 py-1 text-xs text-bone"
+            />
+            <button type="submit" className="rounded-sm border border-gold/30 px-2 text-xs text-gold hover:bg-gold/10">
+              +
+            </button>
+          </form>
+        </div>
+      )}
 
       {(token.kind === 'objeto' || token.kind === 'trampa') && (
         <div>
@@ -125,6 +341,25 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete })
           Quitar marcador
         </button>
       </div>
+
+      {lootPicker && (
+        <SrdPicker
+          title="Añadir objeto al botín"
+          category="equipment"
+          onPick={(entry) => {
+            addLootEntry({
+              id: genId(),
+              name: entry.name,
+              source: entry.custom ? 'custom' : 'srd',
+              index: entry.index,
+              qty: 1,
+              chance: 100,
+            });
+            setLootPicker(false);
+          }}
+          onClose={() => setLootPicker(false)}
+        />
+      )}
     </div>
   );
 }

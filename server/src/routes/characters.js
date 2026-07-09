@@ -20,6 +20,7 @@ const JSON_FIELDS = [
   'spells',
   'other_proficiencies',
   'wizard_data',
+  'custom_sections',
 ];
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
@@ -153,6 +154,22 @@ const UPDATABLE = {
   spells: (v) => v && typeof v === 'object' && JSON.stringify(v).length < 50000,
   features: (v) => typeof v === 'string' && v.length <= 20000,
   notes: (v) => typeof v === 'string' && v.length <= 20000,
+  // Secciones dinámicas de la ficha (Fase 21): bloques que el jugador crea y
+  // nombra a su gusto. Cada bloque: id, title, type ('texto'|'lista'|'srd') y
+  // content (string / array de strings / array de {index,name,category}).
+  custom_sections: (v) =>
+    Array.isArray(v) &&
+    v.length <= 40 &&
+    v.every(
+      (s) =>
+        s &&
+        typeof s === 'object' &&
+        typeof s.id === 'string' &&
+        typeof s.title === 'string' &&
+        s.title.length <= 120 &&
+        ['texto', 'lista', 'srd'].includes(s.type)
+    ) &&
+    JSON.stringify(v).length < 60000,
   background: (v) => typeof v === 'string' && v.length <= 2000,
   alignment: (v) => typeof v === 'string' && v.length <= 100,
   pronouns: (v) => typeof v === 'string' && v.length <= 100,

@@ -105,7 +105,8 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - Buscador rápido con filtros sobre hechizos, monstruos, equipo y condiciones ya sincronizados
   - Aprovechar para completar la traducción al español de hechizos y monstruos (pendiente desde la fase 1)
   - Comandos de tirada directamente en el chat de la mesa
-  - Caché de imágenes de enemigos generadas por IA: al crear un enemigo del compendio, la imagen se guarda y se reutiliza en vez de regenerarla cada vez
+  - [x] **Bestiario del DM (adelanto)** — en el editor de mapas, el modo Marcador abre `BestiaryBrowser` (sustituye al `SrdPicker` de solo nombres): buscador del compendio de monstruos con **ficha completa** (características, CA/PG/velocidad, rasgos y acciones, reutilizando `MonsterStatsContent` de `MonsterStatBlock`), **favoritos** por usuario (migración v22, `srd_favorites`), **imagen personalizada por monstruo** subida o generada con IA (migración v22, `monster_images`; se reutiliza en cada marcador del tablero vía `mapLibrary.serializeToken`, sin regenerarla), pestaña **"Mis jefes"** (personajes `kind='boss'`, crear en blanco o como copia editable de un monstruo del SRD con sus stats/rasgos volcados a la ficha) y colocar en el mapa tanto un monstruo SRD como un jefe. Rutas nuevas en `routes/srd.js`: `GET /srd/favoritos`, `PUT|DELETE /srd/favoritos/:category/:idx`, `PATCH|POST|DELETE /srd/monsters/:idx/imagen`
+  - Caché de imágenes de enemigos generadas por IA: al crear un enemigo del compendio, la imagen se guarda y se reutiliza en vez de regenerarla cada vez (cubierto por `monster_images` del bestiario)
 
 - [ ] **Fase 12** — Fuentes de luz dinámicas, clima y oscuridad en el mapa (opcional, si el tiempo lo permite)
   - Dos niveles de luz: revelado-pero-en-penumbra vs. iluminado, combinado con la niebla de guerra
@@ -125,6 +126,55 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 - [ ] **Fase 14** — Pulido y pruebas en local
   - Sesión de prueba completa con el grupo real, recoger fricciones antes de plantear el despliegue
 
+## Creación de contenido propio (biblioteca del DM y ficha)
+
+Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas con el grupo", sigue siendo el cierre real). Decisiones de producto tomadas con el usuario:
+
+- **Biblioteca global del DM**: los objetos, hechizos y NPCs que cree el DM viven en una colección propia reutilizable en cualquier campaña, y se asignan/eligen desde cada una (no se duplican por campaña).
+- **Basado siempre en la API/SRD**: cuando la estructura del SRD contempla un dato (forma de un objeto, de un hechizo, de una sección de ficha), la creación se apoya en esos campos en vez de inventar un formato paralelo.
+- Orden sugerido por dependencias (flechas = "desbloquea a"): 15 → 20 y 21; 18 → 19 y 17(rasgos); 16 extiende el sistema `kind='boss'`; 17 y 21 casi independientes.
+
+- [x] **Fase 15** — Biblioteca del DM: objetos y hechizos propios
+  - Migración v23 (`custom_items`, `custom_spells`, por usuario): el `data` se guarda con la MISMA forma que una entrada del SRD (equipment/spells), y `buildMeta` se extrajo a `services/srdShape.js` para compartirlo. `services/customLibrary.js` serializa el contenido propio a la forma de entrada del compendio con index sintético `custom:<id>`
+  - Router `routes/library.js` (`/api/biblioteca/objetos|hechizos`, CRUD). Los listados y el detalle de `/srd/equipment` y `/srd/spells` **mezclan el contenido propio con el SRD** (bandera `custom`), con `?fuente=srd|propios` para filtrar una sola fuente. El detalle resuelve `custom:<id>`; así `SrdPicker`, `addItem`/`addSpell` y `castSpellRoll` de la ficha consumen lo propio sin cambios
+  - Cliente: `pages/BibliotecaPage.jsx` (dos pestañas) con formularios que construyen la forma SRD, apoyados en `/srd/damage-types`, `/srd/weapon-properties`, `/srd/magic-schools` y categorías/rareza fijas (`lib/customLibrary.js`). Enlace desde Personajes y ruta `/biblioteca`
+  - Base para el botín (Fase 20) y para enriquecer la ficha (Fase 21)
+
+- [x] **Fase 16** — NPCs enlazados y panel de gestión de campaña del DM
+  - **Decisión de implementación**: en vez de un `kind` nuevo en `map_tokens`/`characters` (obligaría a reconstruir un `CHECK` de tablas muy referenciadas con `foreign_keys=ON` dentro de la transacción de migración), un **NPC es un marcador `aliado` enlazado a un personaje del DM** (`characters.kind='boss'`, `map_tokens.character_id`, v20). Un mismo personaje sirve como jefe hostil (marcador enemigo) o PNJ aliado (marcador aliado): toma su avatar y stats en ambos
+  - Servidor: `routes/maps.js` permite enlazar personaje a marcadores `aliado` además de `enemigo`. Migración v25 `campaign_library` (asignar objetos/hechizos de la biblioteca a una campaña). Rutas en `campaigns.js`: `GET /:id/gestion` (PNJ/jefes del DM con bandera `assigned`, y biblioteca con `assigned`), `PUT|DELETE /:id/biblioteca/:tipo/:contentId`
+  - Cliente: selector de PNJ en el modo Marcador del editor cuando el tipo es `aliado` (reutiliza la lista de personajes del DM); `pages/CampaignManagementPage.jsx` (`/campanas/:id/gestion`, solo DM) para asignar personajes y biblioteca a la campaña; enlaces «Gestión» desde la mesa (MapControls y lobby)
+  - Pendiente futuro: acotar el selector de PNJ a los personajes ya asignados a la campaña (hoy muestra todos los del DM)
+
+- [x] **Fase 17** — Minibosses: variantes por instancia
+  - Migración v26: columna JSON `map_tokens.overrides` (y `combatants.overrides`). El panel del marcador (`TokenPanel`) edita, para un enemigo concreto, **PG, CA, velocidad, ataque +/-, daño +/- y rasgos añadidos** (texto libre), sin crear otra ficha ("Esqueleto capitán" sobre el esqueleto base)
+  - `spawnRoomEnemies` aplica los overrides de PG/CA con prioridad sobre el SRD/jefe y los copia al combatiente; `trySpendEnemyMovement` usa la velocidad de la variante. El bloque de estadísticas del DM (`MonsterStatBlock`/`MonsterStatsContent`, abierto desde el tracker) aplica los deltas de impacto y daño a las tiradas y muestra los rasgos añadidos y el PG/CA retocado (marcados como «var.»)
+  - El rasgo/mecánica extra es texto libre por ahora; cuando existan los eventos (Fase 18) se podrá enlazar un evento en vez de solo describirlo. Los overrides se ven solo en la vista del DM (no viajan al jugador)
+
+- [ ] **Fase 18** — Eventos y efectos
+  - El DM define **eventos reutilizables** que aplican una pasiva o consecuencia (ej.: "oscuridad total: −1 a percepción a todos"), y los **cuelga de misiones, ubicaciones del mundo, salas o enemigos** para tenerlos a la vista y, donde tenga sentido, aplicarlos mecánicamente
+  - Modelo nuevo (evento: nombre, descripción, efecto/modificador, ámbito) enganchado a `campaigns`/`world_locations`/`map_rooms`/`map_tokens`
+  - Cimiento de las mecánicas (Fase 19) y del rasgo enlazable de los minibosses (Fase 17)
+
+- [ ] **Fase 19** — Mecánicas por disparador
+  - Mecánicas con **disparador temporal o condicional** sobre el tablero (ej.: cada 3 turnos hay que salir de una zona porque cae el techo), enganchadas a la economía de turno (`turnEconomy.js`, ya lleva rondas/turnos) y a los eventos de la Fase 18 (un evento en una sala actúa de trigger)
+  - Requiere plantear con calma la estructura del disparador (temporal/por zona/por condición) una vez estén los eventos; es el punto más abierto del arco
+
+- [x] **Fase 20** — Botín y saqueo
+  - Migración v26: columna JSON `map_tokens.loot`. El panel del marcador configura la **tabla de botín por instancia** de un enemigo: objetos del compendio/biblioteca (`SrdPicker`, incluye lo propio de la Fase 15) o texto libre, con **cantidad y probabilidad** por entrada
+  - `services/loot.js`: al morir un enemigo (`sockets.js`, `combate:danio`) se **tira la tabla** (`rollLoot`) y lo que cae queda en un **marcador 'objeto' saqueable** (`dropLootMarker`) en su casilla, visible para los jugadores. Un personaje adyacente lo **saquea** (`POST /campaigns/:id/marcadores/:tokenId/saquear`, `lootMarkerInto`): pasa al inventario de su ficha y el marcador desaparece. No cuesta acción del turno
+  - Cliente: `InteractPanel` detecta un marcador con `hasLoot` y ofrece «Saquear» (mostrando lo obtenido) en vez del flujo de interacción normal. Depende de la Fase 15 (objetos reales) y encaja con el inventario existente
+  - Pendiente futuro: botín por defecto en la ficha del jefe/NPC (hoy es por instancia del marcador); enriquecer armas saqueadas con sus datos de ataque al entrar al inventario
+
+- [x] **Fase 21** — Secciones dinámicas de la ficha de personaje
+  - El jugador **crea y nombra sus propias secciones** para organizar la ficha a su gusto (lore, equipo, monturas, características extra…), más allá de las secciones fijas actuales
+  - Tres tipos de bloque: **texto** libre, **lista** de viñetas y **enlaces al compendio** (`srd`, apoyado en `SrdPicker` sobre las categorías ya sincronizadas — incluye el contenido propio de la Fase 15). La conexión a la API es opcional por bloque
+  - Migración v24: una sola columna JSON `characters.custom_sections` (bloques: `id`, `title`, `type`, `content`), validada en `routes/characters.js`; se renderiza en `components/CustomSections.jsx` dentro de `CharacterSheetPage` y usa el autoguardado normal. Solo lectura para quien no es el dueño
+
+## Despliegue
+
+- [x] **Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights): contenedor único `tridnd:latest` (`Dockerfile` en la raíz, build multi-stage: cliente Vite + servidor Express sirviendo `client/dist`), tras el Caddy compartido de `/opt/tilestudio` vía red `tilestudio_default`. Datos persistidos en volumen `/opt/tridnd/data` (SQLite + uploads + `translations/es.json`, este último copiado al volumen porque el bind mount tapa lo empaquetado en la imagen). URL provisional sin dominio propio: `https://tridnd.167-233-99-156.sslip.io`. Archivos de despliegue en `deploy/` (`server-compose.yml`, `build-on-server.sh`, `tridnd.caddy`); redeploy manual por ahora (subir `src.tar.gz` + `./build-on-server.sh` en el servidor), sin GitHub Actions todavía a diferencia de friendlyflights
+
 ## Fuera de alcance por ahora
 
-- **Despliegue en VPS Hetzner + Caddy** — se abordará en una fase separada, solo cuando el usuario lo pida explícitamente.
+- **Dominio propio y despliegue automático (GitHub Actions)** — de momento solo hay IP/sslip.io y redeploy manual; se añadirá cuando el usuario lo pida.

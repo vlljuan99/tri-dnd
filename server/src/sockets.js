@@ -7,6 +7,7 @@ import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership, countPlayers } from './routes/campaigns.js';
 import { bindCombatBroadcaster, notifyCampaignMap } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
+import { rollLoot, dropLootMarker } from './services/loot.js';
 import {
   orderedCombatants,
   rollInitiativeValue,
@@ -82,12 +83,16 @@ function combatantView(row, { isDm, round }) {
     const c = db.prepare('SELECT hp_current, hp_max, ac, speed FROM characters WHERE id = ?').get(row.character_id);
     if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac, speed: c.speed });
   } else if (row.kind === 'enemigo' && isDm) {
+    const overrides = JSON.parse(row.overrides || '{}');
     Object.assign(base, {
       hpCurrent: row.hp_current,
       hpMax: row.hp_max,
       ac: row.ac,
       monsterIndex: row.monster_index,
-      speed: monsterSpeedFeet(row.monster_index),
+      speed: Number.isInteger(overrides.speed) ? overrides.speed : monsterSpeedFeet(row.monster_index),
+      // Variante por instancia (miniboss): el bloque de estadísticas del DM
+      // aplica estos deltas a los ataques y muestra los rasgos añadidos.
+      overrides,
     });
   }
   return base;
@@ -681,6 +686,9 @@ export function setupSockets(io) {
           const newHp = combatant.hp_current - damage;
           detail.maxHp = combatant.hp_max ?? null;
           if (newHp <= 0) {
+            // Botín (Fase 20): al caer se tira su tabla y lo que toca queda
+            // en un marcador saqueable en su casilla
+            const rolledLoot = rollLoot(JSON.parse(resolved.token.loot || '[]'));
             db.transaction(() => {
               db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
               const table = db
@@ -690,10 +698,12 @@ export function setupSockets(io) {
                 db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
               }
               db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
+              dropLootMarker(resolved.token, rolledLoot);
             })();
             detail.remainingHp = 0;
             detail.defeated = true;
             body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
+            if (rolledLoot.length) body += ' Deja algo tras de sí.';
             // Sin enemigos que queden, se acabó el encuentro: vuelta a
             // movimiento libre sola, sin esperar a que el DM lo pulse
             if (endCombatIfNoEnemiesLeft(campaignId)) {

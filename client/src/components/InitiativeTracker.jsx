@@ -166,7 +166,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                     <>
                       {c.monsterIndex && (
                         <button
-                          onClick={() => setStatBlockOf({ index: c.monsterIndex, name: c.name })}
+                          onClick={() => setStatBlockOf({ index: c.monsterIndex, name: c.name, overrides: c.overrides ?? {} })}
                           className="rounded-sm border border-gold/40 px-1.5 py-0.5 text-xs text-gold hover:bg-gold/10"
                         >
                           Ficha
@@ -387,6 +387,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
         <MonsterStatBlock
           index={statBlockOf.index}
           name={statBlockOf.name}
+          overrides={statBlockOf.overrides}
           onClose={() => setStatBlockOf(null)}
         />
       )}

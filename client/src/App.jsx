@@ -4,6 +4,8 @@ import { useAuth } from './store/auth.js';
 import AuthPage from './pages/AuthPage.jsx';
 import HubPage from './pages/HubPage.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
+import BibliotecaPage from './pages/BibliotecaPage.jsx';
+import CampaignManagementPage from './pages/CampaignManagementPage.jsx';
 import CharacterSheetPage from './pages/CharacterSheetPage.jsx';
 import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
 import CampaignWizardPage from './pages/CampaignWizardPage.jsx';
@@ -66,6 +68,14 @@ export default function App() {
             </ParchmentShell>
           }
         />
+        <Route
+          path="/biblioteca"
+          element={
+            <ParchmentShell>
+              <BibliotecaPage />
+            </ParchmentShell>
+          }
+        />
         <Route path="/personajes/:id/asistente" element={<CharacterWizardPage />} />
         <Route path="/personajes/:id" element={<CharacterSheetPage />} />
         <Route
@@ -83,6 +93,7 @@ export default function App() {
           }
         />
         <Route path="/campanas/:id/tablero" element={<RedirectToCampaign />} />
+        <Route path="/campanas/:id/gestion" element={<CampaignManagementPage />} />
         <Route path="/campanas/:id/asistente" element={<CampaignWizardPage />} />
         <Route
           path="/campanas/:id/mundo"

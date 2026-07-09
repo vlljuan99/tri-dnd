@@ -123,9 +123,14 @@ export default function MapControls({
             Mesa
           </button>
           {isDm && editorHref && (
-            <Link to={editorHref} className={BTN_IDLE}>
-              Editor
-            </Link>
+            <>
+              <Link to={editorHref} className={BTN_IDLE}>
+                Editor
+              </Link>
+              <Link to={editorHref.replace(/\/editor$/, '/gestion')} className={BTN_IDLE} title="PNJ, jefes y biblioteca de la campaña">
+                Gestión
+              </Link>
+            </>
           )}
           {isDm && (
             <button

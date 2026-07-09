@@ -228,7 +228,13 @@ export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
     return { ok: false, error: 'No es el turno de este enemigo' };
   }
 
-  const budget = Math.floor((monsterSpeedFeet(combatant.monster_index) ?? 30) / 5);
+  // La velocidad de la variante por instancia (miniboss, Fase 17) manda
+  // sobre la del monstruo del compendio para el presupuesto de movimiento.
+  const overrides = JSON.parse(combatant.overrides || '{}');
+  const speedFeet = Number.isInteger(overrides.speed)
+    ? overrides.speed
+    : monsterSpeedFeet(combatant.monster_index) ?? 30;
+  const budget = Math.floor(speedFeet / 5);
   const nextTotal = combatant.moved_squares + squares;
   if (nextTotal > budget) {
     const left = Math.max(0, budget - combatant.moved_squares);
