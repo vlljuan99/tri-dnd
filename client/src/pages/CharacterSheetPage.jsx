@@ -384,6 +384,13 @@ export default function CharacterSheetPage() {
           <NumberField label="HP temp." value={char.hp_temp} disabled={ro} onChange={(v) => patch({ hp_temp: v })} />
           <NumberField label="CA" value={char.ac} max={40} disabled={ro} onChange={(v) => patch({ ac: v })} />
           <NumberField label="Velocidad" value={char.speed} max={300} disabled={ro} onChange={(v) => patch({ speed: v })} />
+          <NumberField
+            label="Visión oscuridad"
+            value={char.darkvision}
+            max={30}
+            disabled={ro}
+            onChange={(v) => patch({ darkvision: v })}
+          />
         </div>
       </Card>
 

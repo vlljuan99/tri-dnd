@@ -12,7 +12,7 @@ import {
   touchMap,
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
-import { ensureCombatantForCharacter, trySpendMovement } from '../services/turnEconomy.js';
+import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -44,7 +44,21 @@ function serializeCampaign(row, role) {
     dmUserId: row.dm_user_id,
     role,
     isLive: Boolean(table?.is_live),
+    maxPlayers: row.max_players,
+    lore: row.lore,
+    objectives: JSON.parse(row.objectives || '[]'),
+    hasWorldMap: Boolean(row.has_world_map),
+    worldMapUrl: row.world_map_url ?? null,
   };
+}
+
+// Cuántos jugadores (sin contar al DM) están ya unidos a la campaña — usado
+// tanto para el límite de plazas al unirse como para exigir al menos uno
+// antes de poder abrir la sesión en vivo.
+export function countPlayers(campaignId) {
+  return db
+    .prepare("SELECT COUNT(*) AS n FROM campaign_members WHERE campaign_id = ? AND role = 'jugador'")
+    .get(campaignId).n;
 }
 
 campaignsRouter.get('/', (req, res) => {
@@ -59,18 +73,35 @@ campaignsRouter.get('/', (req, res) => {
 });
 
 campaignsRouter.post('/', (req, res) => {
-  const { name, description } = req.body ?? {};
+  const { name, description, maxPlayers, lore, objectives, hasWorldMap } = req.body ?? {};
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'La campaña necesita un nombre' });
   }
+  if (maxPlayers !== undefined && maxPlayers !== null && !(Number.isInteger(maxPlayers) && maxPlayers >= 1 && maxPlayers <= 20)) {
+    return res.status(400).json({ error: 'Número de plazas no válido' });
+  }
+  if (lore !== undefined && (typeof lore !== 'string' || lore.length > 5000)) {
+    return res.status(400).json({ error: 'Lore no válido' });
+  }
+  if (objectives !== undefined && !(Array.isArray(objectives) && objectives.length <= 30 && objectives.every((o) => typeof o === 'string'))) {
+    return res.status(400).json({ error: 'Objetivos no válidos' });
+  }
+  const cleanObjectives = (objectives ?? []).map((o) => o.trim().slice(0, 200)).filter(Boolean);
+
   const create = db.transaction(() => {
     const info = db
-      .prepare('INSERT INTO campaigns (name, description, dm_user_id, invite_code) VALUES (?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO campaigns (name, description, dm_user_id, invite_code, max_players, lore, objectives, has_world_map) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      )
       .run(
         name.trim().slice(0, 80),
         typeof description === 'string' ? description.slice(0, 2000) : '',
         req.user.id,
-        generateInviteCode()
+        generateInviteCode(),
+        maxPlayers ?? null,
+        typeof lore === 'string' ? lore : '',
+        JSON.stringify(cleanObjectives),
+        hasWorldMap ? 1 : 0
       );
     const id = info.lastInsertRowid;
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
@@ -94,6 +125,10 @@ campaignsRouter.post('/join', (req, res) => {
 
   const existing = getMembership(row.id, req.user.id);
   if (existing) return res.json({ campaign: serializeCampaign(row, existing.role) });
+
+  if (row.max_players != null && countPlayers(row.id) >= row.max_players) {
+    return res.status(403).json({ error: 'La campaña ya tiene todas las plazas ocupadas' });
+  }
 
   db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'jugador')").run(
     row.id,
@@ -122,6 +157,52 @@ campaignsRouter.get('/:id', (req, res) => {
     .all(row.id);
 
   res.json({ campaign: serializeCampaign(row, membership.role), members, characters });
+});
+
+// Editar campaña (solo el DM): lore de apertura, objetivos, plazas y si forma
+// parte de un mapa de mundo. Solo se tocan los campos presentes en el body.
+campaignsRouter.patch('/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM puede editar la campaña' });
+  }
+
+  const { lore, objectives, maxPlayers, hasWorldMap } = req.body ?? {};
+  const sets = [];
+  const values = [];
+
+  if (lore !== undefined) {
+    if (typeof lore !== 'string' || lore.length > 5000) {
+      return res.status(400).json({ error: 'Lore no válido' });
+    }
+    sets.push('lore = ?');
+    values.push(lore);
+  }
+  if (objectives !== undefined) {
+    if (!(Array.isArray(objectives) && objectives.length <= 30 && objectives.every((o) => typeof o === 'string'))) {
+      return res.status(400).json({ error: 'Objetivos no válidos' });
+    }
+    sets.push('objectives = ?');
+    values.push(JSON.stringify(objectives.map((o) => o.trim().slice(0, 200)).filter(Boolean)));
+  }
+  if (maxPlayers !== undefined) {
+    if (maxPlayers !== null && !(Number.isInteger(maxPlayers) && maxPlayers >= 1 && maxPlayers <= 20)) {
+      return res.status(400).json({ error: 'Número de plazas no válido' });
+    }
+    sets.push('max_players = ?');
+    values.push(maxPlayers ?? null);
+  }
+  if (hasWorldMap !== undefined) {
+    sets.push('has_world_map = ?');
+    values.push(hasWorldMap ? 1 : 0);
+  }
+
+  if (sets.length) {
+    db.prepare(`UPDATE campaigns SET ${sets.join(', ')} WHERE id = ?`).run(...values, row.id);
+  }
+  const updated = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(row.id);
+  res.json({ campaign: serializeCampaign(updated, 'dm') });
 });
 
 // Borrar una campaña entera (solo su DM). Las fichas de personaje no se
@@ -316,6 +397,47 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
       .prepare('SELECT COUNT(*) AS n FROM map_rooms WHERE id IN (?, ?) AND revealed = 1')
       .get(door.from_room_id, door.to_room_id).n;
     if (revealedSides === 0) return res.status(403).json({ error: 'No ves ninguna puerta ahí' });
+
+    // Abrir una puerta cuesta la acción del turno y solo funciona al lado:
+    // se busca el personaje del jugador y se mide la distancia (Chebyshev,
+    // misma regla que el resto del tablero) a cualquiera de los dos lados.
+    const character = db
+      .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ? AND user_id = ?')
+      .get(req.body?.characterId, req.params.id, req.user.id);
+    if (!character) return res.status(400).json({ error: 'Personaje no válido' });
+
+    const charToken = db
+      .prepare(
+        `SELECT t.*, r.floor_id FROM map_character_tokens t JOIN map_rooms r ON r.id = t.room_id
+         WHERE t.map_id = ? AND t.character_id = ?`
+      )
+      .get(activeMapId, character.id);
+    if (!charToken) return res.status(400).json({ error: 'Tu personaje no está en el tablero' });
+
+    const fromFloor = db.prepare('SELECT floor_id FROM map_rooms WHERE id = ?').get(door.from_room_id);
+    const toFloor = db.prepare('SELECT floor_id FROM map_rooms WHERE id = ?').get(door.to_room_id);
+    const nearFrom =
+      charToken.floor_id === fromFloor.floor_id &&
+      Math.max(Math.abs(door.from_x - charToken.x), Math.abs(door.from_y - charToken.y)) <= 1;
+    const nearTo =
+      charToken.floor_id === toFloor.floor_id &&
+      Math.max(Math.abs(door.to_x - charToken.x), Math.abs(door.to_y - charToken.y)) <= 1;
+    if (!nearFrom && !nearTo) {
+      return res.status(400).json({ error: 'Tienes que estar al lado de la puerta' });
+    }
+
+    const actionSpend = trySpendAction(req.params.id, character.id);
+    if (!actionSpend.ok) return res.status(400).json({ error: actionSpend.error });
+
+    if (door.skill) {
+      const roll = req.body?.roll;
+      if (!roll || typeof roll.total !== 'number') {
+        return res.status(400).json({ error: 'Falta la tirada de habilidad' });
+      }
+      if (roll.total < door.dc) {
+        return res.json({ ok: true, opened: false, success: false, dc: door.dc });
+      }
+    }
   }
 
   // Salas que se van a revelar ahora: sus enemigos entrarán al tracker
@@ -343,7 +465,75 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
 
   const map = getMap(req.params.id, activeMapId);
   res.json({
+    ok: true,
+    opened: open,
+    success: true,
+    dc: !isDm && door.skill ? door.dc : undefined,
     map: isDm ? serializeFullMap(map, req.params.id) : serializeMapForPlayer(map, req.user.id),
   });
+});
+
+// Interactuar con un marcador de trampa/objeto del mapa activo: cuesta la
+// acción del turno y solo funciona al lado, igual que abrir una puerta. Los
+// enemigos/aliados no pasan por aquí (van por el panel de combate). El DM
+// puede probarlo sin coste, pero no es el flujo principal: ya controla
+// estos marcadores desde el editor y el tracker.
+campaignsRouter.post('/:id/marcadores/:tokenId/interactuar', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  const isDm = membership.role === 'dm';
+
+  const activeMapId = getActiveMapId(req.params.id);
+  const token = activeMapId
+    ? db
+        .prepare(
+          `SELECT t.*, r.floor_id FROM map_tokens t
+           JOIN map_rooms r ON r.id = t.room_id
+           JOIN map_floors f ON f.id = r.floor_id
+           WHERE t.id = ? AND f.map_id = ?`
+        )
+        .get(req.params.tokenId, activeMapId)
+    : undefined;
+  if (!token || (token.hidden && !isDm)) {
+    return res.status(404).json({ error: 'Marcador no encontrado en el mapa activo' });
+  }
+  if (token.kind !== 'trampa' && token.kind !== 'objeto') {
+    return res.status(400).json({ error: 'Ese marcador no se interactúa así' });
+  }
+
+  if (isDm) return res.json({ ok: true, success: true });
+
+  const character = db
+    .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ? AND user_id = ?')
+    .get(req.body?.characterId, req.params.id, req.user.id);
+  if (!character) return res.status(400).json({ error: 'Personaje no válido' });
+
+  const charToken = db
+    .prepare(
+      `SELECT t.*, r.floor_id FROM map_character_tokens t JOIN map_rooms r ON r.id = t.room_id
+       WHERE t.map_id = ? AND t.character_id = ?`
+    )
+    .get(activeMapId, character.id);
+  if (!charToken) return res.status(400).json({ error: 'Tu personaje no está en el tablero' });
+
+  const adjacent =
+    charToken.floor_id === token.floor_id &&
+    Math.max(Math.abs(token.x - charToken.x), Math.abs(token.y - charToken.y)) <= 1;
+  if (!adjacent) return res.status(400).json({ error: 'Tienes que estar al lado' });
+
+  const actionSpend = trySpendAction(req.params.id, character.id);
+  if (!actionSpend.ok) return res.status(400).json({ error: actionSpend.error });
+
+  if (token.skill) {
+    const roll = req.body?.roll;
+    if (!roll || typeof roll.total !== 'number') {
+      return res.status(400).json({ error: 'Falta la tirada de habilidad' });
+    }
+    if (roll.total < token.dc) {
+      return res.json({ ok: true, success: false, dc: token.dc });
+    }
+    return res.json({ ok: true, success: true, dc: token.dc });
+  }
+  res.json({ ok: true, success: true });
 });
 

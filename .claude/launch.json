@@ -10,8 +10,9 @@
     {
       "name": "cliente-preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "client", "--", "--port", "5199", "--strictPort"],
-      "port": 5199
+      "runtimeArgs": ["run", "dev", "--prefix", "client", "--", "--strictPort"],
+      "port": 5199,
+      "autoPort": true
     },
     {
       "name": "servidor",

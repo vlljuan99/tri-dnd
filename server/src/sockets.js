@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
-import { getMembership } from './routes/campaigns.js';
+import { getMembership, countPlayers } from './routes/campaigns.js';
 import { bindCombatBroadcaster, notifyCampaignMap } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import {
@@ -319,6 +319,9 @@ export function setupSockets(io) {
     socket.on('table:set-live', ({ campaignId, isLive }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede abrir o cerrar la sesión' });
+      if (isLive && countPlayers(campaignId) < 1) {
+        return cb?.({ error: 'Necesitas al menos un jugador para iniciar la partida' });
+      }
 
       db.prepare("UPDATE game_tables SET is_live = ?, updated_at = datetime('now') WHERE campaign_id = ?").run(
         isLive ? 1 : 0,

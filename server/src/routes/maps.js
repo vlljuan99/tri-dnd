@@ -280,7 +280,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { name, x, y, width, height, disabledCells, obstacleCells, notes, revealed } = req.body ?? {};
+  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, notes, revealed } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'La sala necesita un nombre' });
   }
@@ -298,20 +298,25 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   if (obstacleCells !== undefined && !isValidDisabledCells(obstacleCells)) {
     return res.status(400).json({ error: 'Lista de obstáculos no válida' });
   }
+  if (spawnCells !== undefined && !isValidDisabledCells(spawnCells)) {
+    return res.status(400).json({ error: 'Lista de puntos de aparición no válida' });
+  }
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json({ error: 'Las notas deben ser texto' });
   }
 
   const nextWidth = width ?? room.width;
   const nextHeight = height ?? room.height;
-  // Al encoger la sala, las casillas desactivadas u obstáculos fuera se descartan
+  // Al encoger la sala, las casillas desactivadas, obstáculos o puntos de
+  // aparición fuera de los nuevos límites se descartan
   const insideRoom = ([col, row]) => col < nextWidth && row < nextHeight;
   const nextDisabled = (disabledCells ?? JSON.parse(room.disabled_cells || '[]')).filter(insideRoom);
   const nextObstacles = (obstacleCells ?? JSON.parse(room.obstacle_cells || '[]')).filter(insideRoom);
+  const nextSpawns = (spawnCells ?? JSON.parse(room.spawn_cells || '[]')).filter(insideRoom);
 
   db.prepare(
     `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-       disabled_cells = ?, obstacle_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, notes = ?, revealed = ? WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : room.name,
     x ?? room.x,
@@ -320,6 +325,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     nextHeight,
     JSON.stringify(nextDisabled),
     JSON.stringify(nextObstacles),
+    JSON.stringify(nextSpawns),
     notes ?? room.notes,
     revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
     room.id
@@ -447,7 +453,7 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { kind = 'enemigo', name, x, y, monsterIndex, hidden } = req.body ?? {};
+  const { kind = 'enemigo', name, x, y, monsterIndex, characterId, hidden, dc, skill } = req.body ?? {};
   if (!TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
   }
@@ -455,6 +461,12 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   if (!cleanName) return res.status(400).json({ error: 'El marcador necesita un nombre' });
   if (!isValidCoord(x) || !isValidCoord(y) || !cellInsideRoom(room, x, y)) {
     return res.status(400).json({ error: 'El marcador debe estar en una casilla activa de la sala' });
+  }
+  if (dc !== undefined && dc !== null && !(Number.isInteger(dc) && dc >= 1 && dc <= 30)) {
+    return res.status(400).json({ error: 'Dificultad no válida' });
+  }
+  if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
+    return res.status(400).json({ error: 'Habilidad no válida' });
   }
 
   let monsterIdx = null;
@@ -464,11 +476,23 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
       .get(monsterIndex);
     if (monster) monsterIdx = monster.idx;
   }
+  // Un enemigo puede enlazarse a un "jefe" (ficha completa del DM) en vez
+  // de/además de un monstruo del compendio; solo bosses del propio DM
+  let bossId = null;
+  if (kind === 'enemigo' && characterId != null) {
+    const boss = db
+      .prepare("SELECT id FROM characters WHERE id = ? AND user_id = ? AND kind = 'boss'")
+      .get(characterId, req.user.id);
+    if (!boss) return res.status(400).json({ error: 'Jefe no válido' });
+    bossId = boss.id;
+  }
   const isHidden = hidden !== undefined ? Number(Boolean(hidden)) : kind === 'trampa' ? 1 : 0;
 
   const info = db
-    .prepare('INSERT INTO map_tokens (room_id, kind, name, monster_index, x, y, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(room.id, kind, cleanName, monsterIdx, x, y, isHidden);
+    .prepare(
+      'INSERT INTO map_tokens (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+    .run(room.id, kind, cleanName, monsterIdx, bossId, x, y, isHidden, dc ?? null, skill ?? null);
   touchAndNotify(map);
 
   const token = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(info.lastInsertRowid);
@@ -480,12 +504,18 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   const token = map && getToken(map.id, req.params.tokenId);
   if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
 
-  const { name, x, y, hidden, kind } = req.body ?? {};
+  const { name, x, y, hidden, kind, dc, skill } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
   }
   if (kind !== undefined && !TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
+  }
+  if (dc !== undefined && dc !== null && !(Number.isInteger(dc) && dc >= 1 && dc <= 30)) {
+    return res.status(400).json({ error: 'Dificultad no válida' });
+  }
+  if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
+    return res.status(400).json({ error: 'Habilidad no válida' });
   }
 
   // Al moverlo puede cambiar de sala: se busca la sala de la misma planta
@@ -518,13 +548,17 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
 
-  db.prepare('UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ? WHERE id = ?').run(
+  db.prepare(
+    'UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ? WHERE id = ?'
+  ).run(
     roomId,
     name !== undefined ? name.trim().slice(0, 60) : token.name,
     x ?? token.x,
     y ?? token.y,
     hidden !== undefined ? Number(Boolean(hidden)) : token.hidden,
     kind ?? token.kind,
+    dc !== undefined ? dc : token.dc,
+    skill !== undefined ? skill : token.skill,
     token.id
   );
   touchAndNotify(map);
@@ -606,12 +640,18 @@ mapsRouter.patch('/:mapId/puertas/:doorId', (req, res) => {
     map && db.prepare('SELECT * FROM map_doors WHERE id = ? AND map_id = ?').get(req.params.doorId, map.id);
   if (!door) return res.status(404).json({ error: 'Puerta no encontrada' });
 
-  const { kind, control, isOpen } = req.body ?? {};
+  const { kind, control, isOpen, dc, skill } = req.body ?? {};
   if (kind !== undefined && !['puerta', 'escalera', 'portal'].includes(kind)) {
     return res.status(400).json({ error: 'Tipo de puerta no válido' });
   }
   if (control !== undefined && !['jugador', 'dm'].includes(control)) {
     return res.status(400).json({ error: 'Control de puerta no válido' });
+  }
+  if (dc !== undefined && dc !== null && !(Number.isInteger(dc) && dc >= 1 && dc <= 30)) {
+    return res.status(400).json({ error: 'Dificultad no válida' });
+  }
+  if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
+    return res.status(400).json({ error: 'Habilidad no válida' });
   }
   if (kind === 'puerta') {
     const fromRoom = getRoom(map.id, door.from_room_id);
@@ -623,10 +663,12 @@ mapsRouter.patch('/:mapId/puertas/:doorId', (req, res) => {
     }
   }
 
-  db.prepare('UPDATE map_doors SET kind = ?, control = ?, is_open = ? WHERE id = ?').run(
+  db.prepare('UPDATE map_doors SET kind = ?, control = ?, is_open = ?, dc = ?, skill = ? WHERE id = ?').run(
     kind ?? door.kind,
     control ?? door.control,
     isOpen !== undefined ? Number(Boolean(isOpen)) : door.is_open,
+    dc !== undefined ? dc : door.dc,
+    skill !== undefined ? skill : door.skill,
     door.id
   );
   touchAndNotify(map);

@@ -7,6 +7,10 @@ import { api } from '../api.js';
 export default function HubPage() {
   const [campaigns, setCampaigns] = useState(null);
   const [newName, setNewName] = useState('');
+  const [maxPlayers, setMaxPlayers] = useState('');
+  const [lore, setLore] = useState('');
+  const [objectives, setObjectives] = useState('');
+  const [hasWorldMap, setHasWorldMap] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
 
@@ -19,9 +23,25 @@ export default function HubPage() {
     if (!newName.trim()) return;
     setError('');
     try {
-      const { campaign } = await api('/campaigns', { method: 'POST', body: { name: newName } });
+      const { campaign } = await api('/campaigns', {
+        method: 'POST',
+        body: {
+          name: newName,
+          maxPlayers: maxPlayers.trim() ? Number(maxPlayers) : null,
+          lore,
+          objectives: objectives
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean),
+          hasWorldMap,
+        },
+      });
       setCampaigns((cs) => [campaign, ...(cs ?? [])]);
       setNewName('');
+      setMaxPlayers('');
+      setLore('');
+      setObjectives('');
+      setHasWorldMap(false);
     } catch (err) {
       setError(err.message);
     }
@@ -59,18 +79,53 @@ export default function HubPage() {
       <h2 className="mb-6 font-display text-3xl font-semibold text-ink">Tus campañas</h2>
 
       <div className="mb-8 grid gap-3 sm:grid-cols-2">
-        <form onSubmit={createCampaign} className="flex gap-2">
+        <form
+          onSubmit={createCampaign}
+          className="flex flex-col gap-2 rounded-md border border-ink/15 bg-parchment-100/40 p-3"
+        >
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="Nueva campaña (serás el DM)"
             required
-            className="flex-1 rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
+            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
           />
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={maxPlayers}
+            onChange={(e) => setMaxPlayers(e.target.value)}
+            placeholder="Plazas (sin límite si se deja vacío)"
+            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
+          />
+          <textarea
+            value={lore}
+            onChange={(e) => setLore(e.target.value)}
+            placeholder="Lore de apertura (se enseña a los jugadores al entrar)"
+            rows={3}
+            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
+          />
+          <textarea
+            value={objectives}
+            onChange={(e) => setObjectives(e.target.value)}
+            placeholder="Objetivos, uno por línea"
+            rows={3}
+            className="rounded-sm border border-ink/30 bg-parchment-100 px-3 py-2 text-ink placeholder:text-ink/40 focus:border-ochre focus:outline-none"
+          />
+          <label className="flex items-center gap-2 text-sm text-ink/80">
+            <input
+              type="checkbox"
+              checked={hasWorldMap}
+              onChange={(e) => setHasWorldMap(e.target.checked)}
+              className="h-4 w-4 accent-ochre"
+            />
+            Forma parte de un mapa de mundo (viajarás entre ubicaciones)
+          </label>
           <button
             type="submit"
             disabled={!newName.trim()}
-            className="rounded-sm bg-ember px-4 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40 disabled:hover:bg-ember"
+            className="rounded-sm bg-ember px-4 py-2 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40 disabled:hover:bg-ember"
           >
             Crear
           </button>
@@ -122,22 +177,32 @@ export default function HubPage() {
                   </>
                 )}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <Link
                   to={`/campanas/${c.id}`}
                   className="inline-block rounded-sm bg-ochre px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ochre/90"
                 >
                   Ir a la mesa de juego
                 </Link>
-                {c.role === 'dm' && (
-                  <button
-                    type="button"
-                    onClick={() => deleteCampaign(c)}
-                    className="rounded-sm border border-ember/40 px-2 py-1.5 text-xs text-ember hover:bg-ember/10"
-                  >
-                    Borrar
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {c.role === 'dm' && c.hasWorldMap && (
+                    <Link
+                      to={`/campanas/${c.id}/mundo`}
+                      className="rounded-sm border border-ochre/50 px-2 py-1.5 text-xs text-ochre hover:bg-ochre/10"
+                    >
+                      Mapa de mundo
+                    </Link>
+                  )}
+                  {c.role === 'dm' && (
+                    <button
+                      type="button"
+                      onClick={() => deleteCampaign(c)}
+                      className="rounded-sm border border-ember/40 px-2 py-1.5 text-xs text-ember hover:bg-ember/10"
+                    >
+                      Borrar
+                    </button>
+                  )}
+                </div>
               </div>
             </li>
           ))}

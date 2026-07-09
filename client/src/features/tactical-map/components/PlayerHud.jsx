@@ -28,7 +28,7 @@ export default function PlayerHud({
   const gated = Boolean(combatActive && combatant); // movimiento/acción solo tienen sentido con el modo activo
 
   return (
-    <div className="pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-2 self-start rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 text-bone shadow-xl backdrop-blur">
+    <div className="pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-1.5 self-start rounded-sm border border-gold/25 bg-night-900/95 px-2.5 py-1.5 text-bone shadow-xl backdrop-blur">
       <div className="flex items-center gap-2">
         {token.imageUrl ? (
           <img src={token.imageUrl} alt="" className="h-10 w-10 rounded-full border border-gold/40 object-cover" />
@@ -75,7 +75,7 @@ export default function PlayerHud({
         {characterId && (
           <button
             onClick={onOpenSheet}
-            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
           >
             Ficha
           </button>
@@ -83,7 +83,7 @@ export default function PlayerHud({
         {characterId && (
           <button
             onClick={onOpenInventory}
-            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
           >
             Inventario
           </button>
@@ -91,18 +91,24 @@ export default function PlayerHud({
         {canSeeNotes && (
           <button
             onClick={onOpenNotes}
-            className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/80 hover:border-gold hover:text-gold"
+            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
           >
             Notas
           </button>
         )}
-        {isMyTurn && (
+        {isMyTurn ? (
           <button
             onClick={onEndTurn}
-            className="rounded-sm bg-gold px-2 py-1 font-display text-xs uppercase tracking-widest text-night-950 hover:bg-gold/90"
+            className="inline-flex min-h-9 items-center rounded-sm bg-gold px-2.5 text-xs font-semibold text-night-950 hover:bg-gold/90"
           >
             Terminar turno
           </button>
+        ) : (
+          gated && (
+            <span className="inline-flex min-h-9 items-center rounded-sm border border-bone/10 px-2.5 text-xs text-bone/40">
+              Esperando tu turno…
+            </span>
+          )
         )}
       </div>
     </div>

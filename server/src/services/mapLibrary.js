@@ -20,6 +20,7 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     backgroundUrl: row.background_url,
     disabledCells: JSON.parse(row.disabled_cells || '[]'),
     obstacleCells: JSON.parse(row.obstacle_cells || '[]'),
+    spawnCells: JSON.parse(row.spawn_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
     // Para el jugador, toda sala que recibe es visible (aunque el DM la
     // tenga sin revelar y solo la vea él por tener ahí su personaje)
@@ -27,7 +28,10 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
   };
 }
 
-export function serializeDoor(row) {
+// dc (dificultad de la tirada para forzarla) es secreto para el jugador,
+// igual que la CA de un enemigo: solo se revela al resolver el intento.
+// skill (qué habilidad tira) sí es público, para que sepa qué le espera.
+export function serializeDoor(row, { forPlayer = false } = {}) {
   return {
     id: row.id,
     fromRoomId: row.from_room_id,
@@ -39,10 +43,12 @@ export function serializeDoor(row) {
     kind: row.kind,
     control: row.control,
     isOpen: Boolean(row.is_open),
+    skill: row.skill ?? null,
+    dc: forPlayer ? undefined : row.dc ?? null,
   };
 }
 
-export function serializeToken(row) {
+export function serializeToken(row, { forPlayer = false } = {}) {
   return {
     id: row.id,
     roomId: row.room_id,
@@ -57,6 +63,14 @@ export function serializeToken(row) {
     // de vida (decisión de producto), uno oculto o sin revelar ni se envía.
     hp: Number.isInteger(row.combatant_hp) ? row.combatant_hp : null,
     hpMax: Number.isInteger(row.combatant_hp_max) ? row.combatant_hp_max : null,
+    // Jefe (personaje kind='boss') enlazado, si lo hay: se pinta con su
+    // avatar en vez del marcador genérico
+    characterId: row.character_id ?? null,
+    avatarUrl: row.boss_avatar_path ?? null,
+    // Igual que en la puerta: skill público (sabes qué tiras), dc secreto
+    // hasta resolver el intento de interactuar (trampa/objeto).
+    skill: row.skill ?? null,
+    dc: forPlayer ? undefined : row.dc ?? null,
   };
 }
 
@@ -119,7 +133,7 @@ function loadCharacterTokens(mapId) {
   return db
     .prepare(
       `SELECT t.*, c.name AS character_name, c.user_id, c.avatar_path, c.speed,
-              c.hp_current, c.hp_max
+              c.hp_current, c.hp_max, c.darkvision
        FROM map_character_tokens t JOIN characters c ON c.id = t.character_id
        WHERE t.map_id = ? ORDER BY t.id`
     )
@@ -167,6 +181,21 @@ export function ensureCharacterTokens(map, campaignId) {
   );
   for (const character of missing) {
     let placed = false;
+    // Pase 1: casillas de aparición marcadas por el DM (Fase 8.8), si las hay
+    for (const room of spawnRooms) {
+      const spawnCells = JSON.parse(room.spawn_cells || '[]');
+      for (const [c, r] of spawnCells) {
+        if (placed) break;
+        const key = `${room.x + c},${room.y + r}`;
+        if (occupied.has(key)) continue;
+        insert.run(map.id, character.id, room.id, room.x + c, room.y + r);
+        occupied.add(key);
+        placed = true;
+      }
+      if (placed) break;
+    }
+    if (placed) continue;
+    // Pase 2 (respaldo): primera casilla libre de la primera sala revelada
     for (const room of spawnRooms) {
       const disabled = new Set(
         [
@@ -220,7 +249,16 @@ export function spawnRoomEnemies(campaignId, roomIds) {
     if (already.has(enemy.id)) continue;
     let hp = null;
     let ac = null;
-    if (enemy.monster_index) {
+    if (enemy.character_id) {
+      // Jefe (ficha completa del DM): sus stats mandan sobre el compendio.
+      // Entra a plena vida (hp_max), como cualquier monstruo del SRD.
+      const boss = db.prepare('SELECT hp_max, ac FROM characters WHERE id = ?').get(enemy.character_id);
+      if (boss) {
+        hp = boss.hp_max;
+        ac = boss.ac;
+      }
+    }
+    if (hp == null && enemy.monster_index) {
       const entry = db
         .prepare("SELECT data FROM srd_entries WHERE category = 'monsters' AND idx = ?")
         .get(enemy.monster_index);
@@ -266,14 +304,17 @@ function loadMapContents(map) {
     )
     .all(map.id);
   const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ? ORDER BY id').all(map.id);
-  // El HP de los enemigos llega del combatiente enlazado del tracker
+  // El HP de los enemigos llega del combatiente enlazado del tracker; si el
+  // marcador está enlazado a un jefe (personaje kind='boss'), se trae su avatar
   const tokens = db
     .prepare(
-      `SELECT t.*, cb.hp_current AS combatant_hp, cb.hp_max AS combatant_hp_max
+      `SELECT t.*, cb.hp_current AS combatant_hp, cb.hp_max AS combatant_hp_max,
+              boss.avatar_path AS boss_avatar_path
        FROM map_tokens t
        JOIN map_rooms r ON r.id = t.room_id
        JOIN map_floors f ON f.id = r.floor_id
        LEFT JOIN combatants cb ON cb.map_token_id = t.id AND cb.campaign_id = ?
+       LEFT JOIN characters boss ON boss.id = t.character_id
        WHERE f.map_id = ? ORDER BY t.id`
     )
     .all(map.campaign_id, map.id);
@@ -344,7 +385,14 @@ export function serializeMapForPlayer(map, userId) {
       }
       visionByFloor.set(
         floor.id,
-        computeFloorVision({ rooms: floorRooms, viewers: floorViewers, radius: map.vision_radius })
+        computeFloorVision({
+          rooms: floorRooms,
+          viewers: floorViewers.map((t) => ({
+            x: t.x,
+            y: t.y,
+            radius: Math.max(map.vision_radius, t.darkvision || 0),
+          })),
+        })
       );
     }
   }
@@ -399,12 +447,12 @@ export function serializeMapForPlayer(map, userId) {
           (cellVisible(d.from_room_id, d.from_x, d.from_y) ||
             cellVisible(d.to_room_id, d.to_x, d.to_y))
       )
-      .map(serializeDoor),
+      .map((d) => serializeDoor(d, { forPlayer: true })),
     // Un marcador oculto (trampa, tesoro) no existe para el jugador aunque
     // la sala esté visible; con niebla, tampoco los que quedan fuera de visión
     tokens: tokens
       .filter((t) => visible.has(t.room_id) && !t.hidden && cellVisible(t.room_id, t.x, t.y))
-      .map(serializeToken),
+      .map((t) => serializeToken(t, { forPlayer: true })),
     characterTokens: characterTokens
       .filter(
         (t) =>

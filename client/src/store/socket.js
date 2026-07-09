@@ -18,6 +18,9 @@ export const useRoom = create((set, get) => ({
   // Contador que sube cuando el servidor avisa de que el mapa activo cambió;
   // quien muestre el mapa lo observa y vuelve a pedir /mapa-activo
   mapVersion: 0,
+  // Igual, pero para el mapa de mundo (viajar, editar ubicaciones): la mesa
+  // repide /mundo y, si cambió la ubicación actual, muestra el lore de destino
+  worldVersion: 0,
   // Pings efímeros sobre el tablero (se autodescartan a los pocos segundos)
   pings: [],
 
@@ -52,6 +55,7 @@ export const useRoom = create((set, get) => ({
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
     socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
+    socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));
     socket.on('mapa:ping', (ping) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const entry = { id, createdAt: Date.now(), ...ping };

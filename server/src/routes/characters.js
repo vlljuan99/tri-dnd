@@ -50,13 +50,16 @@ charactersRouter.get('/', (req, res) => {
 });
 
 charactersRouter.post('/', (req, res) => {
-  const { name } = req.body ?? {};
+  const { name, kind } = req.body ?? {};
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 60) : '';
-  // Todo personaje nuevo nace como borrador: el cliente debe llevarlo al
-  // asistente guiado en vez de abrir la ficha completa vacía.
+  const isBoss = kind === 'boss';
+  // Todo PJ nuevo nace como borrador: el cliente debe llevarlo al asistente
+  // guiado en vez de abrir la ficha completa vacía. Un jefe/boss no pasa por
+  // el asistente (no elige clase/raza del SRD) — nace "completo" y el DM
+  // rellena su ficha directamente (stats, avatar, notas).
   const info = db
-    .prepare("INSERT INTO characters (user_id, name, status) VALUES (?, ?, 'draft')")
-    .run(req.user.id, trimmed || 'Nuevo personaje');
+    .prepare('INSERT INTO characters (user_id, name, status, kind) VALUES (?, ?, ?, ?)')
+    .run(req.user.id, trimmed || (isBoss ? 'Nuevo jefe' : 'Nuevo personaje'), isBoss ? 'complete' : 'draft', isBoss ? 'boss' : 'pj');
   const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ character: serialize(row) });
 });
@@ -140,6 +143,7 @@ const UPDATABLE = {
   hp_temp: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
   ac: (v) => Number.isInteger(v) && v >= 0 && v <= 40,
   speed: (v) => Number.isInteger(v) && v >= 0 && v <= 300,
+  darkvision: (v) => Number.isInteger(v) && v >= 0 && v <= 30,
   abilities: (v) =>
     v && typeof v === 'object' && ABILITY_KEYS.every((k) => Number.isInteger(v[k]) && v[k] >= 1 && v[k] <= 30),
   save_proficiencies: (v) => Array.isArray(v) && v.every((s) => ABILITY_KEYS.includes(s)),
@@ -211,7 +215,7 @@ charactersRouter.put('/:id', (req, res) => {
   // Curarse o cambiar HP/CA desde la ficha refresca las barras del tablero
   if (
     updated.campaign_id &&
-    ['hp_current', 'hp_max', 'ac', 'name', 'speed'].some((k) => k in plainUpdates)
+    ['hp_current', 'hp_max', 'ac', 'name', 'speed', 'darkvision'].some((k) => k in plainUpdates)
   ) {
     notifyCampaignMap(updated.campaign_id);
   }

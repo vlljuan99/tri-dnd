@@ -6,6 +6,7 @@ import { useRoom } from '../../../store/socket.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
 import InventoryPanel from './InventoryPanel.jsx';
+import InteractPanel from './InteractPanel.jsx';
 import NotesPanel from './NotesPanel.jsx';
 import GameDrawer from './GameDrawer.jsx';
 import PlayerHud from './PlayerHud.jsx';
@@ -61,6 +62,7 @@ export default function TacticalMap({
   const [measureMode, setMeasureMode] = useState(false);
   const [measurePoints, setMeasurePoints] = useState([]);
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
+  const [interactTarget, setInteractTarget] = useState(null); // { type: 'door' | 'token', target }
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -150,7 +152,8 @@ export default function TacticalMap({
   }, [combatTarget, map.tokens]);
 
   // Con tu personaje seleccionado, pulsar un enemigo u otro PJ lo fija como
-  // objetivo de ataque; cualquier otro caso simplemente selecciona el token.
+  // objetivo de ataque, y un marcador de trampa/objeto abre el popup de
+  // interactuar (Fase 8.7); cualquier otro caso simplemente selecciona el token.
   function handleSelectToken(tokenId) {
     const clicked = map.tokens.find((t) => t.id === tokenId);
     const canAttackFrom =
@@ -165,9 +168,29 @@ export default function TacticalMap({
       setInventoryOpen(false);
       return;
     }
+    const interactable =
+      !isDm && clicked && clicked.serverId && (clicked.kind === 'trampa' || clicked.kind === 'objeto');
+    if (canAttackFrom && interactable) {
+      setInteractTarget({ type: 'token', target: clicked });
+      setInventoryOpen(false);
+      return;
+    }
     setSelectedTokenId(tokenId);
     setCombatTarget(null);
+    setInteractTarget(null);
     setInventoryOpen(false);
+  }
+
+  // Abrir una puerta: el DM la alterna directo (sin coste), el jugador pasa
+  // por el popup de confirmación (adyacencia, turno y tirada los valida el
+  // servidor al confirmar).
+  function handleOpenDoor(door) {
+    if (isDm) {
+      onOpenDoor(door);
+      return;
+    }
+    if (door.isOpen) return;
+    setInteractTarget({ type: 'door', target: door });
   }
 
   function sendCameraCommand(type) {
@@ -179,6 +202,7 @@ export default function TacticalMap({
       if (!value) {
         setSelectedTokenId(null);
         setCombatTarget(null);
+        setInteractTarget(null);
       }
       setMeasurePoints([]);
       return !value;
@@ -215,7 +239,7 @@ export default function TacticalMap({
           cameraCommand={cameraCommand}
           onSelectToken={handleSelectToken}
           onMoveToken={onMoveToken}
-          onOpenDoor={onOpenDoor}
+          onOpenDoor={handleOpenDoor}
           onPing={onPing}
           pings={pings}
           measureMode={measureMode}
@@ -339,6 +363,17 @@ export default function TacticalMap({
         />
       )}
 
+      {interactTarget && ownCharacterId && (
+        <InteractPanel
+          type={interactTarget.type}
+          target={interactTarget.target}
+          campaignId={campaignId}
+          characterId={ownCharacterId}
+          combat={combat}
+          onClose={() => setInteractTarget(null)}
+        />
+      )}
+
       {inventoryOpen && hudToken && (
         <InventoryPanel
           token={hudToken}
@@ -366,31 +401,11 @@ export default function TacticalMap({
         />
       )}
 
-      {/* HUD y controles apilados en flujo normal (no cada uno con su propio
-          "absolute bottom-X"): así nunca se solapan, tengan la altura que tengan */}
-      <div className="absolute inset-x-3 bottom-3 z-10 flex flex-col gap-1.5 sm:inset-x-4 sm:bottom-4">
-        <PlayerHud
-          token={hudDisplay}
-          combatant={hudCombatant}
-          combatActive={combat.active}
-          // El botón de terminar turno es de quien de verdad puede pulsarlo:
-          // el dueño del PJ mostrado, o el DM (controla enemigos y, si hace
-          // falta, PJ ausentes)
-          isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
-          onEndTurn={async () => {
-            const resp = await endTurn();
-            if (resp?.error) window.alert(resp.error);
-          }}
-          // Ficha/Inventario son conceptos de personaje: no existen para un
-          // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
-          // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto
-          characterId={hudCharacterId}
-          canSeeNotes={canSeeHudNotes}
-          onOpenSheet={() => setSheetOpen(true)}
-          onOpenInventory={() => setInventoryOpen((v) => !v)}
-          onOpenNotes={() => setNotesOpen((v) => !v)}
-        />
-
+      {/* Footer de ancho completo en tres zonas fijas (como la cabecera):
+          45% cámara+mesa/editor/vista, 5% movimiento, el resto tu personaje.
+          Cada grupo mantiene su propia caja separada (mismo estilo que ya
+          tenían); solo cambia dónde se reparte el ancho. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end gap-0 px-3 pb-3 sm:px-4 sm:pb-4">
         <MapControls
           showGrid={showGrid}
           selectedToken={selectedToken}
@@ -407,11 +422,36 @@ export default function TacticalMap({
           onClearSelection={() => {
             setSelectedTokenId(null);
             setCombatTarget(null);
+            setInteractTarget(null);
           }}
           onNudgeToken={nudgeSelectedToken}
           drawerOpen={drawerOpen}
           onToggleDrawer={() => setDrawerOpen((v) => !v)}
         />
+
+        <div className="pointer-events-auto flex flex-1 items-end justify-start">
+          <PlayerHud
+            token={hudDisplay}
+            combatant={hudCombatant}
+            combatActive={combat.active}
+            // El botón de terminar turno es de quien de verdad puede pulsarlo:
+            // el dueño del PJ mostrado, o el DM (controla enemigos y, si hace
+            // falta, PJ ausentes)
+            isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
+            onEndTurn={async () => {
+              const resp = await endTurn();
+              if (resp?.error) window.alert(resp.error);
+            }}
+            // Ficha/Inventario son conceptos de personaje: no existen para un
+            // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
+            // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto
+            characterId={hudCharacterId}
+            canSeeNotes={canSeeHudNotes}
+            onOpenSheet={() => setSheetOpen(true)}
+            onOpenInventory={() => setInventoryOpen((v) => !v)}
+            onOpenNotes={() => setNotesOpen((v) => !v)}
+          />
+        </div>
       </div>
     </section>
   );

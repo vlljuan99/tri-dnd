@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SKILLS } from '../../../lib/dnd.js';
 
 const inputClass =
   'w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none';
@@ -57,6 +58,47 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete })
           ))}
         </div>
       </div>
+
+      {(token.kind === 'objeto' || token.kind === 'trampa') && (
+        <div>
+          <p className={labelClass}>Interacción (opcional)</p>
+          <p className="mt-1 text-xs text-bone/50">
+            Si pides una habilidad, interactuar cuesta la acción del turno y el jugador tiene que tirar
+            contra la dificultad (oculta hasta que resuelve el intento).
+          </p>
+          <div className="mt-1.5 flex gap-1.5">
+            <select
+              disabled={busy}
+              value={token.skill ?? ''}
+              onChange={(e) =>
+                onPatch(token.id, { skill: e.target.value || null, dc: e.target.value ? token.dc ?? 10 : null })
+              }
+              className="flex-1 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-xs text-bone"
+            >
+              <option value="">Sin tirada</option>
+              {SKILLS.map((s) => (
+                <option key={s.index} value={s.index}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            {token.skill && (
+              <input
+                type="number"
+                min={1}
+                max={30}
+                disabled={busy}
+                value={token.dc ?? 10}
+                onChange={(e) =>
+                  onPatch(token.id, { dc: Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 1)) })
+                }
+                className="w-16 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-center font-mono text-xs text-bone"
+                aria-label="Dificultad"
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       <button
         type="button"

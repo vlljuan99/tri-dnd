@@ -78,6 +78,7 @@ export default function EditorCanvas({
   onDoorCellClick,
   onTokenCellClick,
   onObstacleCellClick,
+  onSpawnCellClick,
   onMoveRoom,
   onMoveToken,
 }) {
@@ -139,6 +140,18 @@ export default function EditorCanvas({
           !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
       );
       if (target) onObstacleCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'spawn') {
+      // Igual que el obstáculo: se pinta también sobre una casilla ya
+      // marcada (para quitarla), por eso no usa roomAt
+      const target = rooms.find(
+        (r) =>
+          cellPos.x >= r.x &&
+          cellPos.x < r.x + r.width &&
+          cellPos.y >= r.y &&
+          cellPos.y < r.y + r.height &&
+          !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
+      );
+      if (target) onSpawnCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
     } else if (!room) {
       onSelect(null);
     }
@@ -215,7 +228,7 @@ export default function EditorCanvas({
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
-            : mode === 'door' || mode === 'obstacle'
+            : mode === 'door' || mode === 'obstacle' || mode === 'spawn'
               ? 'cursor-crosshair'
               : 'cursor-default'
         }
@@ -270,6 +283,18 @@ export default function EditorCanvas({
                   fill="#5a4632"
                   stroke="#2c2117"
                   strokeWidth={1.5}
+                />
+              ))}
+              {(room.spawnCells ?? []).map(([c, r]) => (
+                <circle
+                  key={`spawn-${c},${r}`}
+                  cx={pos.left + c * cell + cell / 2}
+                  cy={pos.top + r * cell + cell / 2}
+                  r={cell * 0.28}
+                  fill="none"
+                  stroke="#e8c368"
+                  strokeWidth={2}
+                  strokeDasharray="3 2"
                 />
               ))}
               <rect

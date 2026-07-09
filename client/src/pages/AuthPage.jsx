@@ -47,7 +47,7 @@ export default function AuthPage() {
           TriDnD
         </h1>
         <p className="mb-8 text-center italic text-ink/70">
-          La mesa de juego de vuestro grupo
+          La mesa de juego del Triángulo
         </p>
 
         <div className="rounded-md border border-ink/20 bg-parchment-100/70 p-6 shadow-lg shadow-ink/10">

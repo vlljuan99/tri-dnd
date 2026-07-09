@@ -11,6 +11,7 @@ import DiceOverlay from './components/DiceOverlay.jsx';
 
 const CampaignGamePage = lazy(() => import('./features/tactical-map/pages/CampaignGamePage.jsx'));
 const MapEditorPage = lazy(() => import('./features/map-editor/pages/MapEditorPage.jsx'));
+const WorldMapEditorPage = lazy(() => import('./features/world-map/pages/WorldMapEditorPage.jsx'));
 
 // La mesa de juego (chat) y el tablero eran dos pantallas; ahora es una
 // sola en /campanas/:id — este enlace antiguo sigue funcionando
@@ -81,6 +82,20 @@ export default function App() {
           }
         />
         <Route path="/campanas/:id/tablero" element={<RedirectToCampaign />} />
+        <Route
+          path="/campanas/:id/mundo"
+          element={
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center bg-night-950 text-bone">
+                  <p className="font-display text-lg tracking-wide text-gold">Cargando mapa de mundo...</p>
+                </div>
+              }
+            >
+              <WorldMapEditorPage />
+            </Suspense>
+          }
+        />
         <Route
           path="/campanas/:id/editor"
           element={

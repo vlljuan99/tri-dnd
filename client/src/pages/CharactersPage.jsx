@@ -51,13 +51,15 @@ export default function CharactersPage() {
       .catch(() => {});
   }, []);
 
-  async function createCharacter() {
+  async function createCharacter(kind = 'pj') {
     setCreating(true);
     try {
-      // El personaje nace como borrador: el asistente guiado se encarga de
+      // El PJ nace como borrador: el asistente guiado se encarga de
       // completarlo paso a paso, nunca se abre una ficha vacía directamente.
-      const { character } = await api('/characters', { method: 'POST', body: {} });
-      navigate(`/personajes/${character.id}/asistente`);
+      // Un jefe no pasa por el asistente (no elige clase/raza del SRD): va
+      // directo a la ficha completa para que el DM rellene sus stats.
+      const { character } = await api('/characters', { method: 'POST', body: { kind } });
+      navigate(kind === 'boss' ? `/personajes/${character.id}` : `/personajes/${character.id}/asistente`);
     } catch (err) {
       setError(err.message);
       setCreating(false);
@@ -78,13 +80,23 @@ export default function CharactersPage() {
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h2 className="font-display text-3xl font-semibold text-ink">Tus personajes</h2>
-        <button
-          onClick={createCharacter}
-          disabled={creating}
-          className="rounded-sm bg-ember px-4 py-2 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40"
-        >
-          + Crear personaje
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => createCharacter('pj')}
+            disabled={creating}
+            className="rounded-sm bg-ember px-4 py-2 font-display tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40"
+          >
+            + Crear personaje
+          </button>
+          <button
+            onClick={() => createCharacter('boss')}
+            disabled={creating}
+            title="Ficha completa para un enemigo importante: la usa el DM en el mapa"
+            className="rounded-sm border border-ink/30 px-4 py-2 font-display tracking-wide text-ink hover:bg-ink/5 disabled:opacity-40"
+          >
+            + Crear jefe
+          </button>
+        </div>
       </div>
 
       {error && <p className="mb-4 text-sm text-ember">{error}</p>}
@@ -107,6 +119,11 @@ export default function CharactersPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate font-display text-lg font-semibold text-ink">{c.name}</span>
+                    {c.kind === 'boss' && (
+                      <span className="shrink-0 rounded-sm border border-blood/50 bg-blood/10 px-1.5 py-0.5 font-mono text-xs text-blood">
+                        Jefe
+                      </span>
+                    )}
                     {c.status === 'draft' ? (
                       <span className="shrink-0 rounded-sm border border-ochre/50 bg-ochre/10 px-1.5 py-0.5 font-mono text-xs text-ochre">
                         Borrador

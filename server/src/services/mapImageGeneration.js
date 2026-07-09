@@ -135,3 +135,64 @@ export function generateMapImage(provider, prompt, context) {
     ? generateMapImageGoogle(prompt, context)
     : generateMapImageOpenAI(prompt, context);
 }
+
+// ---- Mapa de mundo (mapa de campaña) ----
+// A diferencia del suelo de sala (vista cenital de batalla), aquí queremos un
+// mapa de región/mundo ilustrado, estilo cartografía de fantasía, apaisado.
+function buildWorldPrompt(description) {
+  return [
+    'Mapa de mundo/región para una ambientación de fantasía, estilo cartografía ilustrada ' +
+      'antigua pintada a mano (como los mapas de aventura de rol de mesa): vista de mapa desde arriba ' +
+      'mostrando geografía —costas, montañas, bosques, ríos, llanuras y algún asentamiento estilizado.',
+    `Territorio a representar: ${description}.`,
+    'Estilo: pergamino envejecido, tintas y acuarelas terrosas, relieve sombreado a mano, ' +
+      'composición que cubre todo el encuadre de borde a borde.',
+    'Restricciones estrictas: sin texto, sin nombres, sin números, sin letras, sin rótulos, ' +
+      'sin brújula ni rosa de los vientos con letras, sin marcas de agua ni firma, sin cuadrícula, ' +
+      'sin interfaz de usuario, sin personajes ni criaturas en primer plano.',
+  ].join(' ');
+}
+
+export async function generateWorldMapImageOpenAI(prompt) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('Falta configurar OPENAI_API_KEY en el servidor');
+
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'gpt-image-1', prompt: buildWorldPrompt(prompt), size: '1536x1024' }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || 'Error generando la imagen con OpenAI');
+  const b64 = data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI no devolvió ninguna imagen');
+  return { buffer: Buffer.from(b64, 'base64') };
+}
+
+export async function generateWorldMapImageGoogle(prompt) {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error('Falta configurar GOOGLE_API_KEY en el servidor');
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt: buildWorldPrompt(prompt) }],
+        parameters: { sampleCount: 1, aspectRatio: '16:9' },
+      }),
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || 'Error generando la imagen con Google');
+  const b64 = data.predictions?.[0]?.bytesBase64Encoding;
+  if (!b64) throw new Error('Google no devolvió ninguna imagen');
+  return { buffer: Buffer.from(b64, 'base64') };
+}
+
+export function generateWorldMapImage(provider, prompt) {
+  return provider === 'google'
+    ? generateWorldMapImageGoogle(prompt)
+    : generateWorldMapImageOpenAI(prompt);
+}

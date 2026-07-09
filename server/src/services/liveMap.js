@@ -32,3 +32,10 @@ export function notifyCampaignMap(campaignId) {
 export function notifyIfActive(campaignId, mapId) {
   if (getActiveMapId(campaignId) === Number(mapId)) notifyCampaignMap(campaignId);
 }
+
+// Señal para el mapa de mundo: cuando el DM viaja o edita las ubicaciones, los
+// clientes de la mesa reciben 'mundo:actualizado' y vuelven a pedir /mundo. Al
+// cambiar la ubicación actual, la mesa muestra la pantalla de lore de destino.
+export function notifyCampaignWorld(campaignId) {
+  ioRef?.to(`campaign:${campaignId}`).emit('mundo:actualizado');
+}

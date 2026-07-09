@@ -52,6 +52,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
         kind: door.kind,
         control: door.control,
         isOpen: door.isOpen,
+        skill: door.skill ?? null,
+        dc: door.dc ?? null,
         col: side.x - minX,
         row: side.y - minY,
       });
@@ -76,8 +78,15 @@ export function composeBoardFromMap(map, preferredFloorId) {
       },
       size: 1,
       type: TOKEN_TYPES[t.kind] ?? 'enemy',
+      // kind crudo (además del type genérico de render): permite distinguir
+      // trampa/objeto interactuables de un npc cualquiera
+      kind: t.kind,
+      skill: t.skill ?? null,
+      dc: t.dc ?? null,
       hp: Number.isInteger(t.hp) ? t.hp : null,
       hpMax: Number.isInteger(t.hpMax) ? t.hpMax : null,
+      // Avatar del jefe (personaje kind='boss') enlazado, si lo hay
+      imageUrl: t.avatarUrl || undefined,
       visible: true,
     }));
 

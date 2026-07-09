@@ -36,11 +36,12 @@ function cellsBetween(x0, y0, x1, y1) {
 /**
  * Calcula las casillas visibles de UNA planta.
  * - rooms: filas de map_rooms de esa planta (con disabled/obstacle_cells)
- * - viewers: [{ x, y }] posiciones de los tokens que ven
- * - radius: alcance en casillas (distancia de Chebyshev, regla 5e)
+ * - viewers: [{ x, y, radius }] posiciones y alcance de cada token que ve
+ *   (distancia de Chebyshev, regla 5e); el radio es por viewer para que la
+ *   visión en la oscuridad de un personaje no afecte a los demás
  * Devuelve un Set de 'x,y' absolutas visibles.
  */
-export function computeFloorVision({ rooms, viewers, radius }) {
+export function computeFloorVision({ rooms, viewers }) {
   const existing = new Set();
   const obstacles = new Set();
   for (const room of rooms) {
@@ -62,6 +63,7 @@ export function computeFloorVision({ rooms, viewers, radius }) {
 
   const visible = new Set();
   for (const viewer of viewers) {
+    const radius = viewer.radius;
     for (let y = viewer.y - radius; y <= viewer.y + radius; y += 1) {
       for (let x = viewer.x - radius; x <= viewer.x + radius; x += 1) {
         const target = key(x, y);

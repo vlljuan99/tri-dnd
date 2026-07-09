@@ -49,6 +49,14 @@ export default function MapEditorPage() {
   const [tokenName, setTokenName] = useState('');
   const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
+  const [bosses, setBosses] = useState([]); // personajes kind='boss' del DM
+  const [tokenBossId, setTokenBossId] = useState('');
+
+  useEffect(() => {
+    api('/characters')
+      .then(({ characters }) => setBosses(characters.filter((c) => c.kind === 'boss')))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -103,8 +111,10 @@ export default function MapEditorPage() {
   }
 
   async function placeToken(target) {
+    const boss = tokenKind === 'enemigo' ? bosses.find((b) => b.id === Number(tokenBossId)) : null;
     const name =
       tokenName.trim() ||
+      boss?.name ||
       (tokenKind === 'enemigo' && tokenMonster?.name) ||
       TOKEN_KINDS.find((k) => k.key === tokenKind)?.label ||
       'Marcador';
@@ -113,7 +123,8 @@ export default function MapEditorPage() {
       name,
       x: target.x,
       y: target.y,
-      monsterIndex: tokenKind === 'enemigo' ? tokenMonster?.index : undefined,
+      monsterIndex: tokenKind === 'enemigo' && !boss ? tokenMonster?.index : undefined,
+      characterId: boss?.id,
     });
     setSelection({ type: 'token', id: token.id });
     setMode('select');
@@ -129,6 +140,20 @@ export default function MapEditorPage() {
       ? room.obstacleCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
       : [...(room.obstacleCells ?? []), rel];
     await editor.patchRoom(room.id, { obstacleCells: next });
+  }
+
+  // Pinta o borra un punto de aparición en la casilla pulsada de la sala
+  // (Fase 8.8): sustituye al spawn automático (primera casilla libre) como
+  // origen de aparición de los personajes, que sigue de respaldo si no se marca ninguno.
+  async function toggleSpawn(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const rel = [target.x - room.x, target.y - room.y];
+    const exists = (room.spawnCells ?? []).some(([c, r]) => c === rel[0] && r === rel[1]);
+    const next = exists
+      ? room.spawnCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
+      : [...(room.spawnCells ?? []), rel];
+    await editor.patchRoom(room.id, { spawnCells: next });
   }
 
   async function doorCellClick(end) {
@@ -350,6 +375,9 @@ export default function MapEditorPage() {
                 <button type="button" onClick={() => { setMode('obstacle'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'obstacle')}>
                   Obstáculos
                 </button>
+                <button type="button" onClick={() => { setMode('spawn'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'spawn')}>
+                  Aparición
+                </button>
 
                 {mode === 'add-room' && (
                   <>
@@ -400,13 +428,21 @@ export default function MapEditorPage() {
                     clic en una casilla de una sala para poner o quitar un obstáculo (no se puede pisar)
                   </span>
                 )}
+                {mode === 'spawn' && (
+                  <span className="text-xs italic text-bone/50">
+                    clic en una casilla de una sala para marcarla como punto de aparición (sustituye al spawn automático)
+                  </span>
+                )}
                 {mode === 'token' && (
                   <>
                     <select
                       value={tokenKind}
                       onChange={(e) => {
                         setTokenKind(e.target.value);
-                        if (e.target.value !== 'enemigo') setTokenMonster(null);
+                        if (e.target.value !== 'enemigo') {
+                          setTokenMonster(null);
+                          setTokenBossId('');
+                        }
                       }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
@@ -420,7 +456,7 @@ export default function MapEditorPage() {
                       placeholder="Nombre (Esqueleto, Cofre…)"
                       className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
                     />
-                    {tokenKind === 'enemigo' && (
+                    {tokenKind === 'enemigo' && !tokenBossId && (
                       <button
                         type="button"
                         onClick={() => setShowMonsterPicker(true)}
@@ -438,6 +474,18 @@ export default function MapEditorPage() {
                       >
                         ✕
                       </button>
+                    )}
+                    {tokenKind === 'enemigo' && bosses.length > 0 && !tokenMonster && (
+                      <select
+                        value={tokenBossId}
+                        onChange={(e) => setTokenBossId(e.target.value)}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                      >
+                        <option value="">— o un jefe tuyo —</option>
+                        {bosses.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
                     )}
                     <span className="text-xs italic text-bone/50">clic en una sala para colocarlo</span>
                   </>
@@ -457,6 +505,7 @@ export default function MapEditorPage() {
                 onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
                 onTokenCellClick={(target) => placeToken(target).catch(() => {})}
                 onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
+                onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
                 onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
               />

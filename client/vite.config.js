@@ -28,7 +28,8 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // PORT la asignan herramientas de preview para no chocar con otro dev server
+    port: Number(process.env.PORT) || 5173,
     proxy: {
       '/api': 'http://localhost:4000',
       '/uploads': 'http://localhost:4000',

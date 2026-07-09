@@ -338,6 +338,84 @@ const migrations = [
   );
   CREATE INDEX idx_character_notes_character ON character_notes(character_id);
   `,
+
+  // v16 — Fase 8.7: visión en la oscuridad por personaje (darkvision), en
+  // casillas. Campo manual como los rasgos de clase/raza (texto libre): el
+  // jugador lo rellena, no se deduce automáticamente de su raza. Se combina
+  // con el radio de niebla del mapa (el mayor de los dos) al calcular
+  // visión, nunca lo sustituye.
+  `
+  ALTER TABLE characters ADD COLUMN darkvision INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  // v17 — Fase 8.7: dificultad opcional para forzar puertas o interactuar
+  // con marcadores de trampa/objeto. dc es la dificultad (CD) de la tirada,
+  // oculta al jugador hasta resolver el intento, igual que la CA en
+  // combate; skill es el nombre de la habilidad narrada (ej. 'atletismo'),
+  // visible antes de tirar para que el jugador sepa qué tira. NULL en
+  // ambas = se abre/interactúa gratis, sin tirada.
+  `
+  ALTER TABLE map_doors ADD COLUMN dc INTEGER;
+  ALTER TABLE map_doors ADD COLUMN skill TEXT;
+  ALTER TABLE map_tokens ADD COLUMN dc INTEGER;
+  ALTER TABLE map_tokens ADD COLUMN skill TEXT;
+  `,
+
+  // v18 — Fase 8.8: plazas, lore y objetivos de campaña (pantalla de carga),
+  // y punto de aparición marcado por el DM en una sala (mismo patrón que
+  // obstacle_cells: pares [col, fila] relativos al origen de la sala).
+  // max_players NULL = sin límite. objectives es JSON, lista de strings.
+  `
+  ALTER TABLE campaigns ADD COLUMN max_players INTEGER;
+  ALTER TABLE campaigns ADD COLUMN lore TEXT NOT NULL DEFAULT '';
+  ALTER TABLE campaigns ADD COLUMN objectives TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE map_rooms ADD COLUMN spawn_cells TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v19 — Mapa de campaña (mapa de mundo): una capa por encima del tablero.
+  // El DM decide al crear la campaña si "forma parte de un mapa" (has_world_map).
+  // Sobre una imagen de mundo (world_map_url) coloca ubicaciones (puntos de
+  // interés), cada una con su lore y enlazada a un mapa jugable de la biblioteca
+  // (map_id). El grupo "viaja" a una ubicación (current_location_id en
+  // game_tables), lo que activa el mapa enlazado. En esta fase todas las
+  // ubicaciones son visibles para todos (sin ocultas). El lore de apertura
+  // reutiliza campaigns.lore de la v18.
+  `
+  ALTER TABLE campaigns ADD COLUMN has_world_map INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE campaigns ADD COLUMN world_map_url TEXT;
+
+  -- x/y: posición del pin en porcentaje (0-100) sobre la imagen del mundo,
+  -- independiente del tamaño de render. map_id ON DELETE SET NULL: borrar el
+  -- mapa de la biblioteca desvincula la ubicación, no la borra.
+  CREATE TABLE world_locations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Ubicación sin nombre',
+    x REAL NOT NULL DEFAULT 50,
+    y REAL NOT NULL DEFAULT 50,
+    lore TEXT NOT NULL DEFAULT '',
+    map_id INTEGER REFERENCES maps(id) ON DELETE SET NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_world_locations_campaign ON world_locations(campaign_id);
+
+  -- Ubicación actual del grupo. Sin ON DELETE (mismo criterio que
+  -- active_map_id, v8): se limpia a mano al borrar la ubicación.
+  ALTER TABLE game_tables ADD COLUMN current_location_id INTEGER;
+  `,
+
+  // v20 — Fase 8 (cierre): personaje como jefe/boss. En vez de un sistema de
+  // plantillas de enemigo aparte, un "personaje" puede ser kind='boss': lo
+  // crea el DM en la sección de Personajes, reutilizando ficha completa
+  // (stats, avatar generado por IA, notas) sin pasar por el asistente
+  // guiado de PJ. Un marcador de enemigo en el editor de mapas puede
+  // enlazarse a un jefe (map_tokens.character_id) en vez de/además de un
+  // monstruo del compendio SRD.
+  `
+  ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'pj' CHECK (kind IN ('pj', 'boss'));
+  ALTER TABLE map_tokens ADD COLUMN character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
+  `,
 ];
 
 export function runMigrations() {
