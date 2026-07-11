@@ -22,6 +22,8 @@ import {
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyIfActive, notifyCombat } from '../services/liveMap.js';
 import { trySpendEnemyMovement } from '../services/turnEconomy.js';
+import { buildWalkableGrid, findPathCost } from '../services/pathfinding.js';
+import { fireRevealEvents } from '../services/events.js';
 
 // Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
 // sockets de la campaña para que recarguen su vista (ya filtrada por rol)
@@ -280,7 +282,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, notes, revealed } = req.body ?? {};
+  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, terrainCells, notes, revealed } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'La sala necesita un nombre' });
   }
@@ -301,6 +303,21 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   if (spawnCells !== undefined && !isValidDisabledCells(spawnCells)) {
     return res.status(400).json({ error: 'Lista de puntos de aparición no válida' });
   }
+  // Terreno difícil: [col, fila, coste] con coste 2..10 (1 sería suelo normal)
+  if (
+    terrainCells !== undefined &&
+    !(
+      Array.isArray(terrainCells) &&
+      terrainCells.length <= 2500 &&
+      terrainCells.every(
+        ([c, r, cost]) =>
+          Number.isInteger(c) && Number.isInteger(r) && c >= 0 && r >= 0 &&
+          Number.isInteger(cost) && cost >= 2 && cost <= 10
+      )
+    )
+  ) {
+    return res.status(400).json({ error: 'Lista de terreno no válida' });
+  }
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json({ error: 'Las notas deben ser texto' });
   }
@@ -313,10 +330,11 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const nextDisabled = (disabledCells ?? JSON.parse(room.disabled_cells || '[]')).filter(insideRoom);
   const nextObstacles = (obstacleCells ?? JSON.parse(room.obstacle_cells || '[]')).filter(insideRoom);
   const nextSpawns = (spawnCells ?? JSON.parse(room.spawn_cells || '[]')).filter(insideRoom);
+  const nextTerrain = (terrainCells ?? JSON.parse(room.terrain_cells || '[]')).filter(insideRoom);
 
   db.prepare(
     `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, notes = ?, revealed = ? WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : room.name,
     x ?? room.x,
@@ -326,6 +344,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     JSON.stringify(nextDisabled),
     JSON.stringify(nextObstacles),
     JSON.stringify(nextSpawns),
+    JSON.stringify(nextTerrain),
     notes ?? room.notes,
     revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
     room.id
@@ -333,9 +352,11 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   touchAndNotify(map);
 
   // Al revelarse por primera vez en la mesa, sus enemigos entran al tracker
+  // y saltan sus eventos de revelado (Fase 19)
   const becameRevealed = revealed !== undefined && Boolean(revealed) && !room.revealed;
   if (becameRevealed && getActiveMapId(req.params.campaignId) === map.id) {
     if (spawnRoomEnemies(map.campaign_id, [room.id]) > 0) notifyCombat(map.campaign_id);
+    fireRevealEvents(map.campaign_id, [room.id]);
   }
 
   const updated = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(room.id);
@@ -561,8 +582,19 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
 
     // Con el modo por turnos activo, arrastrar un enemigo también gasta su
     // movimiento y se bloquea fuera de su turno o al agotarlo — misma
-    // economía que un jugador, para que el DM no lo mueva más de la cuenta.
-    const distance = Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
+    // economía que un jugador, ahora con el coste del camino real (terreno
+    // difícil incluido). Si no hay camino se cae a la distancia en línea:
+    // el DM conserva la libertad de recolocar la escena.
+    const floorRooms = db
+      .prepare('SELECT * FROM map_rooms WHERE floor_id = ?')
+      .all(currentRoom.floor_id);
+    const pathCost = findPathCost(
+      buildWalkableGrid(floorRooms),
+      { x: token.x, y: token.y },
+      { x: nextX, y: nextY },
+      150
+    );
+    const distance = pathCost ?? Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
     const spend = trySpendEnemyMovement(req.params.campaignId, token.id, distance);
     if (!spend.ok) return res.status(400).json({ error: spend.error });
   }

@@ -78,6 +78,7 @@ export default function EditorCanvas({
   onDoorCellClick,
   onTokenCellClick,
   onObstacleCellClick,
+  onTerrainCellClick,
   onSpawnCellClick,
   onMoveRoom,
   onMoveToken,
@@ -140,6 +141,18 @@ export default function EditorCanvas({
           !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
       );
       if (target) onObstacleCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'terrain') {
+      // Igual que el obstáculo: se pinta también sobre una casilla ya
+      // marcada (para quitarla), por eso no usa roomAt
+      const target = rooms.find(
+        (r) =>
+          cellPos.x >= r.x &&
+          cellPos.x < r.x + r.width &&
+          cellPos.y >= r.y &&
+          cellPos.y < r.y + r.height &&
+          !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
+      );
+      if (target) onTerrainCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
     } else if (mode === 'spawn') {
       // Igual que el obstáculo: se pinta también sobre una casilla ya
       // marcada (para quitarla), por eso no usa roomAt
@@ -228,7 +241,7 @@ export default function EditorCanvas({
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
-            : mode === 'door' || mode === 'obstacle' || mode === 'spawn'
+            : mode === 'door' || mode === 'obstacle' || mode === 'terrain' || mode === 'spawn'
               ? 'cursor-crosshair'
               : 'cursor-default'
         }
@@ -284,6 +297,31 @@ export default function EditorCanvas({
                   stroke="#2c2117"
                   strokeWidth={1.5}
                 />
+              ))}
+              {(room.terrainCells ?? []).map(([c, r, cost]) => (
+                <g key={`terr-${c},${r}`} className="pointer-events-none">
+                  <rect
+                    x={pos.left + c * cell + 1}
+                    y={pos.top + r * cell + 1}
+                    width={cell - 2}
+                    height={cell - 2}
+                    fill="#9c6f2e"
+                    fillOpacity={0.4}
+                    stroke="#9c6f2e"
+                    strokeOpacity={0.7}
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={pos.left + c * cell + cell / 2}
+                    y={pos.top + r * cell + cell * 0.66}
+                    textAnchor="middle"
+                    fill="#e8dfc9"
+                    fontSize={cell * 0.4}
+                    className="select-none font-mono"
+                  >
+                    {cost}
+                  </text>
+                </g>
               ))}
               {(room.spawnCells ?? []).map(([c, r]) => (
                 <circle

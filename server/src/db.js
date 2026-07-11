@@ -515,6 +515,52 @@ const migrations = [
   ALTER TABLE map_tokens ADD COLUMN loot TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE combatants ADD COLUMN overrides TEXT NOT NULL DEFAULT '{}';
   `,
+
+  // v27 — Terreno difícil y movimiento por camino real. terrain_cells:
+  // JSON [[col, fila, coste], ...] relativo a la sala (mismo patrón que
+  // obstacle_cells con un coste extra): entrar en esa casilla cuesta
+  // `coste` puntos de movimiento en vez de 1. El movimiento pasa de
+  // distancia Chebyshev en línea recta a coste del CAMINO más barato
+  // (Dijkstra, services/pathfinding.js), validado en servidor.
+  `
+  ALTER TABLE map_rooms ADD COLUMN terrain_cells TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v28 — Fases 18/19: eventos y efectos del DM con disparadores.
+  // dm_events: biblioteca reutilizable por usuario (como custom_items), con
+  //   pasiva/consecuencia en texto (effect) y disparador: 'manual' (solo a la
+  //   vista del DM), 'rondas' (cada N rondas del combate) o 'revelar' (al
+  //   revelarse la sala enlazada, una sola vez). hidden = el aviso va como
+  //   mensaje oculto (solo DM), mismo patrón que las tiradas ocultas.
+  // event_links: dónde cuelga cada evento en una campaña (la propia campaña,
+  //   una sala o un marcador). last_fired_round/fired evitan el doble disparo.
+  `
+  CREATE TABLE dm_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    effect TEXT NOT NULL DEFAULT '',
+    trigger_kind TEXT NOT NULL DEFAULT 'manual' CHECK (trigger_kind IN ('manual', 'rondas', 'revelar')),
+    trigger_every INTEGER,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_dm_events_user ON dm_events(user_id);
+
+  CREATE TABLE event_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES dm_events(id) ON DELETE CASCADE,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL CHECK (target_type IN ('campana', 'sala', 'marcador')),
+    target_id INTEGER,
+    last_fired_round INTEGER,
+    fired INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_event_links_campaign ON event_links(campaign_id);
+  `,
 ];
 
 export function runMigrations() {

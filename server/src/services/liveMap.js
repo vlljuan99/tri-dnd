@@ -20,6 +20,17 @@ export function bindCombatBroadcaster(fn) {
   combatBroadcaster = fn;
 }
 
+// sockets.js registra aquí su inserción+difusión de mensajes de chat, para
+// que los servicios (eventos con disparador, Fase 19) puedan publicar
+// mensajes de sistema respetando el filtrado de ocultos (solo DM y autor).
+let chatPoster = null;
+export function bindChatPoster(fn) {
+  chatPoster = fn;
+}
+export function postSystemMessage(campaignId, body, { hidden = false, userId = null } = {}) {
+  chatPoster?.(campaignId, { body, hidden, userId });
+}
+
 export function notifyCombat(campaignId) {
   combatBroadcaster?.(campaignId);
 }

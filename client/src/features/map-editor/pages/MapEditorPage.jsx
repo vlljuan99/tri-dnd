@@ -51,6 +51,7 @@ export default function MapEditorPage() {
   const [newMapName, setNewMapName] = useState('');
   const [tokenKind, setTokenKind] = useState('enemigo');
   const [tokenName, setTokenName] = useState('');
+  const [terrainCost, setTerrainCost] = useState(2); // coste del pincel de terreno difícil
   const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
   const [bosses, setBosses] = useState([]); // personajes kind='boss' del DM
@@ -144,6 +145,20 @@ export default function MapEditorPage() {
       ? room.obstacleCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
       : [...(room.obstacleCells ?? []), rel];
     await editor.patchRoom(room.id, { obstacleCells: next });
+  }
+
+  // Pinta o borra terreno difícil en la casilla pulsada: entrar en ella
+  // cuesta `terrainCost` puntos de movimiento en vez de 1 (el coste lo
+  // valida el servidor con el camino real al mover)
+  async function toggleTerrain(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const rel = [target.x - room.x, target.y - room.y];
+    const exists = (room.terrainCells ?? []).some(([c, r]) => c === rel[0] && r === rel[1]);
+    const next = exists
+      ? room.terrainCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
+      : [...(room.terrainCells ?? []), [rel[0], rel[1], terrainCost]];
+    await editor.patchRoom(room.id, { terrainCells: next });
   }
 
   // Pinta o borra un punto de aparición en la casilla pulsada de la sala
@@ -379,6 +394,9 @@ export default function MapEditorPage() {
                 <button type="button" onClick={() => { setMode('obstacle'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'obstacle')}>
                   Obstáculos
                 </button>
+                <button type="button" onClick={() => { setMode('terrain'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'terrain')}>
+                  Terreno
+                </button>
                 <button type="button" onClick={() => { setMode('spawn'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'spawn')}>
                   Aparición
                 </button>
@@ -431,6 +449,25 @@ export default function MapEditorPage() {
                   <span className="text-xs italic text-bone/50">
                     clic en una casilla de una sala para poner o quitar un obstáculo (no se puede pisar)
                   </span>
+                )}
+                {mode === 'terrain' && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-bone/60">
+                      Coste de movimiento
+                      <select
+                        value={terrainCost}
+                        onChange={(e) => setTerrainCost(Number(e.target.value))}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                      >
+                        {[2, 3, 4, 5].map((n) => (
+                          <option key={n} value={n}>×{n}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="text-xs italic text-bone/50">
+                      clic para pintar o quitar terreno difícil (entrar cuesta ese movimiento en vez de 1)
+                    </span>
+                  </>
                 )}
                 {mode === 'spawn' && (
                   <span className="text-xs italic text-bone/50">
@@ -509,6 +546,7 @@ export default function MapEditorPage() {
                 onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
                 onTokenCellClick={(target) => placeToken(target).catch(() => {})}
                 onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
+                onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}
                 onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
                 onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}

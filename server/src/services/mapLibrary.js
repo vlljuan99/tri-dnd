@@ -21,6 +21,9 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     disabledCells: JSON.parse(row.disabled_cells || '[]'),
     obstacleCells: JSON.parse(row.obstacle_cells || '[]'),
     spawnCells: JSON.parse(row.spawn_cells || '[]'),
+    // Terreno difícil ([col, fila, coste]): visible también para el jugador,
+    // el coste de moverse no es información oculta
+    terrainCells: JSON.parse(row.terrain_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
     // Para el jugador, toda sala que recibe es visible (aunque el DM la
     // tenga sin revelar y solo la vea él por tener ahí su personaje)

@@ -37,12 +37,11 @@ function DoubleClickPing({ onPing }) {
   return null;
 }
 
-function PointerMissedMovement({ register, selectedTokenId, measureMode, onMoveToken, onMeasurePoint }) {
+function PointerMissedMovement({ register, measureMode, onGroundClick, onMeasurePoint }) {
   const { camera, gl } = useThree();
 
   useEffect(() => {
     register((event) => {
-      if (!measureMode && !selectedTokenId) return;
       const rect = gl.domElement.getBoundingClientRect();
       const pointer = new THREE.Vector2(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -57,11 +56,12 @@ function PointerMissedMovement({ register, selectedTokenId, measureMode, onMoveT
       if (measureMode) {
         onMeasurePoint({ x: point.x, z: point.z });
       } else {
-        onMoveToken(selectedTokenId, { x: point.x, y: 0, z: point.z });
+        // La decisión (vista previa de movimiento, deselección…) vive arriba
+        onGroundClick({ x: point.x, y: 0, z: point.z });
       }
     });
     return () => register(null);
-  }, [camera, gl.domElement, measureMode, onMeasurePoint, onMoveToken, register, selectedTokenId]);
+  }, [camera, gl.domElement, measureMode, onMeasurePoint, onGroundClick, register]);
 
   return null;
 }
@@ -75,7 +75,7 @@ export default function TacticalMapCanvas({
   savingTokenId,
   cameraCommand,
   onSelectToken,
-  onMoveToken,
+  onGroundClick,
   onOpenDoor,
   onPing,
   pings = [],
@@ -83,6 +83,8 @@ export default function TacticalMapCanvas({
   measurePoints = [],
   onMeasurePoint,
   reachableCells = [],
+  terrainCells = [],
+  pathCells = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -98,9 +100,8 @@ export default function TacticalMapCanvas({
       <ambientLight intensity={1.25} />
       <TacticalCamera map={map} command={cameraCommand} />
       <PointerMissedMovement
-        selectedTokenId={selectedTokenId}
         measureMode={measureMode}
-        onMoveToken={onMoveToken}
+        onGroundClick={onGroundClick}
         onMeasurePoint={onMeasurePoint}
         register={(handler) => {
           missedHandlerRef.current = handler;
@@ -108,7 +109,11 @@ export default function TacticalMapCanvas({
       />
       <MapFloor map={map} />
       <MapGrid map={map} visible={showGrid} />
+      {/* Terreno difícil (ocre, permanente), área de alcance (verde) y
+          camino de la vista previa de movimiento (dorado, por encima) */}
+      <MovementRange cells={terrainCells} gridSize={map.gridSize} color="#9c6f2e" opacity={0.3} y={0.012} />
       <MovementRange cells={reachableCells} gridSize={map.gridSize} />
+      <MovementRange cells={pathCells} gridSize={map.gridSize} color="#e8c368" opacity={0.4} y={0.024} />
       {(map.doors ?? []).map((door, index) => (
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}

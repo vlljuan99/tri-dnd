@@ -15,6 +15,9 @@ import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
 import { lootMarkerInto } from '../services/loot.js';
+import { buildWalkableGrid, findPathCost } from '../services/pathfinding.js';
+import { fireRevealEvents } from '../services/events.js';
+import { serializeEvent } from './events.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -322,6 +325,120 @@ campaignsRouter.delete('/:id/biblioteca/:tipo/:contentId', (req, res) => {
   res.json({ ok: true, assigned: false });
 });
 
+// --- Eventos colgados de la campaña (Fase 18) ------------------------------
+// Los enlaces son cosa del DM: dónde ha colgado cada evento de su biblioteca
+// (la propia campaña, una sala o un marcador) y su estado de disparo.
+
+const EVENT_TARGET_TYPES = new Set(['campana', 'sala', 'marcador']);
+
+campaignsRouter.get('/:id/eventos', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  const links = db
+    .prepare(
+      `SELECT l.*, e.name, e.description, e.effect, e.trigger_kind, e.trigger_every, e.hidden,
+              r.name AS room_name, t.name AS token_name
+       FROM event_links l
+       JOIN dm_events e ON e.id = l.event_id
+       LEFT JOIN map_rooms r ON l.target_type = 'sala' AND r.id = l.target_id
+       LEFT JOIN map_tokens t ON l.target_type = 'marcador' AND t.id = l.target_id
+       WHERE l.campaign_id = ? ORDER BY l.id`
+    )
+    .all(campaign.id);
+  // Destinos disponibles para colgar eventos: salas y marcadores de los
+  // mapas de esta campaña (para los selectores del panel de gestión)
+  const rooms = db
+    .prepare(
+      `SELECT r.id, r.name, m.name AS map_name FROM map_rooms r
+       JOIN map_floors f ON f.id = r.floor_id JOIN maps m ON m.id = f.map_id
+       WHERE m.campaign_id = ? ORDER BY m.name, r.name`
+    )
+    .all(campaign.id);
+  const tokens = db
+    .prepare(
+      `SELECT t.id, t.name, t.kind, m.name AS map_name FROM map_tokens t
+       JOIN map_rooms r ON r.id = t.room_id JOIN map_floors f ON f.id = r.floor_id
+       JOIN maps m ON m.id = f.map_id WHERE m.campaign_id = ? ORDER BY m.name, t.name`
+    )
+    .all(campaign.id);
+
+  res.json({
+    links: links.map((l) => ({
+      id: l.id,
+      event: serializeEvent({ ...l, id: l.event_id }),
+      targetType: l.target_type,
+      targetId: l.target_id,
+      targetName:
+        l.target_type === 'sala'
+          ? l.room_name ?? 'Sala borrada'
+          : l.target_type === 'marcador'
+            ? l.token_name ?? 'Marcador borrado'
+            : 'Toda la campaña',
+      fired: Boolean(l.fired),
+      lastFiredRound: l.last_fired_round,
+    })),
+    targets: {
+      rooms: rooms.map((r) => ({ id: r.id, label: `${r.name} (${r.map_name})` })),
+      tokens: tokens.map((t) => ({ id: t.id, label: `${t.name} · ${t.kind} (${t.map_name})` })),
+    },
+  });
+});
+
+campaignsRouter.post('/:id/eventos', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  const { eventId, targetType = 'campana', targetId } = req.body ?? {};
+  const event = db.prepare('SELECT id FROM dm_events WHERE id = ? AND user_id = ?').get(eventId, req.user.id);
+  if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+  if (!EVENT_TARGET_TYPES.has(targetType)) return res.status(400).json({ error: 'Destino no válido' });
+
+  let cleanTargetId = null;
+  if (targetType === 'sala') {
+    const room = db
+      .prepare(
+        `SELECT r.id FROM map_rooms r JOIN map_floors f ON f.id = r.floor_id
+         JOIN maps m ON m.id = f.map_id WHERE r.id = ? AND m.campaign_id = ?`
+      )
+      .get(targetId, campaign.id);
+    if (!room) return res.status(400).json({ error: 'Sala no válida' });
+    cleanTargetId = room.id;
+  } else if (targetType === 'marcador') {
+    const token = db
+      .prepare(
+        `SELECT t.id FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id JOIN maps m ON m.id = f.map_id
+         WHERE t.id = ? AND m.campaign_id = ?`
+      )
+      .get(targetId, campaign.id);
+    if (!token) return res.status(400).json({ error: 'Marcador no válido' });
+    cleanTargetId = token.id;
+  }
+
+  const info = db
+    .prepare('INSERT INTO event_links (event_id, campaign_id, target_type, target_id) VALUES (?, ?, ?, ?)')
+    .run(eventId, campaign.id, targetType, cleanTargetId);
+  res.status(201).json({ ok: true, linkId: info.lastInsertRowid });
+});
+
+// Rearmar un enlace ya disparado (revelar es de un solo uso): vuelve a quedar
+// pendiente, útil para reutilizar la trampa narrativa en otra sesión
+campaignsRouter.post('/:id/eventos/:linkId/rearmar', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  db.prepare('UPDATE event_links SET fired = 0, last_fired_round = NULL WHERE id = ? AND campaign_id = ?').run(
+    req.params.linkId,
+    campaign.id
+  );
+  res.json({ ok: true });
+});
+
+campaignsRouter.delete('/:id/eventos/:linkId', (req, res) => {
+  const campaign = requireDm(req, res);
+  if (!campaign) return;
+  db.prepare('DELETE FROM event_links WHERE id = ? AND campaign_id = ?').run(req.params.linkId, campaign.id);
+  res.json({ ok: true });
+});
+
 // Mapa activo de la mesa, filtrado según el rol: el DM lo ve entero; el
 // jugador solo las salas reveladas y las puertas visibles (filtrado en el
 // servidor, como las tiradas ocultas).
@@ -412,12 +529,22 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     return res.status(400).json({ error: 'No puedes entrar en una zona sin descubrir' });
   }
 
-  // Con el modo por turnos activo, el movimiento se descuenta del
-  // presupuesto del turno (velocidad en casillas); el DM mueve sin límite,
-  // ya sea su propio control de la escena o el de un enemigo/aliado.
+  // Movimiento por camino real (no línea recta): el coste es el del camino
+  // más barato entre casillas pisables, contando terreno difícil, sobre las
+  // salas que el jugador puede atravesar (reveladas + la suya). Sin camino
+  // no hay movimiento: las paredes y huecos ya no se saltan; entre salas
+  // separadas se cruza pisando el umbral de una puerta, como siempre. Con el
+  // modo por turnos activo, ese coste se descuenta del presupuesto del
+  // turno; el DM mueve sin restricción (reposiciona la escena a placer).
   if (!isDm) {
-    const distance = Math.max(Math.abs(x - token.x), Math.abs(y - token.y));
-    const spend = trySpendMovement(req.params.id, character.id, distance);
+    const traversable = db
+      .prepare('SELECT * FROM map_rooms WHERE floor_id = ? AND (revealed = 1 OR id = ?)')
+      .all(currentRoom.floor_id, token.room_id);
+    const cost = findPathCost(buildWalkableGrid(traversable), { x: token.x, y: token.y }, { x, y }, 150);
+    if (cost === null) {
+      return res.status(400).json({ error: 'No hay camino hasta esa casilla' });
+    }
+    const spend = trySpendMovement(req.params.id, character.id, cost);
     if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
 
@@ -464,8 +591,9 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   );
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
-  if (newlyRevealed.length && spawnRoomEnemies(req.params.id, newlyRevealed) > 0) {
-    notifyCombat(req.params.id);
+  if (newlyRevealed.length) {
+    if (spawnRoomEnemies(req.params.id, newlyRevealed) > 0) notifyCombat(req.params.id);
+    fireRevealEvents(req.params.id, newlyRevealed);
   }
   res.json({ ok: true });
 });
@@ -558,8 +686,9 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
   })();
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
-  if (newlyRevealed.length && spawnRoomEnemies(req.params.id, newlyRevealed) > 0) {
-    notifyCombat(req.params.id);
+  if (newlyRevealed.length) {
+    if (spawnRoomEnemies(req.params.id, newlyRevealed) > 0) notifyCombat(req.params.id);
+    fireRevealEvents(req.params.id, newlyRevealed);
   }
 
   const map = getMap(req.params.id, activeMapId);

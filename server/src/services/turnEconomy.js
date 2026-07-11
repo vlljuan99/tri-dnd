@@ -1,4 +1,5 @@
 import { db } from '../db.js';
+import { fireRoundEvents } from './events.js';
 
 // Economía de turno de verdad (Fase 8.5): con el modo por turnos activo
 // (game_tables.combat_active), moverse y actuar en el tablero solo es
@@ -78,14 +79,22 @@ export function resetCombatantResources(combatantId) {
 }
 
 // Marca a un combatiente como el que actúa ahora y resetea sus recursos del
-// turno (la reacción no se resetea aquí: es por ronda, no por turno).
+// turno (la reacción no se resetea aquí: es por ronda, no por turno). Si la
+// ronda avanza, saltan los eventos de cadencia por rondas (Fase 19) — este
+// es el único sitio donde se escribe combat_round durante el combate.
 export function startTurnFor(campaignId, combatantId, round) {
+  const previousRound = db
+    .prepare('SELECT combat_round FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId)?.combat_round;
   db.prepare('UPDATE game_tables SET combat_turn_id = ?, combat_round = ? WHERE campaign_id = ?').run(
     combatantId,
     round,
     campaignId
   );
   resetCombatantResources(combatantId);
+  if (Number.isInteger(previousRound) && round > previousRound) {
+    fireRoundEvents(campaignId, round);
+  }
 }
 
 // Si el modo por turnos está activo y no hay nadie actuando (mesa recién

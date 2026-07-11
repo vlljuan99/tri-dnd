@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import CampaignEventsPanel from '../components/CampaignEventsPanel.jsx';
 
 // Panel de gestión del DM dentro de una campaña (Fase 16): organiza sus
 // PNJ/jefes (personajes kind='boss') y qué objetos/hechizos de su biblioteca
@@ -155,6 +156,9 @@ export default function CampaignManagementPage() {
                 </ul>
               )}
             </section>
+
+            {/* Eventos y efectos (Fases 18/19) */}
+            <CampaignEventsPanel campaignId={id} />
 
             {/* Biblioteca asignada */}
             <section>

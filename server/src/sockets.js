@@ -5,7 +5,7 @@ import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership, countPlayers } from './routes/campaigns.js';
-import { bindCombatBroadcaster, notifyCampaignMap } from './services/liveMap.js';
+import { bindCombatBroadcaster, bindChatPoster, notifyCampaignMap } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
 import {
@@ -248,6 +248,17 @@ export function setupSockets(io) {
   // Las rutas HTTP del mapa también meten enemigos en el tracker al
   // revelarse una sala
   bindCombatBroadcaster(broadcastCombat);
+
+  // Los eventos con disparador (Fase 19) publican mensajes de sistema desde
+  // los servicios: firmados por el DM de la campaña y, si el evento es
+  // oculto, filtrados igual que una tirada oculta (solo DM/autor los reciben)
+  bindChatPoster((campaignId, { body, hidden, userId }) => {
+    const dmUserId =
+      userId ?? db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id;
+    if (!dmUserId) return;
+    const message = insertMessage({ campaignId, userId: dmUserId, type: 'system', body, hidden });
+    broadcastMessage(campaignId, message, { senderId: dmUserId, dmUserId });
+  });
 
   io.on('connection', (socket) => {
     const user = socket.data.user;

@@ -151,20 +151,26 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
   - `spawnRoomEnemies` aplica los overrides de PG/CA con prioridad sobre el SRD/jefe y los copia al combatiente; `trySpendEnemyMovement` usa la velocidad de la variante. El bloque de estadísticas del DM (`MonsterStatBlock`/`MonsterStatsContent`, abierto desde el tracker) aplica los deltas de impacto y daño a las tiradas y muestra los rasgos añadidos y el PG/CA retocado (marcados como «var.»)
   - El rasgo/mecánica extra es texto libre por ahora; cuando existan los eventos (Fase 18) se podrá enlazar un evento en vez de solo describirlo. Los overrides se ven solo en la vista del DM (no viajan al jugador)
 
-- [ ] **Fase 18** — Eventos y efectos
-  - El DM define **eventos reutilizables** que aplican una pasiva o consecuencia (ej.: "oscuridad total: −1 a percepción a todos"), y los **cuelga de misiones, ubicaciones del mundo, salas o enemigos** para tenerlos a la vista y, donde tenga sentido, aplicarlos mecánicamente
-  - Modelo nuevo (evento: nombre, descripción, efecto/modificador, ámbito) enganchado a `campaigns`/`world_locations`/`map_rooms`/`map_tokens`
-  - Cimiento de las mecánicas (Fase 19) y del rasgo enlazable de los minibosses (Fase 17)
+- [x] **Fase 18** — Eventos y efectos
+  - Migración v28: `dm_events` (biblioteca reutilizable por usuario: nombre, descripción, efecto/pasiva en texto, disparador y bandera `hidden`) y `event_links` (dónde cuelga cada evento en una campaña: `campana` entera, `sala` o `marcador`, con estado de disparo). Router `routes/events.js` (`/api/eventos`, CRUD) + rutas de enlaces en `campaigns.js` (`GET|POST /:id/eventos`, `DELETE /:id/eventos/:linkId`, `POST /:id/eventos/:linkId/rearmar`), todas solo-DM
+  - Cliente: sección «Eventos y efectos» en la gestión de la campaña (`CampaignEventsPanel`): crear/editar/borrar eventos, colgarlos (con selectores de sala/marcador de los mapas de la campaña), ver su estado de disparo y rearmarlos. Pendiente futuro: colgar eventos también desde el panel de sala/marcador del editor y de ubicaciones del mundo
 
-- [ ] **Fase 19** — Mecánicas por disparador
-  - Mecánicas con **disparador temporal o condicional** sobre el tablero (ej.: cada 3 turnos hay que salir de una zona porque cae el techo), enganchadas a la economía de turno (`turnEconomy.js`, ya lleva rondas/turnos) y a los eventos de la Fase 18 (un evento en una sala actúa de trigger)
-  - Requiere plantear con calma la estructura del disparador (temporal/por zona/por condición) una vez estén los eventos; es el punto más abierto del arco
+- [x] **Fase 19** — Mecánicas por disparador
+  - Tres disparadores: **manual** (recordatorio a la vista del DM), **cada N rondas** (`fireRoundEvents`, enganchado a `turnEconomy.startTurnFor` — el único punto donde avanza `combat_round` — con `last_fired_round` contra el doble disparo) y **al revelarse la sala** (`fireRevealEvents`, junto a `spawnRoomEnemies` en los 3 puntos de revelado: PATCH de sala, abrir puerta y cruzarla pisando el umbral; de un solo uso vía `fired`, rearmable)
+  - Al cumplirse, la mesa recibe un **mensaje de sistema en el chat** («⚑ Evento: efecto»); si el evento es `hidden`, viaja como mensaje oculto (solo el DM lo recibe, mismo patrón que las tiradas ocultas). `services/events.js` + `liveMap.bindChatPoster`/`postSystemMessage` (sockets registra la inserción+difusión respetando el filtrado)
+  - Los eventos de sala solo saltan si la sala está revelada; los de marcador, si sigue en el tablero y visible. Pendiente futuro: enlazar un evento como rasgo de miniboss (Fase 17) y disparadores por zona/condición
 
 - [x] **Fase 20** — Botín y saqueo
   - Migración v26: columna JSON `map_tokens.loot`. El panel del marcador configura la **tabla de botín por instancia** de un enemigo: objetos del compendio/biblioteca (`SrdPicker`, incluye lo propio de la Fase 15) o texto libre, con **cantidad y probabilidad** por entrada
   - `services/loot.js`: al morir un enemigo (`sockets.js`, `combate:danio`) se **tira la tabla** (`rollLoot`) y lo que cae queda en un **marcador 'objeto' saqueable** (`dropLootMarker`) en su casilla, visible para los jugadores. Un personaje adyacente lo **saquea** (`POST /campaigns/:id/marcadores/:tokenId/saquear`, `lootMarkerInto`): pasa al inventario de su ficha y el marcador desaparece. No cuesta acción del turno
   - Cliente: `InteractPanel` detecta un marcador con `hasLoot` y ofrece «Saquear» (mostrando lo obtenido) en vez del flujo de interacción normal. Depende de la Fase 15 (objetos reales) y encaja con el inventario existente
   - Pendiente futuro: botín por defecto en la ficha del jefe/NPC (hoy es por instancia del marcador); enriquecer armas saqueadas con sus datos de ataque al entrar al inventario
+
+- [x] **Movimiento apuntado (estilo Baldur's Gate), terreno difícil y deselección** — pulido de mesa pedido por el usuario (adelanta el "pathing" que la Fase 8.5 dejaba para la 14)
+  - **Terreno difícil** (migración v27, `map_rooms.terrain_cells` `[[col, fila, coste]]`): pincel «Terreno» en el editor con coste ×2..×5 por casilla (pintar/quitar como los obstáculos, con el coste rotulado); visible también para el jugador en el tablero (overlay ocre)
+  - **Movimiento por camino real**: Dijkstra 8-direcciones con coste por casilla (`server/src/services/pathfinding.js`, espejo cliente en `domain/pathfinding.js` con tests en `__tests__/pathfinding.test.js`). El servidor valida el coste del CAMINO (ya no la distancia Chebyshev en línea): sin camino no hay movimiento (las paredes no se saltan; entre salas separadas se cruza por puertas), y el jugador solo atraviesa salas reveladas. El arrastre de enemigos del DM usa el mismo coste (con respaldo a distancia en línea si no hay camino: el DM recoloca libre)
+  - **Vista previa con confirmación**: clic en una casilla con tu token seleccionado → se pinta el camino (dorado) y un popup muestra el coste y el movimiento restante; «Mover» confirma, «Cancelar»/Escape lo cierra. El área verde de alcance ahora también usa el coste real (terreno incluido)
+  - **Deselección**: clic fuera del suelo pisable deselecciona el token; re-clic sobre el token seleccionado también (toggle); Escape cancela la vista previa y después deselecciona
 
 - [x] **Fase 21** — Secciones dinámicas de la ficha de personaje
   - El jugador **crea y nombra sus propias secciones** para organizar la ficha a su gusto (lore, equipo, monturas, características extra…), más allá de las secciones fijas actuales

@@ -139,6 +139,9 @@ export function composeBoardFromMap(map, preferredFloorId) {
       backgroundUrl: r.backgroundUrl || null,
       disabledCells: r.disabledCells,
       obstacleCells: r.obstacleCells ?? [],
+      // Terreno difícil [col, fila, coste] relativo a la sala: lo pinta el
+      // tablero y lo usa el pathfinding de la vista previa de movimiento
+      terrainCells: r.terrainCells ?? [],
       // Solo el DM recibe salas sin revelar: se pintan atenuadas
       revealed: r.revealed !== false,
     })),

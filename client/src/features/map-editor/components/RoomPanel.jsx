@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import GridCalibrationModal from './GridCalibrationModal.jsx';
 
 const inputClass =
   'w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none';
@@ -17,6 +18,8 @@ export default function RoomPanel({
   const [form, setForm] = useState(room);
   const [prompt, setPrompt] = useState('');
   const [provider, setProvider] = useState('openai');
+  // Imagen elegida pendiente de calibrar su cuadrícula antes de subirla
+  const [pendingFile, setPendingFile] = useState(null);
   const fileRef = useRef(null);
 
   // Al cambiar de sala seleccionada se descartan los cambios sin guardar
@@ -43,6 +46,28 @@ export default function RoomPanel({
   }
 
   const toInt = (v) => (v === '' || v === '-' ? v : Number.parseInt(v, 10));
+
+  // Imagen calibrada: se sube el recorte alineado y la sala pasa a medir las
+  // casillas reales de la imagen, para que ambas cuadrículas coincidan 1:1
+  async function handleCalibrated({ blob, cols, rows }) {
+    try {
+      const upload = new File([blob], 'suelo.webp', { type: 'image/webp' });
+      await onUploadImage(room.id, upload);
+      await onPatch(room.id, { width: cols, height: rows });
+    } catch {
+      // el error ya se muestra en el banner del editor
+    }
+    setPendingFile(null);
+  }
+
+  async function handleUploadOriginal() {
+    try {
+      await onUploadImage(room.id, pendingFile);
+    } catch {
+      // el error ya se muestra en el banner del editor
+    }
+    setPendingFile(null);
+  }
 
   return (
     <div className="space-y-4 p-3">
@@ -127,10 +152,19 @@ export default function RoomPanel({
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) onUploadImage(room.id, file);
+            if (file) setPendingFile(file);
             e.target.value = '';
           }}
         />
+        {pendingFile && (
+          <GridCalibrationModal
+            file={pendingFile}
+            busy={busy}
+            onCancel={() => setPendingFile(null)}
+            onConfirm={handleCalibrated}
+            onUploadOriginal={handleUploadOriginal}
+          />
+        )}
         <form
           className="mt-2 space-y-2"
           onSubmit={(e) => {
