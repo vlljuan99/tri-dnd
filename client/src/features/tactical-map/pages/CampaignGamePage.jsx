@@ -110,7 +110,11 @@ export default function CampaignGamePage() {
     version: worldVersion,
   });
   const currentLocationId = world?.currentLocationId ?? null;
-  const currentLocation = world?.locations?.find((l) => l.id === currentLocationId) ?? null;
+  const currentLocation =
+    world?.maps?.flatMap((m) => m.locations).find((l) => l.id === currentLocationId) ?? null;
+  // Un pin de ciudad salta a un submapa: al continuar tras su lore se vuelve
+  // al mapa de mundo (la capa nueva) en vez de al tablero
+  const currentJumpsToSubmap = Boolean(currentLocation?.targetMapId);
   const [screen, setScreen] = useState(null); // 'lore' | 'world' | 'locationLore' | 'board'
   const [travelError, setTravelError] = useState('');
   const loreSeenRef = useRef(false);
@@ -124,9 +128,9 @@ export default function CampaignGamePage() {
       setScreen('lore');
     } else {
       loreSeenRef.current = true;
-      setScreen(currentLocationId ? 'board' : 'world');
+      setScreen(currentLocationId && !currentJumpsToSubmap ? 'board' : 'world');
     }
-  }, [hasWorldMap, world, screen, currentLocationId, campaign]);
+  }, [hasWorldMap, world, screen, currentLocationId, currentJumpsToSubmap, campaign]);
 
   // El DM viaja (o el jugador lo recibe por socket): al cambiar la ubicación
   // actual, mostrar la pantalla de lore de destino antes del tablero.
@@ -139,7 +143,7 @@ export default function CampaignGamePage() {
 
   async function travel(loc) {
     if (loc.id === currentLocationId) {
-      setScreen('board');
+      setScreen(currentJumpsToSubmap ? 'world' : 'board');
       return;
     }
     setTravelError('');
@@ -151,6 +155,17 @@ export default function CampaignGamePage() {
       });
     } catch (error) {
       setTravelError(error.message || 'No se pudo viajar a esa ubicación.');
+    }
+  }
+
+  // Subir del submapa actual a la capa de arriba (solo DM); el cambio llega
+  // por socket y el efecto de ubicación (queda NULL) pasa a 'world'
+  async function travelBack() {
+    setTravelError('');
+    try {
+      await api(`/campaigns/${campaignId}/mundo/volver`, { method: 'POST' });
+    } catch (error) {
+      setTravelError(error.message || 'No se pudo volver al mapa anterior.');
     }
   }
 
@@ -294,6 +309,7 @@ export default function CampaignGamePage() {
             world={world}
             canTravel={isDm && !playerView}
             onTravel={travel}
+            onGoBack={travelBack}
             onEnterBoard={() => setScreen('board')}
             travelError={travelError}
           />
@@ -305,19 +321,28 @@ export default function CampaignGamePage() {
             eyebrow="Viajáis a…"
             title={currentLocation?.name || 'Ubicación'}
             lore={currentLocation?.lore}
-            continueLabel="Entrar al tablero"
-            onContinue={() => setScreen('board')}
+            continueLabel={currentJumpsToSubmap ? 'Entrar al mapa' : 'Entrar al tablero'}
+            onContinue={() => setScreen(currentJumpsToSubmap ? 'world' : 'board')}
           >
             <div className="rounded-sm border border-gold/20 bg-night-900/60 p-4 text-left text-sm text-bone/80">
-              <p className="font-display text-xs uppercase tracking-widest text-gold/70">Tablero</p>
-              {currentLocation?.mapId ? (
-                <p className="mt-1">
-                  {currentLocation.mapName} — {currentLocation.floorCount} planta
-                  {currentLocation.floorCount === 1 ? '' : 's'}, {currentLocation.roomCount} sala
-                  {currentLocation.roomCount === 1 ? '' : 's'}
-                </p>
+              {currentJumpsToSubmap ? (
+                <>
+                  <p className="font-display text-xs uppercase tracking-widest text-gold/70">Mapa</p>
+                  <p className="mt-1">{currentLocation.targetMapName ?? 'Submapa'}</p>
+                </>
               ) : (
-                <p className="mt-1 italic text-bone/50">Sin tablero asignado a esta ubicación.</p>
+                <>
+                  <p className="font-display text-xs uppercase tracking-widest text-gold/70">Tablero</p>
+                  {currentLocation?.mapId ? (
+                    <p className="mt-1">
+                      {currentLocation.mapName} — {currentLocation.floorCount} planta
+                      {currentLocation.floorCount === 1 ? '' : 's'}, {currentLocation.roomCount} sala
+                      {currentLocation.roomCount === 1 ? '' : 's'}
+                    </p>
+                  ) : (
+                    <p className="mt-1 italic text-bone/50">Sin tablero asignado a esta ubicación.</p>
+                  )}
+                </>
               )}
             </div>
           </LoreScreen>

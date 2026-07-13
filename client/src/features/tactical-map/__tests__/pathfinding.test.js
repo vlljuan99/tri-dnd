@@ -151,6 +151,35 @@ test('el área alcanzable respeta las paredes', () => {
   assert.ok(keys.has('1,1'));
 });
 
+// Tablero 3x1 con una puerta en muro entre (0,0) y (1,0): el tablero
+// compuesto trae un marcador por lado (col/row absolutos).
+function doorBoard(isOpen) {
+  return {
+    rooms: [
+      { col: 0, row: 0, width: 3, height: 1, disabledCells: [], obstacleCells: [], terrainCells: [], wallEdges: [] },
+    ],
+    doors: [
+      { id: 7, kind: 'puerta', isOpen, col: 0, row: 0 },
+      { id: 7, kind: 'puerta', isOpen, col: 1, row: 0 },
+    ],
+  };
+}
+
+test('una puerta cerrada bloquea la arista aunque no haya pared pintada', () => {
+  const walkable = buildBoardWalkable(doorBoard(false));
+  const walls = buildBoardWalls(doorBoard(false));
+  assert.equal(findBoardPath(walkable, { col: 0, row: 0 }, { col: 1, row: 0 }, 150, walls), null);
+});
+
+test('una puerta abierta deja libre la arista (incluso sobre una pared)', () => {
+  const board = doorBoard(true);
+  // Pared pintada en la misma arista: la puerta abierta la anula
+  board.rooms[0].wallEdges = [[1, 0, 'o']];
+  const walkable = buildBoardWalkable(board);
+  const walls = buildBoardWalls(board);
+  assert.equal(findBoardPath(walkable, { col: 0, row: 0 }, { col: 1, row: 0 }, 150, walls).cost, 1);
+});
+
 // Sala 5x1 plana salvo la casilla (3,0) elevada 2 niveles.
 const elevatedBoard = {
   rooms: [

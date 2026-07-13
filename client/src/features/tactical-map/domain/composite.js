@@ -43,20 +43,36 @@ export function composeBoardFromMap(map, preferredFloorId) {
   const roomIds = new Set(rooms.map((r) => r.id));
   const doors = [];
   for (const door of map.doors ?? []) {
-    const sides = [];
-    if (roomIds.has(door.fromRoomId)) sides.push({ x: door.fromX, y: door.fromY });
-    if (roomIds.has(door.toRoomId)) sides.push({ x: door.toX, y: door.toY });
-    for (const side of sides) {
+    const fromVisible = roomIds.has(door.fromRoomId);
+    const toVisible = roomIds.has(door.toRoomId);
+    if (!fromVisible && !toVisible) continue;
+    const common = {
+      id: door.id,
+      kind: door.kind,
+      control: door.control,
+      isOpen: door.isOpen,
+      skill: door.skill ?? null,
+      dc: door.dc ?? null,
+    };
+    // Puerta en muro (dos casillas ortogonalmente contiguas): un único marcador
+    // sobre la arista compartida, con la dirección hacia la casilla vecina para
+    // orientar la barra. Escaleras/portales llevan un marcador por extremo.
+    const dx = door.toX - door.fromX;
+    const dy = door.toY - door.fromY;
+    const isEdge =
+      door.kind === 'puerta' && ((dx === 0 && Math.abs(dy) === 1) || (dy === 0 && Math.abs(dx) === 1));
+    if (isEdge) {
       doors.push({
-        id: door.id,
-        kind: door.kind,
-        control: door.control,
-        isOpen: door.isOpen,
-        skill: door.skill ?? null,
-        dc: door.dc ?? null,
-        col: side.x - minX,
-        row: side.y - minY,
+        ...common,
+        col: door.fromX - minX,
+        row: door.fromY - minY,
+        dirX: Math.sign(dx),
+        dirY: Math.sign(dy),
+        edge: true,
       });
+    } else {
+      if (fromVisible) doors.push({ ...common, col: door.fromX - minX, row: door.fromY - minY });
+      if (toVisible) doors.push({ ...common, col: door.toX - minX, row: door.toY - minY });
     }
   }
 

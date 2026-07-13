@@ -36,6 +36,25 @@ export function fireRevealEvents(campaignId, roomIds) {
   return links.length;
 }
 
+// Al viajar el grupo a una ubicación del mundo: eventos de camino colgados de
+// ese pin. Comparten trigger_kind 'revelar' con las salas ("al revelarse la
+// sala / llegar a la ubicación"), un solo uso vía fired, rearmables.
+export function fireTravelEvents(campaignId, locationId) {
+  const links = db
+    .prepare(
+      `SELECT l.id, e.name AS event_name, e.effect, e.description, e.hidden AS event_hidden
+       FROM event_links l JOIN dm_events e ON e.id = l.event_id
+       WHERE l.campaign_id = ? AND l.target_type = 'ubicacion' AND l.target_id = ?
+         AND e.trigger_kind = 'revelar' AND l.fired = 0`
+    )
+    .all(campaignId, locationId);
+  for (const link of links) {
+    db.prepare('UPDATE event_links SET fired = 1 WHERE id = ?').run(link.id);
+    fire(campaignId, link);
+  }
+  return links.length;
+}
+
 // Al empezar una ronda nueva: eventos 'rondas' cuya cadencia toca
 // (ronda % cada === 0). Los colgados de una sala solo si está revelada; los
 // de un marcador solo si sigue en el tablero y visible; los de la campaña
@@ -60,6 +79,10 @@ export function fireRoundEvents(campaignId, round) {
     } else if (link.target_type === 'marcador') {
       const token = db.prepare('SELECT hidden FROM map_tokens WHERE id = ?').get(link.target_id);
       if (!token || token.hidden) continue;
+    } else if (link.target_type === 'ubicacion') {
+      // Solo si el grupo sigue en esa ubicación del mundo
+      const table = db.prepare('SELECT current_location_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
+      if (table?.current_location_id !== link.target_id) continue;
     }
     db.prepare('UPDATE event_links SET last_fired_round = ? WHERE id = ?').run(round, link.id);
     fire(campaignId, link);

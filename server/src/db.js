@@ -617,6 +617,69 @@ const migrations = [
   ALTER TABLE map_rooms ADD COLUMN light_cells TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE maps ADD COLUMN wall_light_every INTEGER NOT NULL DEFAULT 4;
   `,
+
+  // v34 — Mapa de mundo por capas: submapas (ciudades) y tipos de ubicación.
+  // world_maps: cada fila es una imagen con pins (el mapa raíz de la campaña
+  //   o un submapa, p. ej. una ciudad). La jerarquía no lleva parent_id: el
+  //   padre de un submapa es el mapa donde vive el pin que lo enlaza
+  //   (world_locations.target_world_map_id).
+  // campaigns.root_world_map_id: el mapa raíz (sin ON DELETE, mismo criterio
+  //   que active_map_id: la API nunca borra el raíz). campaigns.world_map_url
+  //   queda obsoleta (la imagen vive ahora en world_maps.image_url).
+  // world_locations.kind: 'dungeon' | 'ciudad' | 'campamento' | 'evento',
+  //   validado en ruta (sin CHECK, para poder añadir tipos sin reconstruir).
+  // world_locations.hidden: pin oculto a los jugadores (emboscadas de camino),
+  //   filtrado en SERVIDOR como las tiradas ocultas; se revela al viajar allí.
+  // game_tables.current_world_map_id: qué capa está mirando el grupo.
+  // event_links se reconstruye (nadie la referencia) para ampliar el CHECK de
+  //   target_type con 'ubicacion': el disparador 'revelar' pasa a significar
+  //   "al revelarse la sala / al llegar a la ubicación" (el CHECK de dm_events
+  //   no se toca, precedente de la Fase 16).
+  `
+  CREATE TABLE world_maps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT 'Mapa de mundo',
+    image_url TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_world_maps_campaign ON world_maps(campaign_id);
+
+  ALTER TABLE campaigns ADD COLUMN root_world_map_id INTEGER;
+
+  INSERT INTO world_maps (campaign_id, name, image_url)
+    SELECT id, 'Mapa de mundo', world_map_url
+    FROM campaigns WHERE has_world_map = 1 OR world_map_url IS NOT NULL;
+  UPDATE campaigns SET root_world_map_id =
+    (SELECT wm.id FROM world_maps wm WHERE wm.campaign_id = campaigns.id);
+
+  ALTER TABLE world_locations ADD COLUMN world_map_id INTEGER REFERENCES world_maps(id) ON DELETE CASCADE;
+  UPDATE world_locations SET world_map_id =
+    (SELECT c.root_world_map_id FROM campaigns c WHERE c.id = world_locations.campaign_id);
+  ALTER TABLE world_locations ADD COLUMN kind TEXT NOT NULL DEFAULT 'dungeon';
+  ALTER TABLE world_locations ADD COLUMN target_world_map_id INTEGER REFERENCES world_maps(id) ON DELETE SET NULL;
+  ALTER TABLE world_locations ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+
+  ALTER TABLE game_tables ADD COLUMN current_world_map_id INTEGER;
+  UPDATE game_tables SET current_world_map_id =
+    (SELECT c.root_world_map_id FROM campaigns c WHERE c.id = game_tables.campaign_id);
+
+  CREATE TABLE event_links_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES dm_events(id) ON DELETE CASCADE,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL CHECK (target_type IN ('campana', 'sala', 'marcador', 'ubicacion')),
+    target_id INTEGER,
+    last_fired_round INTEGER,
+    fired INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO event_links_new (id, event_id, campaign_id, target_type, target_id, last_fired_round, fired, created_at)
+    SELECT id, event_id, campaign_id, target_type, target_id, last_fired_round, fired, created_at FROM event_links;
+  DROP TABLE event_links;
+  ALTER TABLE event_links_new RENAME TO event_links;
+  CREATE INDEX idx_event_links_campaign ON event_links(campaign_id);
+  `,
 ];
 
 export function runMigrations() {

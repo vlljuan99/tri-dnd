@@ -48,6 +48,10 @@ export default function MapEditorPage() {
   const [template, setTemplate] = useState(ROOM_TEMPLATES[0]);
   const [customSize, setCustomSize] = useState({ width: 4, height: 4 });
   const [doorDraft, setDoorDraft] = useState(null); // { roomId, x, y }
+  // Colocado de puerta: 'edge' = puerta normal sobre una arista (un clic, como
+  // el pincel de paredes); 'link' = escalera/portal entre salas o plantas
+  // distintas (dos clics)
+  const [doorPlacement, setDoorPlacement] = useState('edge');
   const [newMapName, setNewMapName] = useState('');
   const [tokenKind, setTokenKind] = useState('enemigo');
   const [tokenName, setTokenName] = useState('');
@@ -222,6 +226,61 @@ export default function MapEditorPage() {
     await editor.patchRoom(room.id, { spawnCells: next });
   }
 
+  // Sala de la planta activa que contiene una casilla activa (no desactivada)
+  function roomAtCell(x, y) {
+    if (!activeFloor) return null;
+    return (
+      activeFloor.rooms.find(
+        (r) =>
+          x >= r.x &&
+          x < r.x + r.width &&
+          y >= r.y &&
+          y < r.y + r.height &&
+          !(r.disabledCells ?? []).some(([c, w]) => c === x - r.x && w === y - r.y)
+      ) ?? null
+    );
+  }
+
+  // Puerta normal sobre la arista pulsada (pincel tipo pared): conecta la
+  // casilla clicada con su vecina al otro lado del borde. Ambas han de ser
+  // transitables (una puerta al vacío no lleva a ninguna parte). Si ya hay
+  // una puerta en esa arista, se selecciona en vez de duplicarla.
+  async function doorEdgeClick({ x, y, side }) {
+    const NEIGHBOR = { n: [0, -1], s: [0, 1], o: [-1, 0], e: [1, 0] };
+    const [dx, dy] = NEIGHBOR[side];
+    const bx = x + dx;
+    const by = y + dy;
+    const roomA = roomAtCell(x, y);
+    const roomB = roomAtCell(bx, by);
+    if (!roomA || !roomB) {
+      editor.setError('La puerta debe ir entre dos casillas transitables, no en el borde exterior de la sala.');
+      return;
+    }
+    const existing = (map?.doors ?? []).find(
+      (d) =>
+        d.kind === 'puerta' &&
+        ((d.fromX === x && d.fromY === y && d.toX === bx && d.toY === by) ||
+          (d.fromX === bx && d.fromY === by && d.toX === x && d.toY === y))
+    );
+    if (existing) {
+      setSelection({ type: 'door', id: existing.id });
+      return;
+    }
+    const { door } = await editor.addDoor({
+      fromRoomId: roomA.id,
+      toRoomId: roomB.id,
+      fromX: x,
+      fromY: y,
+      toX: bx,
+      toY: by,
+      kind: 'puerta',
+    });
+    setSelection({ type: 'door', id: door.id });
+  }
+
+  // Escalera/portal (dos clics): enlaza dos salas distintas, incluso de otra
+  // planta. En la misma planta es un portal (teletransporte); entre plantas,
+  // una escalera. Las puertas normales van con el pincel de arista.
   async function doorCellClick(end) {
     if (!doorDraft) {
       setDoorDraft(end);
@@ -241,7 +300,7 @@ export default function MapEditorPage() {
       fromY: doorDraft.y,
       toX: end.x,
       toY: end.y,
-      kind: fromFloor === toFloor ? 'puerta' : 'escalera',
+      kind: fromFloor === toFloor ? 'portal' : 'escalera',
     });
     setDoorDraft(null);
     setSelection({ type: 'door', id: door.id });
@@ -517,11 +576,39 @@ export default function MapEditorPage() {
                   </>
                 )}
                 {mode === 'door' && (
-                  <span className="text-xs italic text-bone/50">
-                    {doorDraft
-                      ? 'ahora pulsa la casilla de destino en otra sala (puedes cambiar de planta)'
-                      : 'pulsa la casilla de origen dentro de una sala'}
-                  </span>
+                  <>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => { setDoorPlacement('edge'); setDoorDraft(null); }}
+                        className={`rounded-sm border px-2 py-1 text-xs ${
+                          doorPlacement === 'edge'
+                            ? 'border-gold bg-gold/15 text-gold'
+                            : 'border-bone/20 text-bone/70 hover:border-bone/40'
+                        }`}
+                      >
+                        En muro
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setDoorPlacement('link'); setDoorDraft(null); }}
+                        className={`rounded-sm border px-2 py-1 text-xs ${
+                          doorPlacement === 'link'
+                            ? 'border-gold bg-gold/15 text-gold'
+                            : 'border-bone/20 text-bone/70 hover:border-bone/40'
+                        }`}
+                      >
+                        Escalera/Portal
+                      </button>
+                    </div>
+                    <span className="text-xs italic text-bone/50">
+                      {doorPlacement === 'edge'
+                        ? 'clic cerca del borde de una casilla para poner una puerta en ese muro (cerrada bloquea, abierta deja pasar y ver)'
+                        : doorDraft
+                          ? 'ahora pulsa la casilla de destino en otra sala (puedes cambiar de planta)'
+                          : 'pulsa la casilla de origen dentro de una sala'}
+                    </span>
+                  </>
                 )}
                 {mode === 'obstacle' && (
                   <span className="text-xs italic text-bone/50">
@@ -662,11 +749,13 @@ export default function MapEditorPage() {
                 selection={selection}
                 mode={mode}
                 doorDraft={doorDraft}
+                doorPlacement={doorPlacement}
                 wallColor={map.wallColor}
                 busy={busy}
                 onSelect={setSelection}
                 onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
                 onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
+                onDoorEdgeClick={(edge) => doorEdgeClick(edge).catch(() => {})}
                 onTokenCellClick={(target) => placeToken(target).catch(() => {})}
                 onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
                 onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}

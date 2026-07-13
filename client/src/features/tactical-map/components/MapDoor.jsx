@@ -4,10 +4,20 @@
 const COLORS = { jugador: '#c9a86a', dm: '#b33939' };
 
 export default function MapDoor({ door, gridSize, onOpen }) {
-  const x = (door.col + 0.5) * gridSize;
-  const z = (door.row + 0.5) * gridSize;
+  // Puerta en muro: se sitúa sobre la arista compartida (medio paso hacia la
+  // casilla vecina) y su barra se orienta a lo largo del borde. El resto de
+  // puertas (y escaleras/portales) van centradas en su casilla.
+  const x = (door.col + 0.5 + (door.edge ? door.dirX * 0.5 : 0)) * gridSize;
+  const z = (door.row + 0.5 + (door.edge ? door.dirY * 0.5 : 0)) * gridSize;
   const color = COLORS[door.control] ?? COLORS.jugador;
   const opacity = door.isOpen ? 0.35 : 0.95;
+  // Arista vertical (vecina en horizontal) → barra alargada en z; horizontal → en x
+  const edgeVertical = door.edge && door.dirX !== 0;
+  const doorBox = door.edge
+    ? edgeVertical
+      ? [gridSize * 0.18, 0.16, gridSize * 0.62]
+      : [gridSize * 0.62, 0.16, gridSize * 0.18]
+    : [gridSize * 0.62, 0.16, gridSize * 0.3];
 
   function handleClick(event) {
     event.stopPropagation();
@@ -32,7 +42,7 @@ export default function MapDoor({ door, gridSize, onOpen }) {
         </group>
       ) : (
         <mesh>
-          <boxGeometry args={[gridSize * 0.62, 0.16, gridSize * 0.3]} />
+          <boxGeometry args={doorBox} />
           <meshStandardMaterial color={color} transparent opacity={opacity} />
         </mesh>
       )}

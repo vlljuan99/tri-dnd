@@ -427,10 +427,17 @@ export function serializeMapForPlayer(map, userId) {
         visionByFloor.set(floor.id, new Set());
         continue;
       }
+      // Puertas cuyos extremos tocan alguna sala visible de esta planta: sus
+      // aristas abren o cierran el muro para el cálculo de la línea de visión.
+      const floorRoomIds = new Set(floorRooms.map((r) => r.id));
+      const floorDoors = doors.filter(
+        (d) => floorRoomIds.has(d.from_room_id) || floorRoomIds.has(d.to_room_id)
+      );
       visionByFloor.set(
         floor.id,
         computeFloorVision({
           rooms: floorRooms,
+          doors: floorDoors,
           viewers: floorViewers.map((t) => ({
             x: t.x,
             y: t.y,

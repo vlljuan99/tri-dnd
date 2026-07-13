@@ -18,6 +18,28 @@ export function buildBoardWalls(map) {
       else if (side === 'e') walls.add(`v:${x + 1},${y}`);
     }
   }
+  // Puertas de arista: el tablero compuesto trae un marcador por lado visible
+  // (col/row); agrupando los dos lados de una misma puerta 'puerta' contigua
+  // se deriva su arista. Cerrada bloquea, abierta abre hueco — igual que en
+  // server/src/services/walls.js.
+  const sidesById = new Map();
+  for (const d of map.doors ?? []) {
+    if (d.kind !== 'puerta') continue;
+    if (!sidesById.has(d.id)) sidesById.set(d.id, []);
+    sidesById.get(d.id).push(d);
+  }
+  for (const sides of sidesById.values()) {
+    if (sides.length < 2) continue;
+    const [a, b] = sides;
+    const dx = b.col - a.col;
+    const dy = b.row - a.row;
+    let edge = null;
+    if (dx === 0 && Math.abs(dy) === 1) edge = `h:${a.col},${Math.max(a.row, b.row)}`;
+    else if (dy === 0 && Math.abs(dx) === 1) edge = `v:${Math.max(a.col, b.col)},${a.row}`;
+    if (!edge) continue;
+    if (a.isOpen) walls.delete(edge);
+    else walls.add(edge);
+  }
   return walls;
 }
 

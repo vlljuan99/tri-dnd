@@ -330,7 +330,7 @@ campaignsRouter.delete('/:id/biblioteca/:tipo/:contentId', (req, res) => {
 // Los enlaces son cosa del DM: dónde ha colgado cada evento de su biblioteca
 // (la propia campaña, una sala o un marcador) y su estado de disparo.
 
-const EVENT_TARGET_TYPES = new Set(['campana', 'sala', 'marcador']);
+const EVENT_TARGET_TYPES = new Set(['campana', 'sala', 'marcador', 'ubicacion']);
 
 campaignsRouter.get('/:id/eventos', (req, res) => {
   const campaign = requireDm(req, res);
@@ -338,11 +338,12 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
   const links = db
     .prepare(
       `SELECT l.*, e.name, e.description, e.effect, e.trigger_kind, e.trigger_every, e.hidden,
-              r.name AS room_name, t.name AS token_name
+              r.name AS room_name, t.name AS token_name, wl.name AS location_name
        FROM event_links l
        JOIN dm_events e ON e.id = l.event_id
        LEFT JOIN map_rooms r ON l.target_type = 'sala' AND r.id = l.target_id
        LEFT JOIN map_tokens t ON l.target_type = 'marcador' AND t.id = l.target_id
+       LEFT JOIN world_locations wl ON l.target_type = 'ubicacion' AND wl.id = l.target_id
        WHERE l.campaign_id = ? ORDER BY l.id`
     )
     .all(campaign.id);
@@ -362,6 +363,13 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
        JOIN maps m ON m.id = f.map_id WHERE m.campaign_id = ? ORDER BY m.name, t.name`
     )
     .all(campaign.id);
+  const worldLocations = db
+    .prepare(
+      `SELECT l.id, l.name, wm.name AS world_map_name FROM world_locations l
+       LEFT JOIN world_maps wm ON wm.id = l.world_map_id
+       WHERE l.campaign_id = ? ORDER BY wm.name, l.name`
+    )
+    .all(campaign.id);
 
   res.json({
     links: links.map((l) => ({
@@ -374,13 +382,19 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
           ? l.room_name ?? 'Sala borrada'
           : l.target_type === 'marcador'
             ? l.token_name ?? 'Marcador borrado'
-            : 'Toda la campaña',
+            : l.target_type === 'ubicacion'
+              ? l.location_name ?? 'Ubicación borrada'
+              : 'Toda la campaña',
       fired: Boolean(l.fired),
       lastFiredRound: l.last_fired_round,
     })),
     targets: {
       rooms: rooms.map((r) => ({ id: r.id, label: `${r.name} (${r.map_name})` })),
       tokens: tokens.map((t) => ({ id: t.id, label: `${t.name} · ${t.kind} (${t.map_name})` })),
+      locations: worldLocations.map((l) => ({
+        id: l.id,
+        label: l.world_map_name ? `${l.name} (${l.world_map_name})` : l.name,
+      })),
     },
   });
 });
@@ -413,6 +427,12 @@ campaignsRouter.post('/:id/eventos', (req, res) => {
       .get(targetId, campaign.id);
     if (!token) return res.status(400).json({ error: 'Marcador no válido' });
     cleanTargetId = token.id;
+  } else if (targetType === 'ubicacion') {
+    const location = db
+      .prepare('SELECT id FROM world_locations WHERE id = ? AND campaign_id = ?')
+      .get(targetId, campaign.id);
+    if (!location) return res.status(400).json({ error: 'Ubicación no válida' });
+    cleanTargetId = location.id;
   }
 
   const info = db
@@ -541,12 +561,22 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     const traversable = db
       .prepare('SELECT * FROM map_rooms WHERE floor_id = ? AND (revealed = 1 OR id = ?)')
       .all(currentRoom.floor_id, token.room_id);
+    const traversableIds = traversable.map((r) => r.id);
+    const traversableDoors = traversableIds.length
+      ? db
+          .prepare(
+            `SELECT * FROM map_doors WHERE map_id = ? AND (from_room_id IN (${traversableIds
+              .map(() => '?')
+              .join(',')}) OR to_room_id IN (${traversableIds.map(() => '?').join(',')}))`
+          )
+          .all(activeMapId, ...traversableIds, ...traversableIds)
+      : [];
     const cost = findPathCost(
       buildWalkableGrid(traversable),
       { x: token.x, y: token.y },
       { x, y },
       150,
-      buildWallSet(traversable),
+      buildWallSet(traversable, traversableDoors),
       buildElevationMap(traversable)
     );
     if (cost === null) {

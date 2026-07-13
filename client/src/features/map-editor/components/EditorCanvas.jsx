@@ -58,6 +58,69 @@ function DoorMarker({ door, x, y, cell, toPx, selected, onSelect }) {
   );
 }
 
+// ¿Es una puerta apoyada en una arista (dos casillas ortogonalmente
+// contiguas)? Esas se dibujan sobre el borde, no como dos marcadores.
+function isEdgeDoor(door) {
+  if (door.kind !== 'puerta') return false;
+  const dx = door.toX - door.fromX;
+  const dy = door.toY - door.fromY;
+  return (dx === 0 && Math.abs(dy) === 1) || (dy === 0 && Math.abs(dx) === 1);
+}
+
+// Marcador de una puerta en muro: barra sobre el borde compartido, a lo largo
+// de la arista. Cerrada = rellena (bloquea), abierta = hueca (hueco abierto).
+function EdgeDoorMarker({ door, cell, toPx, selected, onSelect }) {
+  const vertical = door.fromY === door.toY; // vecinas en horizontal → borde vertical
+  const isDm = door.control === 'dm';
+  const stroke = selected ? '#e8c368' : isDm ? '#b33939' : '#c9a86a';
+  const fill = door.isOpen ? 'transparent' : stroke;
+  let cx;
+  let cy;
+  if (vertical) {
+    cx = toPx.x(Math.max(door.fromX, door.toX));
+    cy = toPx.y(door.fromY) + cell / 2;
+  } else {
+    cx = toPx.x(door.fromX) + cell / 2;
+    cy = toPx.y(Math.max(door.fromY, door.toY));
+  }
+  const long = cell * 0.66;
+  const thick = Math.max(4, cell * 0.2);
+  const w = vertical ? thick : long;
+  const h = vertical ? long : thick;
+  return (
+    <g
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect({ type: 'door', id: door.id });
+      }}
+      className="cursor-pointer"
+    >
+      <rect
+        x={cx - w / 2}
+        y={cy - h / 2}
+        width={w}
+        height={h}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={2}
+        opacity={0.95}
+        rx={2}
+      />
+      {selected && (
+        <rect
+          x={cx - w / 2 - 3}
+          y={cy - h / 2 - 3}
+          width={w + 6}
+          height={h + 6}
+          fill="none"
+          stroke="#e8c368"
+          strokeDasharray="3 3"
+        />
+      )}
+    </g>
+  );
+}
+
 const TOKEN_COLORS = {
   enemigo: '#b33939',
   aliado: '#4a8bd6',
@@ -72,11 +135,13 @@ export default function EditorCanvas({
   selection,
   mode,
   doorDraft,
+  doorPlacement = 'edge',
   wallColor = '#9b8555',
   busy,
   onSelect,
   onPlaceRoom,
   onDoorCellClick,
+  onDoorEdgeClick,
   onTokenCellClick,
   onObstacleCellClick,
   onTerrainCellClick,
@@ -151,7 +216,14 @@ export default function EditorCanvas({
     if (mode === 'add-room') {
       onPlaceRoom(cellPos);
     } else if (mode === 'door') {
-      if (room) onDoorCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
+      if (doorPlacement === 'edge') {
+        // Puerta en muro: se coloca en la arista pulsada, como el pincel de
+        // paredes (la validación de casilla transitable la hace la página)
+        const edge = eventEdge(e);
+        onDoorEdgeClick({ x: edge.x, y: edge.y, side: edge.side });
+      } else if (room) {
+        onDoorCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
+      }
     } else if (mode === 'token') {
       if (room) onTokenCellClick({ roomId: room.id, x: cellPos.x, y: cellPos.y });
     } else if (mode === 'obstacle') {
@@ -480,8 +552,10 @@ export default function EditorCanvas({
           );
         })}
 
-        {/* Línea entre los dos extremos de cada puerta cuya salas estén en esta planta */}
+        {/* Línea entre los dos extremos de una escalera/portal (las puertas en
+            muro se dibujan sobre su arista, sin línea) */}
         {doors.map((door) => {
+          if (isEdgeDoor(door)) return null;
           const from = roomById.get(door.fromRoomId);
           const to = roomById.get(door.toRoomId);
           if (!from || !to) return null;
@@ -499,6 +573,20 @@ export default function EditorCanvas({
           );
         })}
         {doors.map((door) => {
+          // Puerta en muro: un único marcador sobre la arista compartida
+          if (isEdgeDoor(door)) {
+            if (!roomById.has(door.fromRoomId) && !roomById.has(door.toRoomId)) return null;
+            return (
+              <EdgeDoorMarker
+                key={`edge-${door.id}`}
+                door={door}
+                cell={cell}
+                toPx={toPx}
+                selected={selection?.type === 'door' && selection.id === door.id}
+                onSelect={onSelect}
+              />
+            );
+          }
           const markers = [];
           if (roomById.has(door.fromRoomId)) {
             markers.push(

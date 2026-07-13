@@ -3,9 +3,10 @@ import { api } from '../api.js';
 
 // Eventos del DM (Fases 18/19) en la gestión de la campaña: biblioteca
 // reutilizable (crear/editar/borrar) y enlaces a esta campaña (toda la
-// campaña, una sala o un marcador). Los disparadores automáticos ('rondas',
-// 'revelar') publican un mensaje de sistema en el chat al cumplirse; los
-// 'manual' son recordatorios a la vista del DM.
+// campaña, una sala, un marcador o una ubicación del mapa de mundo). Los
+// disparadores automáticos ('rondas', 'revelar' — que en una ubicación
+// significa "al viajar allí") publican un mensaje de sistema en el chat al
+// cumplirse; los 'manual' son recordatorios a la vista del DM.
 
 const inputClass =
   'w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none';
@@ -14,7 +15,7 @@ const labelClass = 'block text-[0.65rem] uppercase tracking-widest text-bone/50 
 const TRIGGER_LABELS = {
   manual: 'Manual (a la vista del DM)',
   rondas: 'Cada N rondas',
-  revelar: 'Al revelarse la sala',
+  revelar: 'Al revelarse la sala / llegar a la ubicación',
 };
 
 const emptyForm = () => ({ name: '', effect: '', description: '', triggerKind: 'manual', triggerEvery: 3, hidden: false });
@@ -87,7 +88,7 @@ function EventForm({ initial, busy, onSave, onCancel }) {
 export default function CampaignEventsPanel({ campaignId }) {
   const [events, setEvents] = useState([]);
   const [links, setLinks] = useState([]);
-  const [targets, setTargets] = useState({ rooms: [], tokens: [] });
+  const [targets, setTargets] = useState({ rooms: [], tokens: [], locations: [] });
   const [editing, setEditing] = useState(null); // null | 'new' | event
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -168,7 +169,8 @@ export default function CampaignEventsPanel({ campaignId }) {
       </div>
       <p className="mb-3 text-xs text-bone/50">
         Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la
-        campaña, una sala o un enemigo; los de rondas y revelado saltan solos como mensaje en el chat.
+        campaña, una sala, un enemigo o una ubicación del mapa de mundo (evento de camino); los de rondas,
+        revelado y viaje saltan solos como mensaje en el chat.
       </p>
 
       {error && <p className="mb-3 text-sm text-blood">{error}</p>}
@@ -236,14 +238,22 @@ export default function CampaignEventsPanel({ campaignId }) {
               <option value="campana">Toda la campaña</option>
               <option value="sala">Una sala</option>
               <option value="marcador">Un marcador</option>
+              <option value="ubicacion">Una ubicación del mundo</option>
             </select>
           </label>
           {linkTargetType !== 'campana' && (
             <label className="block">
-              <span className={labelClass}>{linkTargetType === 'sala' ? 'Sala' : 'Marcador'}</span>
+              <span className={labelClass}>
+                {linkTargetType === 'sala' ? 'Sala' : linkTargetType === 'marcador' ? 'Marcador' : 'Ubicación'}
+              </span>
               <select className={inputClass} value={linkTargetId} onChange={(e) => setLinkTargetId(e.target.value)}>
                 <option value="">— elegir —</option>
-                {(linkTargetType === 'sala' ? targets.rooms : targets.tokens).map((t) => (
+                {(linkTargetType === 'sala'
+                  ? targets.rooms
+                  : linkTargetType === 'marcador'
+                    ? targets.tokens
+                    : targets.locations ?? []
+                ).map((t) => (
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
               </select>

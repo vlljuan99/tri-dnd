@@ -33,6 +33,19 @@ function touchAndNotify(map) {
   notifyIfActive(map.campaign_id, map.id);
 }
 
+// Puertas cuyos extremos tocan alguna de estas salas (filas de map_rooms):
+// las de arista modifican el muro (abren/cierran) en el pathfinding.
+function doorsForRooms(mapId, rooms) {
+  const ids = rooms.map((r) => r.id);
+  if (!ids.length) return [];
+  const marks = ids.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT * FROM map_doors WHERE map_id = ? AND (from_room_id IN (${marks}) OR to_room_id IN (${marks}))`
+    )
+    .all(mapId, ...ids, ...ids);
+}
+
 // Biblioteca de mapas del editor de campaña (Fase 7.5). Solo el DM pasa por
 // aquí, incluso en lectura: los jugadores reciben el mapa activo ya filtrado
 // (salas reveladas) por /api/campaigns/:id/mapa-activo, nunca por esta API.
@@ -635,7 +648,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       { x: token.x, y: token.y },
       { x: nextX, y: nextY },
       150,
-      buildWallSet(floorRooms),
+      buildWallSet(floorRooms, doorsForRooms(map.id, floorRooms)),
       buildElevationMap(floorRooms)
     );
     const distance = pathCost ?? Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
@@ -699,8 +712,21 @@ mapsRouter.post('/:mapId/puertas', (req, res) => {
   if (!['jugador', 'dm'].includes(control)) {
     return res.status(400).json({ error: 'Control de puerta no válido' });
   }
-  if (fromRoomId === toRoomId) {
-    return res.status(400).json({ error: 'Una puerta debe conectar dos salas distintas' });
+  // Una puerta normal se apoya en una arista: sus dos casillas han de ser
+  // ortogonalmente contiguas (misma sala o dos salas que se tocan). Escaleras
+  // y portales, en cambio, enlazan salas distintas (posiblemente de otra
+  // planta) y no tienen esa restricción.
+  if (kind === 'puerta') {
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const adjacent = (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && dx === 0);
+    if (!adjacent) {
+      return res.status(400).json({
+        error: 'Una puerta debe ir entre dos casillas contiguas; para conectar salas lejanas o plantas usa escalera o portal',
+      });
+    }
+  } else if (fromRoomId === toRoomId) {
+    return res.status(400).json({ error: 'Una escalera o portal debe conectar dos salas distintas' });
   }
   const fromRoom = getRoom(map.id, fromRoomId);
   const toRoom = getRoom(map.id, toRoomId);

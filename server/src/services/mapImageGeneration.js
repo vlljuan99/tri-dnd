@@ -138,13 +138,21 @@ export function generateMapImage(provider, prompt, context) {
 
 // ---- Mapa de mundo (mapa de campaña) ----
 // A diferencia del suelo de sala (vista cenital de batalla), aquí queremos un
-// mapa de región/mundo ilustrado, estilo cartografía de fantasía, apaisado.
-function buildWorldPrompt(description) {
+// mapa ilustrado estilo cartografía de fantasía, apaisado. Dos estilos: 'region'
+// (mundo/región, el original) y 'ciudad' (plano urbano para submapas de ciudad).
+function buildWorldPrompt(description, estilo = 'region') {
+  const subject =
+    estilo === 'ciudad'
+      ? 'Plano de ciudad para una ambientación de fantasía, estilo cartografía ilustrada ' +
+        'antigua pintada a mano (como los planos de ciudad de rol de mesa): vista de pájaro ' +
+        'mostrando murallas, calles y callejones, plazas, tejados de edificios, un castillo o ' +
+        'templo destacado, y quizá un río o puerto.'
+      : 'Mapa de mundo/región para una ambientación de fantasía, estilo cartografía ilustrada ' +
+        'antigua pintada a mano (como los mapas de aventura de rol de mesa): vista de mapa desde arriba ' +
+        'mostrando geografía —costas, montañas, bosques, ríos, llanuras y algún asentamiento estilizado.';
   return [
-    'Mapa de mundo/región para una ambientación de fantasía, estilo cartografía ilustrada ' +
-      'antigua pintada a mano (como los mapas de aventura de rol de mesa): vista de mapa desde arriba ' +
-      'mostrando geografía —costas, montañas, bosques, ríos, llanuras y algún asentamiento estilizado.',
-    `Territorio a representar: ${description}.`,
+    subject,
+    `${estilo === 'ciudad' ? 'Ciudad' : 'Territorio'} a representar: ${description}.`,
     'Estilo: pergamino envejecido, tintas y acuarelas terrosas, relieve sombreado a mano, ' +
       'composición que cubre todo el encuadre de borde a borde.',
     'Restricciones estrictas: sin texto, sin nombres, sin números, sin letras, sin rótulos, ' +
@@ -153,14 +161,14 @@ function buildWorldPrompt(description) {
   ].join(' ');
 }
 
-export async function generateWorldMapImageOpenAI(prompt) {
+export async function generateWorldMapImageOpenAI(prompt, estilo) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('Falta configurar OPENAI_API_KEY en el servidor');
 
   const response = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'gpt-image-1', prompt: buildWorldPrompt(prompt), size: '1536x1024' }),
+    body: JSON.stringify({ model: 'gpt-image-1', prompt: buildWorldPrompt(prompt, estilo), size: '1536x1024' }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error?.message || 'Error generando la imagen con OpenAI');
@@ -169,7 +177,7 @@ export async function generateWorldMapImageOpenAI(prompt) {
   return { buffer: Buffer.from(b64, 'base64') };
 }
 
-export async function generateWorldMapImageGoogle(prompt) {
+export async function generateWorldMapImageGoogle(prompt, estilo) {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GOOGLE_API_KEY en el servidor');
 
@@ -179,7 +187,7 @@ export async function generateWorldMapImageGoogle(prompt) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [{ prompt: buildWorldPrompt(prompt) }],
+        instances: [{ prompt: buildWorldPrompt(prompt, estilo) }],
         parameters: { sampleCount: 1, aspectRatio: '16:9' },
       }),
     }
@@ -191,8 +199,8 @@ export async function generateWorldMapImageGoogle(prompt) {
   return { buffer: Buffer.from(b64, 'base64') };
 }
 
-export function generateWorldMapImage(provider, prompt) {
+export function generateWorldMapImage(provider, prompt, estilo) {
   return provider === 'google'
-    ? generateWorldMapImageGoogle(prompt)
-    : generateWorldMapImageOpenAI(prompt);
+    ? generateWorldMapImageGoogle(prompt, estilo)
+    : generateWorldMapImageOpenAI(prompt, estilo);
 }

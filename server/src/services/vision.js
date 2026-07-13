@@ -46,7 +46,7 @@ function sightBlocked(x0, y0, x1, y1, blocksSight, walls) {
  *   visión en la oscuridad de un personaje no afecte a los demás
  * Devuelve un Set de 'x,y' absolutas visibles.
  */
-export function computeFloorVision({ rooms, viewers }) {
+export function computeFloorVision({ rooms, viewers, doors = [] }) {
   const existing = new Set();
   const obstacles = new Set();
   for (const room of rooms) {
@@ -65,7 +65,7 @@ export function computeFloorVision({ rooms, viewers }) {
   }
 
   const blocksSight = (x, y) => obstacles.has(key(x, y)) || !existing.has(key(x, y));
-  const walls = buildWallSet(rooms);
+  const walls = buildWallSet(rooms, doors);
 
   const visible = new Set();
   for (const viewer of viewers) {
