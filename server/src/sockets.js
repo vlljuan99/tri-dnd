@@ -5,7 +5,7 @@ import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership, countPlayers } from './routes/campaigns.js';
-import { bindCombatBroadcaster, bindChatPoster, notifyCampaignMap } from './services/liveMap.js';
+import { bindCombatBroadcaster, bindChatPoster, notifyCampaignMap, notifyCombatStarted } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
 import {
@@ -17,8 +17,13 @@ import {
   activateTurnMode,
   deactivateTurnMode,
   trySpendAction,
+  trySpendActionForCombatant,
   tryUseBonusAction,
   tryUseReaction,
+  trySpecialAction,
+  toggleCondition,
+  startDeathSaves,
+  recordDeathSave,
   endCombatIfNoEnemiesLeft,
 } from './services/turnEconomy.js';
 
@@ -68,6 +73,12 @@ function recentMessages(campaignId, { includeHidden, userId }) {
 // recursos del turno (movimiento/acción/acción adicional/reacción) sí
 // viajan a todos: son necesarios para saber qué puede hacer cada cual.
 function combatantView(row, { isDm, round }) {
+  let conditions = [];
+  try {
+    conditions = JSON.parse(row.conditions || '[]');
+  } catch {
+    conditions = [];
+  }
   const base = {
     id: row.id,
     kind: row.kind,
@@ -78,10 +89,30 @@ function combatantView(row, { isDm, round }) {
     actionUsed: Boolean(row.action_used),
     bonusUsed: Boolean(row.bonus_used),
     reactionAvailable: row.reaction_used_round !== round,
+    dashed: Boolean(row.dashed),
+    stance: row.stance ?? null,
+    conditions,
   };
   if (row.kind === 'pj' && row.character_id) {
     const c = db.prepare('SELECT hp_current, hp_max, ac, speed FROM characters WHERE id = ?').get(row.character_id);
-    if (c) Object.assign(base, { hpCurrent: c.hp_current, hpMax: c.hp_max, ac: c.ac, speed: c.speed });
+    if (c) {
+      const downed = Number.isInteger(c.hp_current) && c.hp_current <= 0;
+      Object.assign(base, {
+        hpCurrent: c.hp_current,
+        hpMax: c.hp_max,
+        ac: c.ac,
+        speed: c.speed,
+        downed,
+        // Muerto de verdad (3 fallos): a diferencia de "agonizando", ya no
+        // se pueden tirar más salvaciones de muerte ni volver con un 20.
+        dead: downed && row.death_failures >= 3,
+        // Salvaciones de muerte: visibles para toda la mesa (el grupo ve caer
+        // a un compañero), solo tienen sentido mientras está agonizando.
+        deathSaves: downed
+          ? { successes: row.death_successes, failures: row.death_failures }
+          : null,
+      });
+    }
   } else if (row.kind === 'enemigo' && isDm) {
     const overrides = JSON.parse(row.overrides || '{}');
     Object.assign(base, {
@@ -176,6 +207,152 @@ function resolveCombatTarget(campaignId, attackerCharacter, target, { melee }) {
   );
   if (melee && distance > 1) return { error: 'Demasiado lejos para atacar cuerpo a cuerpo' };
   return resolved;
+}
+
+// Igual que resolveCombatTarget, pero el ATACANTE es un marcador del DM
+// (enemigo/aliado), no un personaje: se usa cuando el DM ataca a un PJ (o a
+// otro marcador) con un enemigo. Comparte la resolución del objetivo con
+// resolveCombatTarget salvo la posición del atacante, que aquí sale de
+// map_tokens en vez de map_character_tokens.
+function resolveCombatTargetFromMarker(campaignId, attackerTokenId, target, { melee }) {
+  const mapId = getActiveMapId(campaignId);
+  if (!mapId) return { error: 'La mesa no tiene mapa activo' };
+
+  const attacker = db
+    .prepare(
+      `SELECT t.*, r.floor_id FROM map_tokens t
+       JOIN map_rooms r ON r.id = t.room_id
+       JOIN map_floors f ON f.id = r.floor_id
+       WHERE t.id = ? AND f.map_id = ?`
+    )
+    .get(attackerTokenId, mapId);
+  if (!attacker) return { error: 'El atacante no está en el tablero' };
+
+  let resolved;
+  if (target?.kind === 'marcador') {
+    if (Number(target.id) === Number(attackerTokenId)) return { error: 'No puede atacarse a sí mismo' };
+    const row = db
+      .prepare(
+        `SELECT t.*, r.floor_id, r.revealed FROM map_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id
+         WHERE t.id = ? AND f.map_id = ?`
+      )
+      .get(target.id, mapId);
+    if (!row || row.hidden) return { error: 'Objetivo no encontrado' };
+    const combatant = db
+      .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+      .get(campaignId, row.id);
+    resolved = { ac: combatant?.ac ?? 10, name: row.name, kind: 'marcador', token: row, combatant };
+  } else if (target?.kind === 'personaje') {
+    const row = db
+      .prepare(
+        `SELECT t.*, r.floor_id FROM map_character_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         WHERE t.map_id = ? AND t.character_id = ?`
+      )
+      .get(mapId, target.id);
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(target.id);
+    if (!row || !character) return { error: 'Objetivo no encontrado' };
+    resolved = { ac: character.ac ?? 10, name: character.name, kind: 'personaje', token: row, character };
+  } else {
+    return { error: 'Objetivo no válido' };
+  }
+
+  if (resolved.token.floor_id !== attacker.floor_id) return { error: 'El objetivo está en otra planta' };
+  const distance = Math.max(Math.abs(resolved.token.x - attacker.x), Math.abs(resolved.token.y - attacker.y));
+  if (melee && distance > 1) return { error: 'Demasiado lejos para atacar cuerpo a cuerpo' };
+  return resolved;
+}
+
+// Aplica daño ya resuelto a un objetivo (personaje o marcador), sea cual sea
+// quien ataca (un PJ o un enemigo controlado por el DM): la resolución del
+// objetivo puede venir de cualquiera de los dos caminos de arriba, pero
+// aplicar el daño es exactamente lo mismo. Devuelve el mensaje de sistema a
+// narrar y el detalle para quien preguntó (remainingHp, maxHp, defeated).
+function applyCombatDamage(campaignId, resolved, damage) {
+  let body;
+  const detail = { damage, remainingHp: null, maxHp: null, defeated: false };
+
+  if (resolved.kind === 'marcador') {
+    const combatant = resolved.combatant;
+    if (combatant && Number.isInteger(combatant.hp_current)) {
+      const newHp = combatant.hp_current - damage;
+      detail.maxHp = combatant.hp_max ?? null;
+      if (newHp <= 0) {
+        // Botín (Fase 20): al caer se tira su tabla y lo que toca queda en
+        // un marcador saqueable en su casilla
+        const rolledLoot = rollLoot(JSON.parse(resolved.token.loot || '[]'));
+        db.transaction(() => {
+          db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
+          const table = db
+            .prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?')
+            .get(campaignId);
+          if (table?.combat_turn_id === combatant.id) {
+            db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+          }
+          db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
+          dropLootMarker(resolved.token, rolledLoot);
+        })();
+        detail.remainingHp = 0;
+        detail.defeated = true;
+        body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
+        if (rolledLoot.length) body += ' Deja algo tras de sí.';
+        // Sin enemigos que queden, se acabó el encuentro: vuelta a
+        // movimiento libre sola, sin esperar a que el DM lo pulse
+        if (endCombatIfNoEnemiesLeft(campaignId)) {
+          body += ' Sin enemigos: movimiento libre.';
+        } else {
+          // Si seguía siendo su turno (o nadie tenía turno), que el
+          // siguiente combatiente pueda actuar en vez de quedar bloqueada la mesa
+          ensureTurnStarted(campaignId);
+        }
+      } else {
+        db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
+        detail.remainingHp = newHp;
+        body = `${resolved.name} recibe ${damage} puntos de daño.`;
+      }
+    } else {
+      // Sin ficha en el tracker (p. ej. un aliado): solo se narra
+      body = `${resolved.name} recibe ${damage} puntos de daño.`;
+    }
+  } else {
+    const prevHp = resolved.character.hp_current ?? 0;
+    const newHp = Math.max(-99, prevHp - damage);
+    db.prepare("UPDATE characters SET hp_current = ?, updated_at = datetime('now') WHERE id = ?").run(
+      newHp,
+      resolved.character.id
+    );
+    detail.remainingHp = newHp;
+    detail.maxHp = resolved.character.hp_max ?? null;
+    detail.defeated = newHp <= 0;
+
+    // Salvaciones de muerte: al caer por primera vez, empieza a agonizar
+    // (0/0). Si ya estaba a 0 y recibe más daño, cuenta como un fallo de
+    // salvación (dos y muere directamente serían un crítico; no se modela).
+    const pjCombatant = db
+      .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
+      .get(campaignId, resolved.character.id);
+    if (newHp <= 0) {
+      if (prevHp > 0) {
+        if (pjCombatant) startDeathSaves(pjCombatant.id);
+        body = `${resolved.name} recibe ${damage} puntos de daño y cae inconsciente.`;
+      } else if (pjCombatant) {
+        const failures = Math.min(3, pjCombatant.death_failures + 1);
+        db.prepare('UPDATE combatants SET death_failures = ? WHERE id = ?').run(failures, pjCombatant.id);
+        body =
+          failures >= 3
+            ? `${resolved.name} recibe daño estando inconsciente y muere.`
+            : `${resolved.name} recibe daño estando inconsciente: falla una salvación de muerte (${failures}/3).`;
+      } else {
+        body = `${resolved.name} recibe ${damage} puntos de daño y cae inconsciente.`;
+      }
+    } else {
+      body = `${resolved.name} recibe ${damage} puntos de daño.`;
+    }
+  }
+
+  return { body, detail };
 }
 
 // Valida al atacante de un evento de combate: personaje de la campaña, del
@@ -494,10 +671,10 @@ export function setupSockets(io) {
       // Arranque fresco: tira iniciativa para todos los presentes y resetea
       // sus recursos, aunque ya llevaran un rato en el tracker
       activateTurnMode(campaignId);
-
-      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha comenzado' });
-      io.to(roomName(campaignId)).emit('chat:new', note);
+      // Primero el estado (para que el cartel ya tenga el orden), luego el
+      // aviso: cartel a pantalla + mensaje de chat, igual que el automático
       broadcastCombat(campaignId);
+      notifyCombatStarted(campaignId);
       cb?.({ ok: true });
     });
 
@@ -593,6 +770,102 @@ export function setupSockets(io) {
       cb?.({ ok: true });
     });
 
+    // Acción especial del turno que gasta la acción: Correr (dobla el
+    // movimiento), Esquivar o Destrabarse (posturas informativas). La puede
+    // lanzar el dueño del PJ activo o el DM (controla enemigos/ausentes).
+    socket.on('combat:special-action', ({ campaignId, combatantId, kind }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db.prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+      if (membership.role !== 'dm') {
+        const owns =
+          row.kind === 'pj' &&
+          row.character_id &&
+          db.prepare('SELECT 1 FROM characters WHERE id = ? AND user_id = ?').get(row.character_id, user.id);
+        if (!owns) return cb?.({ error: 'Ese combatiente no es tuyo' });
+      }
+
+      const result = trySpecialAction(campaignId, row.id, kind);
+      if (!result.ok) return cb?.(result);
+
+      const verb = kind === 'correr' ? 'corre' : kind === 'esquivar' ? 'se prepara para esquivar' : 'se destraba';
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: `${row.name} ${verb}.` });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true });
+    });
+
+    // Pone o quita una condición de combate a un combatiente (envenenado,
+    // derribado…). Solo el DM: es su llamada narrativa. Persiste entre turnos.
+    socket.on('combat:toggle-condition', ({ campaignId, combatantId, condition }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM gestiona las condiciones' });
+
+      const result = toggleCondition(campaignId, combatantId, condition);
+      if (!result.ok) return cb?.(result);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, conditions: result.conditions });
+    });
+
+    // Salvación de muerte de un PJ a 0 PG: el cliente tira un d20 (sin
+    // modificador salvo rasgos que la mesa aplique) y el servidor decide según
+    // las reglas 5e. La puede tirar el dueño del PJ o el DM.
+    socket.on('combat:death-save', ({ campaignId, combatantId, roll, d20 }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db
+        .prepare("SELECT * FROM combatants WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
+        .get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+      if (membership.role !== 'dm') {
+        const owns =
+          row.character_id &&
+          db.prepare('SELECT 1 FROM characters WHERE id = ? AND user_id = ?').get(row.character_id, user.id);
+        if (!owns) return cb?.({ error: 'Ese personaje no es tuyo' });
+      }
+
+      const character = db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(row.character_id);
+      if (!character || character.hp_current > 0) {
+        return cb?.({ error: 'Ese personaje no está agonizando' });
+      }
+      if (row.death_failures >= 3) {
+        return cb?.({ error: 'Ese personaje ya ha muerto' });
+      }
+
+      const die = Number.isInteger(d20) ? d20 : Math.round(Number(roll?.total)) || 1;
+      const result = recordDeathSave(campaignId, row.id, die);
+      if (!result.ok) return cb?.(result);
+
+      // Con un 20 natural el personaje recupera 1 PG (vuelve en sí)
+      if (result.outcome === 'revive') {
+        db.prepare("UPDATE characters SET hp_current = 1, updated_at = datetime('now') WHERE id = ?").run(row.character_id);
+      }
+
+      if (roll) {
+        const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+        io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+      }
+
+      const bodies = {
+        revive: `${row.name} saca un 20 natural en su salvación de muerte y vuelve en sí con 1 PG.`,
+        estable: `${row.name} logra su tercera salvación de muerte y se estabiliza.`,
+        exito: `${row.name} supera una salvación de muerte (${result.successes}/3).`,
+        fallo: `${row.name} falla una salvación de muerte (${result.failures}/3).`,
+        muere: `${row.name} falla su tercera salvación de muerte y muere.`,
+      };
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: bodies[result.outcome] });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+
+      const mapId = getActiveMapId(campaignId);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, outcome: result.outcome });
+    });
+
     // Alterna entre modo por turnos (bloquea movimiento/acción fuera de tu
     // turno) y modo libre (sin restricciones), sin vaciar el tracker.
     socket.on('combat:toggle-mode', ({ campaignId }, cb) => {
@@ -613,6 +886,8 @@ export function setupSockets(io) {
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
+      // Cartel de aviso tras difundir el estado, para que ya tenga el orden
+      if (turningOn) io.to(roomName(campaignId)).emit('combat:started');
       cb?.({ ok: true, active: turningOn });
     });
 
@@ -688,69 +963,82 @@ export function setupSockets(io) {
       const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
-      let body;
-      // Detalle para el panel del atacante: HP que queda y máximo del objetivo
-      let detail = { damage, remainingHp: null, maxHp: null, defeated: false };
-      if (resolved.kind === 'marcador') {
-        const combatant = resolved.combatant;
-        if (combatant && Number.isInteger(combatant.hp_current)) {
-          const newHp = combatant.hp_current - damage;
-          detail.maxHp = combatant.hp_max ?? null;
-          if (newHp <= 0) {
-            // Botín (Fase 20): al caer se tira su tabla y lo que toca queda
-            // en un marcador saqueable en su casilla
-            const rolledLoot = rollLoot(JSON.parse(resolved.token.loot || '[]'));
-            db.transaction(() => {
-              db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
-              const table = db
-                .prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?')
-                .get(campaignId);
-              if (table?.combat_turn_id === combatant.id) {
-                db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
-              }
-              db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
-              dropLootMarker(resolved.token, rolledLoot);
-            })();
-            detail.remainingHp = 0;
-            detail.defeated = true;
-            body = `${resolved.name} recibe ${damage} puntos de daño y cae derrotado.`;
-            if (rolledLoot.length) body += ' Deja algo tras de sí.';
-            // Sin enemigos que queden, se acabó el encuentro: vuelta a
-            // movimiento libre sola, sin esperar a que el DM lo pulse
-            if (endCombatIfNoEnemiesLeft(campaignId)) {
-              body += ' Sin enemigos: movimiento libre.';
-            } else {
-              // Si seguía siendo su turno (o nadie tenía turno), que el
-              // siguiente combatiente pueda actuar en vez de quedar bloqueada la mesa
-              ensureTurnStarted(campaignId);
-            }
-          } else {
-            db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
-            detail.remainingHp = newHp;
-            body = `${resolved.name} recibe ${damage} puntos de daño.`;
-          }
-          broadcastCombat(campaignId);
-        } else {
-          // Sin ficha en el tracker (p. ej. un aliado): solo se narra
-          body = `${resolved.name} recibe ${damage} puntos de daño.`;
-        }
-      } else {
-        const newHp = Math.max(-99, (resolved.character.hp_current ?? 0) - damage);
-        db.prepare("UPDATE characters SET hp_current = ?, updated_at = datetime('now') WHERE id = ?").run(
-          newHp,
-          resolved.character.id
-        );
-        detail.remainingHp = newHp;
-        detail.maxHp = resolved.character.hp_max ?? null;
-        detail.defeated = newHp <= 0;
-        broadcastCombat(campaignId);
-        body =
-          newHp <= 0
-            ? `${resolved.name} recibe ${damage} puntos de daño y cae inconsciente.`
-            : `${resolved.name} recibe ${damage} puntos de daño.`;
-      }
+      const { body, detail } = applyCombatDamage(campaignId, resolved, damage);
+      broadcastCombat(campaignId);
 
       // Las barras de vida del tablero se refrescan en toda la mesa
+      const mapId = getActiveMapId(campaignId);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      cb?.({ ok: true, ...detail });
+    });
+
+    // --- Combate en el tablero: enemigo/aliado controlado por el DM ---
+    // Mismo patrón que combate:atacar/combate:danio, pero el atacante es un
+    // marcador (map_tokens), no un personaje: es lo que permite que un
+    // enemigo controlado por el DM ataque de verdad a un PJ (antes solo se
+    // podía "tirar a chat" desde la ficha del monstruo, sin aplicar daño).
+    socket.on('combate:atacar-marcador', ({ campaignId, tokenId, target, weaponName, melee, roll }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM controla a los enemigos' });
+      if (!Number.isFinite(Number(roll?.total))) return cb?.({ error: 'Tirada no válida' });
+      if (JSON.stringify(roll ?? {}).length > 8000) return cb?.({ error: 'Tirada demasiado grande' });
+
+      const resolved = resolveCombatTargetFromMarker(campaignId, tokenId, target, { melee: Boolean(melee) });
+      if (resolved.error) return cb?.({ error: resolved.error });
+
+      // Atacar (tirada + daño) es la acción del turno del combatiente, si
+      // está en el tracker y el modo por turnos está activo (igual que un PJ)
+      const attackerCombatant = db
+        .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+        .get(campaignId, tokenId);
+      if (attackerCombatant) {
+        const spend = trySpendActionForCombatant(campaignId, attackerCombatant.id);
+        if (!spend.ok) return cb?.(spend);
+      }
+
+      const crit = Boolean(roll.crit);
+      const hit = crit || (!roll.fumble && Number(roll.total) >= resolved.ac);
+
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+
+      const attackerToken = db.prepare('SELECT name FROM map_tokens WHERE id = ?').get(tokenId);
+      const attackerName = attackerToken?.name ?? 'El enemigo';
+      const weapon =
+        typeof weaponName === 'string' && weaponName.trim() ? ` con ${weaponName.trim().slice(0, 40)}` : '';
+      const note = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'system',
+        body: hit
+          ? `${attackerName} ataca a ${resolved.name}${weapon}: ¡impacta!${crit ? ' (crítico)' : ''}`
+          : `${attackerName} ataca a ${resolved.name}${weapon}: falla.${roll.fumble ? ' (pifia)' : ''}`,
+      });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total) });
+    });
+
+    socket.on('combate:danio-marcador', ({ campaignId, tokenId, target, roll }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM controla a los enemigos' });
+      if (!Number.isFinite(Number(roll?.total))) return cb?.({ error: 'Tirada no válida' });
+      if (JSON.stringify(roll ?? {}).length > 8000) return cb?.({ error: 'Tirada demasiado grande' });
+
+      // Sin exigencia de adyacencia aquí: la posición se validó al atacar
+      const resolved = resolveCombatTargetFromMarker(campaignId, tokenId, target, { melee: false });
+      if (resolved.error) return cb?.({ error: resolved.error });
+
+      const damage = Math.max(0, Math.min(999, Math.round(Number(roll.total)) || 0));
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+
+      const { body, detail } = applyCombatDamage(campaignId, resolved, damage);
+      broadcastCombat(campaignId);
+
       const mapId = getActiveMapId(campaignId);
       if (mapId) touchMap(mapId);
       notifyCampaignMap(campaignId);

@@ -81,6 +81,11 @@ export function composeBoardFromMap(map, preferredFloorId) {
       // kind crudo (además del type genérico de render): permite distinguir
       // trampa/objeto interactuables de un npc cualquiera
       kind: t.kind,
+      // Enlace al compendio SRD y variante por instancia (Fase 17): datos de
+      // DM, ya filtrados en servidor (undefined para el jugador). Necesarios
+      // para que el DM pueda atacar con este enemigo (ficha de monstruo).
+      monsterIndex: t.monsterIndex ?? null,
+      overrides: t.overrides ?? undefined,
       skill: t.skill ?? null,
       dc: t.dc ?? null,
       hp: Number.isInteger(t.hp) ? t.hp : null,
@@ -119,6 +124,9 @@ export function composeBoardFromMap(map, preferredFloorId) {
     serverTokens,
     characterTokens,
     name: map.name,
+    wallColor: map.wallColor || '#9b8555',
+    // Antorchas automáticas de pared cada N casillas (0 = solo luces a mano)
+    wallLightEvery: map.wallLightEvery ?? 0,
     floorId: floor.id,
     floorName: floor.name,
     // Plantas con algo visible para este usuario: pestañas del tablero
@@ -142,6 +150,14 @@ export function composeBoardFromMap(map, preferredFloorId) {
       // Terreno difícil [col, fila, coste] relativo a la sala: lo pinta el
       // tablero y lo usa el pathfinding de la vista previa de movimiento
       terrainCells: r.terrainCells ?? [],
+      // Paredes por arista [col, fila, lado]: se pintan como muros finos y
+      // cortan el paso en la vista previa de movimiento
+      wallEdges: r.wallEdges ?? [],
+      // Elevación [col, fila, nivel]: plataformas/fosos; subir cuesta
+      // movimiento extra en la vista previa
+      elevationCells: r.elevationCells ?? [],
+      // Fuentes de luz manuales [col, fila] (braseros, velas...)
+      lightCells: r.lightCells ?? [],
       // Solo el DM recibe salas sin revelar: se pintan atenuadas
       revealed: r.revealed !== false,
     })),

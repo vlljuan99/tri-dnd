@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import BestiaryBrowser from '../../../components/BestiaryBrowser.jsx';
@@ -52,10 +52,12 @@ export default function MapEditorPage() {
   const [tokenKind, setTokenKind] = useState('enemigo');
   const [tokenName, setTokenName] = useState('');
   const [terrainCost, setTerrainCost] = useState(2); // coste del pincel de terreno difícil
+  const [elevationLevel, setElevationLevel] = useState(1); // nivel del pincel de elevación
   const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
   const [bosses, setBosses] = useState([]); // personajes kind='boss' del DM
   const [tokenBossId, setTokenBossId] = useState('');
+  const uvttInputRef = useRef(null);
 
   useEffect(() => {
     api('/characters')
@@ -159,6 +161,51 @@ export default function MapEditorPage() {
       ? room.terrainCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
       : [...(room.terrainCells ?? []), [rel[0], rel[1], terrainCost]];
     await editor.patchRoom(room.id, { terrainCells: next });
+  }
+
+  // Pone o quita una pared en la arista pulsada de una casilla de la sala.
+  // Se normaliza la entrada a la representación exacta que ya exista (el
+  // mismo borde puede describirse desde la casilla de al lado) para que
+  // repetir el clic siempre la quite.
+  async function toggleWall(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const entry = [target.x - room.x, target.y - room.y, target.side];
+    // Representación equivalente del mismo borde vista desde la casilla vecina
+    const TWIN = { n: ['s', 0, -1], s: ['n', 0, 1], o: ['e', -1, 0], e: ['o', 1, 0] };
+    const [twinSide, dx, dy] = TWIN[entry[2]];
+    const twin = [entry[0] + dx, entry[1] + dy, twinSide];
+    const walls = room.wallEdges ?? [];
+    const matches = ([c, r, s]) =>
+      (c === entry[0] && r === entry[1] && s === entry[2]) ||
+      (c === twin[0] && r === twin[1] && s === twin[2]);
+    const next = walls.some(matches) ? walls.filter((w) => !matches(w)) : [...walls, entry];
+    await editor.patchRoom(room.id, { wallEdges: next });
+  }
+
+  // Pinta el nivel de elevación en la casilla pulsada: si ya tiene ese mismo
+  // nivel lo quita (vuelve a 0), si no lo pone/sustituye. El nivel 0 no se
+  // guarda (es el suelo base).
+  async function toggleElevation(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const rel = [target.x - room.x, target.y - room.y];
+    const current = (room.elevationCells ?? []).find(([c, r]) => c === rel[0] && r === rel[1]);
+    const rest = (room.elevationCells ?? []).filter(([c, r]) => !(c === rel[0] && r === rel[1]));
+    const next = current && current[2] === elevationLevel ? rest : [...rest, [rel[0], rel[1], elevationLevel]];
+    await editor.patchRoom(room.id, { elevationCells: next });
+  }
+
+  // Pone o quita una fuente de luz manual (brasero, vela...) en la casilla
+  async function toggleLight(target) {
+    const room = allRooms.find((r) => r.id === target.roomId);
+    if (!room) return;
+    const rel = [target.x - room.x, target.y - room.y];
+    const exists = (room.lightCells ?? []).some(([c, r]) => c === rel[0] && r === rel[1]);
+    const next = exists
+      ? room.lightCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
+      : [...(room.lightCells ?? []), rel];
+    await editor.patchRoom(room.id, { lightCells: next });
   }
 
   // Pinta o borra un punto de aparición en la casilla pulsada de la sala
@@ -267,6 +314,28 @@ export default function MapEditorPage() {
               +
             </button>
           </form>
+          <div className="px-3 pb-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => uvttInputRef.current?.click()}
+              className="w-full rounded-sm border border-gold/25 px-2 py-1 text-xs text-gold/90 hover:bg-gold/10 disabled:opacity-40"
+              title="Importa un mapa exportado de Dungeondraft u otro editor: imagen, cuadrícula y muros"
+            >
+              Importar UVTT (.dd2vtt)
+            </button>
+            <input
+              ref={uvttInputRef}
+              type="file"
+              accept=".dd2vtt,.uvtt,.df2vtt,.json,application/json"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) editor.importUvtt(file).catch(() => {});
+                e.target.value = '';
+              }}
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             {maps === null ? (
               <p className="px-1 text-sm text-bone/50">Cargando…</p>
@@ -394,6 +463,15 @@ export default function MapEditorPage() {
                 <button type="button" onClick={() => { setMode('obstacle'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'obstacle')}>
                   Obstáculos
                 </button>
+                <button type="button" onClick={() => { setMode('wall'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'wall')}>
+                  Paredes
+                </button>
+                <button type="button" onClick={() => { setMode('elevation'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'elevation')}>
+                  Elevación
+                </button>
+                <button type="button" onClick={() => { setMode('light'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'light')}>
+                  Luces
+                </button>
                 <button type="button" onClick={() => { setMode('terrain'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'terrain')}>
                   Terreno
                 </button>
@@ -449,6 +527,50 @@ export default function MapEditorPage() {
                   <span className="text-xs italic text-bone/50">
                     clic en una casilla de una sala para poner o quitar un obstáculo (no se puede pisar)
                   </span>
+                )}
+                {mode === 'light' && (
+                  <span className="text-xs italic text-bone/50">
+                    clic en una casilla para poner o quitar una fuente de luz (brasero, vela…); las antorchas
+                    automáticas de pared se configuran en el panel del mapa
+                  </span>
+                )}
+                {mode === 'elevation' && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-bone/60">
+                      Nivel
+                      <select
+                        value={elevationLevel}
+                        onChange={(e) => setElevationLevel(Number(e.target.value))}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                      >
+                        {[-3, -2, -1, 1, 2, 3, 4, 5].map((n) => (
+                          <option key={n} value={n}>
+                            {n > 0 ? `+${n}` : n} ({n * 5} pies)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="text-xs italic text-bone/50">
+                      clic para pintar el nivel (positivo = plataforma, negativo = foso); mismo nivel para quitarlo. Subir cuesta movimiento extra
+                    </span>
+                  </>
+                )}
+                {mode === 'wall' && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-bone/60">
+                      Color
+                      <input
+                        type="color"
+                        value={map.wallColor ?? '#9b8555'}
+                        onChange={(e) => editor.patchMap(map.id, { wallColor: e.target.value }).catch(() => {})}
+                        className="h-7 w-9 cursor-pointer rounded-sm border border-gold/20 bg-night-950 p-0.5"
+                        title="Color de las paredes de este mapa"
+                      />
+                    </label>
+                    <span className="text-xs italic text-bone/50">
+                      clic cerca del borde de una casilla para poner o quitar una pared (bloquea paso y visión)
+                    </span>
+                  </>
                 )}
                 {mode === 'terrain' && (
                   <>
@@ -540,6 +662,7 @@ export default function MapEditorPage() {
                 selection={selection}
                 mode={mode}
                 doorDraft={doorDraft}
+                wallColor={map.wallColor}
                 busy={busy}
                 onSelect={setSelection}
                 onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
@@ -548,6 +671,9 @@ export default function MapEditorPage() {
                 onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
                 onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}
                 onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
+                onWallEdgeClick={(target) => toggleWall(target).catch(() => {})}
+                onElevationCellClick={(target) => toggleElevation(target).catch(() => {})}
+                onLightCellClick={(target) => toggleLight(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
                 onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
               />
@@ -655,6 +781,26 @@ export default function MapEditorPage() {
                 )}
                 <p className="mt-1 text-[0.65rem] text-bone/45">
                   Con niebla fina, los obstáculos y las paredes bloquean la línea de visión.
+                </p>
+              </div>
+
+              <div className="border-t border-gold/15 pt-3">
+                <p className="text-[0.65rem] uppercase tracking-widest text-bone/50">
+                  Antorchas de pared
+                </p>
+                <select
+                  value={map.wallLightEvery ?? 4}
+                  onChange={(e) => editor.patchMap(map.id, { wallLightEvery: Number(e.target.value) }).catch(() => {})}
+                  className="mt-1 w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none"
+                >
+                  <option value={0}>Desactivadas (solo luces a mano)</option>
+                  {[2, 3, 4, 5, 6, 8].map((n) => (
+                    <option key={n} value={n}>Cada {n} casillas</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[0.65rem] text-bone/45">
+                  Las paredes del mapa lucen una antorcha cada N casillas. Con el pincel «Luces» añades
+                  braseros o velas donde quieras.
                 </p>
               </div>
 

@@ -2,10 +2,13 @@ import { Component, useEffect, useMemo, useState } from 'react';
 import { worldToGrid, gridToWorld } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
-import { buildBoardWalkable, findBoardPath, reachableWithin } from '../domain/pathfinding.js';
+import { buildBoardWalkable, findBoardPath, reachableWithin, buildBoardElevation } from '../domain/pathfinding.js';
+import { buildBoardWalls } from '../domain/walls.js';
 import { useRoom } from '../../../store/socket.js';
+import { rollPool } from '../../../lib/dice.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
+import MonsterAttackPanel from './MonsterAttackPanel.jsx';
 import InventoryPanel from './InventoryPanel.jsx';
 import InteractPanel from './InteractPanel.jsx';
 import NotesPanel from './NotesPanel.jsx';
@@ -13,6 +16,8 @@ import GameDrawer from './GameDrawer.jsx';
 import PlayerHud from './PlayerHud.jsx';
 import CharacterQuickView from './CharacterQuickView.jsx';
 import MapControls from './MapControls.jsx';
+import CombatAlert from './CombatAlert.jsx';
+import InitiativeOrder from './InitiativeOrder.jsx';
 
 class CanvasErrorBoundary extends Component {
   constructor(props) {
@@ -82,6 +87,8 @@ export default function TacticalMap({
   const combat = useRoom((s) => s.combat);
   const endTurn = useRoom((s) => s.endTurn);
   const toggleTurnMode = useRoom((s) => s.toggleTurnMode);
+  const specialAction = useRoom((s) => s.specialAction);
+  const deathSave = useRoom((s) => s.deathSave);
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
@@ -101,7 +108,20 @@ export default function TacticalMap({
   // tiene uno en esta partida) confundía de quién era el turno.
   const myToken = ownCharacterId ? map.tokens.find((t) => t.characterId === ownCharacterId) ?? null : null;
   const myCombatant = combat.combatants.find((c) => c.characterId === ownCharacterId) ?? null;
-  const hudCombatant = isDm ? activeCombatant ?? myCombatant : myCombatant;
+
+  // Mapa characterId → dueño, para saber qué filas de iniciativa son "mías"
+  const ownerByCharId = useMemo(() => {
+    const m = {};
+    for (const t of map.tokens) if (t.characterId) m[t.characterId] = t.ownerUserId;
+    return m;
+  }, [map.tokens]);
+
+  // El DM NO adopta el HUD de un PJ activo: la ficha/inventario/turno de un
+  // personaje jugable son de su jugador. En el turno de un PJ, el DM solo ve
+  // una barra mínima con "Saltar turno" (por si el jugador está ausente); en
+  // el de un enemigo/NPC, sí ve su HUD para jugarlo.
+  const dmOnPjTurn = isDm && combat.active && activeCombatant?.kind === 'pj';
+  const hudCombatant = isDm ? (dmOnPjTurn ? null : activeCombatant ?? myCombatant) : myCombatant;
   const hudCharacterId = hudCombatant?.characterId ?? null;
   const hudToken = hudCharacterId
     ? map.tokens.find((t) => t.characterId === hudCharacterId) ?? null
@@ -118,6 +138,8 @@ export default function TacticalMap({
   // Grid de casillas pisables del tablero (con coste por terreno difícil):
   // lo comparten el área verde de alcance y la vista previa de movimiento.
   const boardWalkable = useMemo(() => buildBoardWalkable(map), [map]);
+  const boardWalls = useMemo(() => buildBoardWalls(map), [map]);
+  const boardElevation = useMemo(() => buildBoardElevation(map), [map]);
 
   // Terreno difícil aplanado a coordenadas del tablero, para pintarlo
   const terrainCells = useMemo(() => {
@@ -137,11 +159,13 @@ export default function TacticalMap({
   const reachableCells = useMemo(() => {
     if (!combat.active || !activeCombatant?.speed || !activeToken) return [];
     if (!selectedToken || selectedToken.id !== activeToken.id) return [];
-    const remaining = Math.floor(activeCombatant.speed / 5) - (activeCombatant.movedSquares ?? 0);
+    // Correr (Dash) dobla el presupuesto, así que el área verde también
+    const budget = Math.floor(activeCombatant.speed / 5) * (activeCombatant.dashed ? 2 : 1);
+    const remaining = budget - (activeCombatant.movedSquares ?? 0);
     if (remaining <= 0) return [];
     const origin = worldToGrid(activeToken.position, map.gridSize);
-    return reachableWithin(boardWalkable, origin, remaining);
-  }, [activeCombatant, activeToken, boardWalkable, combat.active, map.gridSize, selectedToken]);
+    return reachableWithin(boardWalkable, origin, remaining, boardWalls, boardElevation);
+  }, [activeCombatant, activeToken, boardWalkable, boardWalls, boardElevation, combat.active, map.gridSize, selectedToken]);
 
   // Movimiento que le queda al token seleccionado, si se puede saber desde
   // aquí (PJ con combatiente en el tracker y modo por turnos activo)
@@ -149,7 +173,9 @@ export default function TacticalMap({
     if (!combat.active || !selectedToken?.characterId) return null;
     const combatant = combat.combatants.find((c) => c.characterId === selectedToken.characterId);
     if (!combatant?.speed) return null;
-    return Math.floor(combatant.speed / 5) - (combatant.movedSquares ?? 0);
+    // Correr (Dash) dobla el presupuesto del turno
+    const budget = Math.floor(combatant.speed / 5) * (combatant.dashed ? 2 : 1);
+    return budget - (combatant.movedSquares ?? 0);
   }, [combat, selectedToken]);
 
   // La vista previa muere con cualquier cambio de selección o del mapa (el
@@ -195,7 +221,7 @@ export default function TacticalMap({
       setMovePreview(null);
       return;
     }
-    const result = findBoardPath(boardWalkable, origin, cell);
+    const result = findBoardPath(boardWalkable, origin, cell, 150, boardWalls, boardElevation);
     if (!result) {
       setMovePreview({ cell, cost: null, path: [], remaining: selectedRemaining });
       return;
@@ -232,8 +258,14 @@ export default function TacticalMap({
       return;
     }
     const clicked = map.tokens.find((t) => t.id === tokenId);
+    // El DM también puede atacar CON un enemigo/aliado que controla (no solo
+    // con su propio PJ): sin ficha de personaje, sus ataques salen de la
+    // ficha de monstruo del SRD (o de un ataque manual si no tiene ninguna).
+    const isMonsterAttacker =
+      isDm && Boolean(selectedToken?.serverId) && (selectedToken?.kind === 'enemigo' || selectedToken?.kind === 'aliado');
     const canAttackFrom =
-      selectedToken?.characterId && canMoveToken({ token: selectedToken, user, role });
+      (Boolean(selectedToken?.characterId) || isMonsterAttacker) &&
+      canMoveToken({ token: selectedToken, user, role });
     const attackable =
       clicked &&
       clicked.id !== selectedToken?.id &&
@@ -269,8 +301,22 @@ export default function TacticalMap({
     setInteractTarget({ type: 'door', target: door });
   }
 
-  function sendCameraCommand(type) {
-    setCameraCommand({ type, issuedAt: Date.now() });
+  function sendCameraCommand(type, extra = {}) {
+    setCameraCommand({ type, ...extra, issuedAt: Date.now() });
+  }
+
+  // Inclinación de la cámara por escalones: de cenital (0°, plano puro) a
+  // 46° (el tablero se ve claramente en escorzo). Con la cámara ortográfica
+  // el suelo se comprime cos(ángulo) en vertical: a 22° era solo un 7% y no
+  // se apreciaba, por eso los pasos suben hasta ángulos que sí se notan.
+  // El índice inicial (26°) debe coincidir con el tilt inicial de TacticalCamera.
+  const TILT_STEPS_DEG = [0, 15, 26, 36, 46];
+  const [tiltIndex, setTiltIndex] = useState(2);
+  function adjustTilt(dir) {
+    const next = Math.min(TILT_STEPS_DEG.length - 1, Math.max(0, tiltIndex + dir));
+    if (next === tiltIndex) return;
+    setTiltIndex(next);
+    sendCameraCommand('tilt', { tilt: (TILT_STEPS_DEG[next] * Math.PI) / 180 });
   }
 
   function toggleMeasureMode() {
@@ -326,6 +372,8 @@ export default function TacticalMap({
           pathCells={movePreview?.path ?? []}
         />
       </CanvasErrorBoundary>
+
+      <CombatAlert />
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
@@ -384,6 +432,10 @@ export default function TacticalMap({
       </div>
 
       <div className="absolute right-3 top-3 z-10 hidden max-h-[42vh] w-56 overflow-y-auto rounded-sm border border-gold/20 bg-night-900/90 p-2 shadow-xl backdrop-blur md:block">
+        {combat.active ? (
+          <InitiativeOrder combat={combat} isDm={isDm} userId={user?.id} ownerByCharId={ownerByCharId} />
+        ) : (
+          <>
         <p className="mb-2 px-1 font-display text-xs uppercase tracking-widest text-gold/80">Tokens</p>
         <div className="space-y-1">
           {map.tokens.map((token) => {
@@ -431,6 +483,8 @@ export default function TacticalMap({
             );
           })}
         </div>
+          </>
+        )}
       </div>
 
       {/* Vista previa de movimiento (estilo Baldur's Gate): coste del camino
@@ -489,8 +543,22 @@ export default function TacticalMap({
         <AttackPanel
           attacker={selectedToken}
           target={combatTarget}
+          highGround={(() => {
+            // Cota alta: atacante en una casilla más elevada que el objetivo
+            // → ventaja en ataques a distancia (regla de altura). La compara
+            // con el mapa de elevación del tablero.
+            const a = worldToGrid(selectedToken.position, map.gridSize);
+            const t = worldToGrid(combatTarget.position, map.gridSize);
+            const aLvl = boardElevation.get(cellKey(a.col, a.row)) ?? 0;
+            const tLvl = boardElevation.get(cellKey(t.col, t.row)) ?? 0;
+            return aLvl > tLvl;
+          })()}
           onClose={() => setCombatTarget(null)}
         />
+      )}
+
+      {combatTarget && !selectedToken?.characterId && selectedToken?.serverId && (
+        <MonsterAttackPanel attacker={selectedToken} target={combatTarget} onClose={() => setCombatTarget(null)} />
       )}
 
       {interactTarget && ownCharacterId && (
@@ -548,6 +616,13 @@ export default function TacticalMap({
           onCenter={() => sendCameraCommand('center')}
           onZoomIn={() => sendCameraCommand('zoom-in')}
           onZoomOut={() => sendCameraCommand('zoom-out')}
+          onRotateLeft={() => sendCameraCommand('rotate', { dir: -1 })}
+          onRotateRight={() => sendCameraCommand('rotate', { dir: 1 })}
+          tiltLabel={TILT_STEPS_DEG[tiltIndex] === 0 ? 'Cenital' : `${TILT_STEPS_DEG[tiltIndex]}°`}
+          canTiltDown={tiltIndex > 0}
+          canTiltUp={tiltIndex < TILT_STEPS_DEG.length - 1}
+          onTiltDown={() => adjustTilt(-1)}
+          onTiltUp={() => adjustTilt(1)}
           onToggleGrid={() => setShowGrid((value) => !value)}
           onClearSelection={() => {
             setSelectedTokenId(null);
@@ -560,27 +635,59 @@ export default function TacticalMap({
         />
 
         <div className="pointer-events-auto flex flex-1 items-end justify-start">
-          <PlayerHud
-            token={hudDisplay}
-            combatant={hudCombatant}
-            combatActive={combat.active}
-            // El botón de terminar turno es de quien de verdad puede pulsarlo:
-            // el dueño del PJ mostrado, o el DM (controla enemigos y, si hace
-            // falta, PJ ausentes)
-            isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
-            onEndTurn={async () => {
-              const resp = await endTurn();
-              if (resp?.error) window.alert(resp.error);
-            }}
-            // Ficha/Inventario son conceptos de personaje: no existen para un
-            // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
-            // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto
-            characterId={hudCharacterId}
-            canSeeNotes={canSeeHudNotes}
-            onOpenSheet={() => setSheetOpen(true)}
-            onOpenInventory={() => setInventoryOpen((v) => !v)}
-            onOpenNotes={() => setNotesOpen((v) => !v)}
-          />
+          {dmOnPjTurn ? (
+            // Turno de un PJ visto por el DM: barra mínima, sin ficha ni
+            // inventario del jugador. Solo "Saltar turno" por si está ausente.
+            <div className="flex w-fit items-center gap-3 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 shadow-xl backdrop-blur">
+              <span className="font-display text-sm tracking-wide text-gold">
+                Turno de <span className="text-bone">{activeCombatant?.name}</span>
+              </span>
+              <button
+                onClick={async () => {
+                  const resp = await endTurn();
+                  if (resp?.error) window.alert(resp.error);
+                }}
+                className="rounded-sm border border-gold/40 px-2.5 py-1 text-xs text-gold hover:bg-gold/10"
+              >
+                Saltar turno
+              </button>
+            </div>
+          ) : (
+            <PlayerHud
+              token={hudDisplay}
+              combatant={hudCombatant}
+              combatActive={combat.active}
+              // El botón de terminar turno es de quien de verdad puede pulsarlo:
+              // el dueño del PJ mostrado, o el DM (controla enemigos y, si hace
+              // falta, PJ ausentes)
+              isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
+              onEndTurn={async () => {
+                const resp = await endTurn();
+                if (resp?.error) window.alert(resp.error);
+              }}
+              // Acciones especiales del turno (gastan la acción): las lanza el
+              // controlador del combatiente activo (su dueño, o el DM con enemigos)
+              onSpecialAction={async (kind) => {
+                const resp = await specialAction(hudCombatant.id, kind);
+                if (resp?.error) window.alert(resp.error);
+              }}
+              // Salvación de muerte de un PJ agonizante mostrado en el HUD
+              onDeathSave={async () => {
+                const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: hudDisplay?.name });
+                const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
+                const resp = await deathSave(hudCombatant.id, roll, natural);
+                if (resp?.error) window.alert(resp.error);
+              }}
+              // Ficha/Inventario son conceptos de personaje: no existen para un
+              // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
+              // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto
+              characterId={hudCharacterId}
+              canSeeNotes={canSeeHudNotes}
+              onOpenSheet={() => setSheetOpen(true)}
+              onOpenInventory={() => setInventoryOpen((v) => !v)}
+              onOpenNotes={() => setNotesOpen((v) => !v)}
+            />
+          )}
         </div>
       </div>
     </section>

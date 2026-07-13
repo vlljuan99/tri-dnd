@@ -6,6 +6,7 @@ import { rollPool } from '../lib/dice.js';
 import SrdPicker from './SrdPicker.jsx';
 import MonsterStatBlock from './MonsterStatBlock.jsx';
 import StatTooltip from './StatTooltip.jsx';
+import { TurnBadges, ConditionChips, DeathSaveDots, ConditionEditor } from '../features/tactical-map/components/CombatantStatus.jsx';
 
 function hpRatioColor(ratio) {
   if (ratio > 0.5) return 'bg-moss';
@@ -38,6 +39,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
   const [form, setForm] = useState({ name: '', initiative: '', hp: '', ac: '', monsterIndex: null });
   const [editingId, setEditingId] = useState(null);
   const [statBlockOf, setStatBlockOf] = useState(null); // { index, name } | null
+  const [conditionsFor, setConditionsFor] = useState(null); // combatantId con el editor de condiciones abierto
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -59,6 +61,13 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
     } catch {
       // Si falla, el jugador puede pedir al DM que introduzca el valor
     }
+  }
+
+  async function rollDeathSave(combatant) {
+    const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: combatant.name });
+    const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
+    const resp = await room.deathSave(combatant.id, roll, natural);
+    if (resp?.error) window.alert(resp.error);
   }
 
   function submitAdd(e) {
@@ -153,6 +162,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                   {c.name}
                 </span>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  <TurnBadges combatant={c} />
                   <StatTooltip stat="iniciativa" className="font-mono text-xs text-bone/50">Ini {c.initiative}</StatTooltip>
                   {mine && !isDm && (
                     <button
@@ -172,6 +182,12 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                           Ficha
                         </button>
                       )}
+                      <button
+                        onClick={() => setConditionsFor(conditionsFor === c.id ? null : c.id)}
+                        className="rounded-sm border border-bone/20 px-1.5 py-0.5 text-xs text-bone/60 hover:text-bone"
+                      >
+                        Condiciones
+                      </button>
                       <button
                         onClick={() => setEditingId(editingId === c.id ? null : c.id)}
                         className="rounded-sm border border-bone/20 px-1.5 py-0.5 text-xs text-bone/60 hover:text-bone"
@@ -204,6 +220,30 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                       </>
                     )}
                   </span>
+                </div>
+              )}
+
+              <ConditionChips conditions={c.conditions} />
+
+              {/* PJ muerto de verdad (3 fallos): estado final */}
+              {c.dead && (
+                <p className="mt-1 text-center font-display text-xs uppercase tracking-widest text-blood">
+                  ☠ Muerto
+                </p>
+              )}
+
+              {/* Salvaciones de muerte de un PJ agonizante */}
+              {c.downed && !c.dead && (
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <DeathSaveDots saves={c.deathSaves} />
+                  {(mine || isDm) && (
+                    <button
+                      onClick={() => rollDeathSave(c)}
+                      className="rounded-sm border border-blood/50 px-1.5 py-0.5 text-[0.65rem] text-blood hover:bg-blood/10"
+                    >
+                      Tirar salvación
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -278,6 +318,9 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                     </StatTooltip>
                   )}
                 </div>
+              )}
+              {isDm && conditionsFor === c.id && (
+                <ConditionEditor conditions={c.conditions} onToggle={(key) => room.toggleCondition(c.id, key)} />
               )}
               {isDm && editingId === c.id && (
                 <EditCombatantForm

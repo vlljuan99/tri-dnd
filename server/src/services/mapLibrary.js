@@ -24,6 +24,15 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     // Terreno difícil ([col, fila, coste]): visible también para el jugador,
     // el coste de moverse no es información oculta
     terrainCells: JSON.parse(row.terrain_cells || '[]'),
+    // Paredes por arista ([col, fila, lado]): geometría visible del mapa,
+    // el jugador las ve igual que ve los obstáculos
+    wallEdges: JSON.parse(row.wall_edges || '[]'),
+    // Elevación por casilla ([col, fila, nivel]): geometría visible; subir de
+    // nivel cuesta movimiento extra (no es información oculta)
+    elevationCells: JSON.parse(row.elevation_cells || '[]'),
+    // Fuentes de luz manuales ([col, fila]): braseros/velas del DM, visibles
+    // para todos (son decorado; la niebla por luz llegará en la fase 12)
+    lightCells: JSON.parse(row.light_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
     // Para el jugador, toda sala que recibe es visible (aunque el DM la
     // tenga sin revelar y solo la vea él por tener ahí su personaje)
@@ -303,15 +312,22 @@ export function spawnRoomEnemies(campaignId, roomIds) {
     insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id, enemy.overrides || '{}');
     added += 1;
   }
+  let startedCombat = false;
   if (added > 0) {
     // Encuentro nuevo: si la mesa había vuelto a modo libre (p. ej. tras
     // caer el último enemigo), un enemigo nuevo reactiva los turnos con
     // iniciativas frescas; si ya estaba en turnos, solo arranca si no había orden
     const table = db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId);
-    if (!table?.combat_active) activateTurnMode(campaignId);
-    else ensureTurnStarted(campaignId);
+    if (!table?.combat_active) {
+      activateTurnMode(campaignId);
+      startedCombat = true;
+    } else {
+      ensureTurnStarted(campaignId);
+    }
   }
-  return added;
+  // startedCombat: el combate estaba en modo libre y estos enemigos lo
+  // reactivaron → quien llama lanza el aviso (cartel + chat).
+  return { added, startedCombat };
 }
 
 function loadMapContents(map) {
@@ -356,6 +372,8 @@ export function serializeFullMap(map, campaignId) {
     gridSize: map.grid_size,
     visionMode: map.vision_mode,
     visionRadius: map.vision_radius,
+    wallColor: map.wall_color,
+    wallLightEvery: map.wall_light_every,
     isActive: getActiveMapId(campaignId) === map.id,
     floors: floors.map((f) => ({
       id: f.id,
@@ -456,6 +474,8 @@ export function serializeMapForPlayer(map, userId) {
     id: map.id,
     name: map.name,
     gridSize: map.grid_size,
+    wallColor: map.wall_color,
+    wallLightEvery: map.wall_light_every,
     floors: floors.map((f) => ({
       id: f.id,
       name: f.name,

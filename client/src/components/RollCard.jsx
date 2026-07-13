@@ -1,4 +1,5 @@
 import { formatModifier } from '../lib/dnd.js';
+import CombatantTooltip from './CombatantTooltip.jsx';
 
 const ADVANTAGE_LABEL = { adv: 'ventaja', dis: 'desventaja' };
 
@@ -37,7 +38,9 @@ export default function RollCard({ roll, authorName, compact = false }) {
           {hasActor ? (
             <>
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="truncate font-display text-base tracking-wide text-gold">{roll.actorName}</span>
+                <CombatantTooltip name={roll.actorName} className="truncate font-display text-base tracking-wide text-gold">
+                  {roll.actorName}
+                </CombatantTooltip>
                 {authorName && <span className="shrink-0 text-xs text-bone/40">{authorName}</span>}
               </div>
               <div className="mt-0.5">{details}</div>

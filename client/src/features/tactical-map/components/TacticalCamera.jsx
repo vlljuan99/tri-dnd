@@ -5,6 +5,14 @@ const DEFAULT_ZOOM = 52;
 const MIN_ZOOM = 24;
 const MAX_ZOOM = 120;
 const CAMERA_HEIGHT = 60;
+// Inclinación inicial de la cámara respecto a la vertical (debe coincidir
+// con el escalón inicial de TILT_STEPS_DEG en TacticalMap, 26°). El comando
+// 'tilt' trae el ángulo elegido en radianes (0 = cenital puro) y 'rotate'
+// gira el tablero en pasos de 45°; la geometría generaliza el caso cenital
+// (tilt 0 y azimut 0 reproducen exactamente la vista y el `up` originales).
+const TILT_INITIAL = (26 * Math.PI) / 180;
+const TILT_MAX = 1.1; // tope de seguridad (~63°)
+const AZIMUTH_STEP = Math.PI / 4; // 45° por pulsación
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -20,6 +28,9 @@ export default function TacticalCamera({ map, command }) {
   const lastPointerRef = useRef(null);
   const lastPinchDistanceRef = useRef(null);
   const targetRef = useRef({ x: map.width / 2, z: map.height / 2 });
+  // Orientación de la vista: inclinada por defecto (se ve el relieve); el DM
+  // gradúa la inclinación por escalones o rota el tablero en pasos de 45°
+  const viewRef = useRef({ tilt: TILT_INITIAL, azimuth: 0 });
   const { gl, invalidate, size, set, camera: previousCamera } = useThree();
   const center = useMemo(() => ({ x: map.width / 2, z: map.height / 2 }), [map.height, map.width]);
 
@@ -36,8 +47,21 @@ export default function TacticalCamera({ map, command }) {
   function applyCamera() {
     const camera = cameraRef.current;
     if (!camera) return;
-    camera.position.set(targetRef.current.x, CAMERA_HEIGHT, targetRef.current.z);
-    camera.up.set(0, 0, -1);
+    // Cámara en órbita sobre el objetivo: azimut φ (rotación del tablero en
+    // pantalla) e inclinación tilt respecto de la vertical. Con φ=0 y tilt=0
+    // se recupera la cenital original (pos (x,H,z), up (0,0,-1)); con tilt>0
+    // la cámara se retira hacia el lado φ y mira en diagonal hacia abajo.
+    const { tilt, azimuth } = viewRef.current;
+    const sinT = Math.sin(tilt);
+    const cosT = Math.cos(tilt);
+    const sinA = Math.sin(azimuth);
+    const cosA = Math.cos(azimuth);
+    camera.position.set(
+      targetRef.current.x + CAMERA_HEIGHT * sinT * sinA,
+      CAMERA_HEIGHT * cosT,
+      targetRef.current.z + CAMERA_HEIGHT * sinT * cosA
+    );
+    camera.up.set(-sinA * cosT, sinT, -cosA * cosT);
     camera.lookAt(targetRef.current.x, 0, targetRef.current.z);
     camera.updateProjectionMatrix();
     invalidate();
@@ -86,6 +110,16 @@ export default function TacticalCamera({ map, command }) {
     }
     if (command.type === 'zoom-in' && cameraRef.current) setZoom(cameraRef.current.zoom * 1.2);
     if (command.type === 'zoom-out' && cameraRef.current) setZoom(cameraRef.current.zoom / 1.2);
+    // Rotar el tablero 45° por pulsación (dir +1 = horario en pantalla)
+    if (command.type === 'rotate') {
+      viewRef.current.azimuth += AZIMUTH_STEP * (command.dir === -1 ? -1 : 1);
+      applyCamera();
+    }
+    // Graduar la inclinación: el comando trae el ángulo en radianes (0 = cenital)
+    if (command.type === 'tilt') {
+      viewRef.current.tilt = Math.min(TILT_MAX, Math.max(0, Number(command.tilt) || 0));
+      applyCamera();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, command]);
 
@@ -124,8 +158,16 @@ export default function TacticalCamera({ map, command }) {
       if (!lastPointerRef.current || !cameraRef.current) return;
       const dx = event.clientX - lastPointerRef.current.x;
       const dy = event.clientY - lastPointerRef.current.y;
-      targetRef.current.x -= dx / cameraRef.current.zoom;
-      targetRef.current.z -= dy / cameraRef.current.zoom;
+      // El arrastre se traduce a mundo según la orientación de la vista: el
+      // eje horizontal de pantalla es (cosφ, −sinφ) en el suelo y el vertical
+      // (sinφ, cosφ) escorzado por cos(tilt), para seguir 1:1 al tablero
+      const { tilt, azimuth } = viewRef.current;
+      const dxW = dx / cameraRef.current.zoom;
+      const dyW = dy / cameraRef.current.zoom / Math.cos(tilt);
+      const sinA = Math.sin(azimuth);
+      const cosA = Math.cos(azimuth);
+      targetRef.current.x -= dxW * cosA + dyW * sinA;
+      targetRef.current.z -= -dxW * sinA + dyW * cosA;
       lastPointerRef.current = { x: event.clientX, y: event.clientY };
       clampTarget();
       applyCamera();

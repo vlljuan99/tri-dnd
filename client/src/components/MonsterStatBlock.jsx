@@ -19,7 +19,7 @@ function abilityMod(score) {
 }
 
 // Notación del SRD tipo "1d6+2" (dados y modificador ya sumados en un string)
-function parseDamageDice(str) {
+export function parseDamageDice(str) {
   const m = /^(\d+)d(\d+)\s*(?:\+\s*(\d+))?$/i.exec(String(str).trim());
   if (!m) return null;
   return { dice: `${m[1]}d${m[2]}`, modifier: m[3] ? Number(m[3]) : 0 };
@@ -29,7 +29,7 @@ function parseDamageDice(str) {
 // explícito: el daño solo aparece narrado en el texto, con el patrón
 // habitual del SRD "10 (2d6 + 3) contundente damage". Lo extraemos como
 // alternativa para poder ofrecer también el botón de tirar el daño.
-function extractDamageFromDesc(desc) {
+export function extractDamageFromDesc(desc) {
   if (!desc) return [];
   const re = /\((\d+d\d+(?:\s*\+\s*\d+)?)\)\s*([a-z]+)?\s*damage/gi;
   const found = [];
@@ -41,7 +41,7 @@ function extractDamageFromDesc(desc) {
   return found;
 }
 
-const DAMAGE_TYPE_ES = {
+export const DAMAGE_TYPE_ES = {
   acid: 'ácido',
   bludgeoning: 'contundente',
   cold: 'frío',

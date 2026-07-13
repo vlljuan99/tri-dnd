@@ -101,6 +101,129 @@ function RoomObstacles({ room, gridSize }) {
   );
 }
 
+// Paredes por arista de la sala: muros gruesos y altos sobre el borde de la
+// casilla. Bloquean paso y visión (validado en servidor); aquí solo se pintan.
+// El color lo elige el DM por mapa (wallColor).
+function RoomWalls({ room, gridSize, wallColor }) {
+  const edges = room.wallEdges ?? [];
+  if (!edges.length) return null;
+  const thickness = gridSize * 0.22;
+  const height = 1;
+  return (
+    <group>
+      {edges.map(([c, r, side]) => {
+        const horizontal = side === 'n' || side === 's';
+        // Punto medio de la arista en coordenadas de mundo
+        const x = (room.col + c + (side === 'e' ? 1 : horizontal ? 0.5 : 0)) * gridSize;
+        const z = (room.row + r + (side === 's' ? 1 : horizontal ? 0 : 0.5)) * gridSize;
+        return (
+          <mesh key={`${c},${r},${side}`} position={[x, height / 2, z]} raycast={() => null}>
+            <boxGeometry
+              args={horizontal ? [gridSize + thickness, height, thickness] : [thickness, height, gridSize + thickness]}
+            />
+            <meshStandardMaterial color={wallColor || '#9b8555'} roughness={0.9} {...dimmedProps(room)} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+// Elevación de la sala: cada casilla con nivel ≠ 0 se pinta como una
+// plataforma (positiva) o un foso (negativo) sobre el suelo plano. Con la luz
+// direccional, las caras superiores quedan más iluminadas que las laterales,
+// dando sensación de relieve incluso en vista cenital. Subir cuesta
+// movimiento extra (validado en servidor); aquí solo se pinta.
+const ELEV_STEP = 0.4; // altura de mundo por nivel (5 pies)
+
+function RoomElevation({ room, gridSize }) {
+  const cells = room.elevationCells ?? [];
+  if (!cells.length) return null;
+  return (
+    <group>
+      {cells.map(([c, r, level]) => {
+        const h = Math.abs(level) * ELEV_STEP;
+        // Positivo: bloque desde el suelo hacia arriba. Negativo: hacia abajo.
+        const yCenter = level > 0 ? h / 2 : -h / 2;
+        const color = level > 0 ? '#7a6446' : '#241c14';
+        return (
+          <mesh
+            key={`${c},${r}`}
+            position={[(room.col + c + 0.5) * gridSize, yCenter, (room.row + r + 0.5) * gridSize]}
+            raycast={() => null}
+          >
+            <boxGeometry args={[gridSize, h, gridSize]} />
+            <meshStandardMaterial color={color} roughness={0.95} {...dimmedProps(room)} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+// Luces del tablero: antorchas automáticas en las paredes (una cada
+// `wallLightEvery` casillas, determinista por posición) más las fuentes
+// manuales del DM (braseros/velas en lightCells). Cada luz es una brasa
+// emisiva; solo las primeras llevan una pointLight REAL, porque el coste de
+// render de three.js crece con cada luz — el resto queda como brasa
+// decorativa. La niebla por niveles de luz llegará en la fase 12.
+const MAX_REAL_LIGHTS = 16;
+
+function collectBoardLights(map) {
+  const lights = [];
+  const every = map.wallLightEvery ?? 0;
+  for (const room of map.rooms ?? []) {
+    if (every > 0) {
+      for (const [c, r, side] of room.wallEdges ?? []) {
+        const x = room.col + c;
+        const y = room.row + r;
+        // Determinista y ~1 por cada `every` casillas a lo largo de un muro
+        // recto: sobre una pared horizontal varía x, sobre una vertical varía y
+        if ((x + y) % every !== 0) continue;
+        const horizontal = side === 'n' || side === 's';
+        // En el punto medio de la arista, un pelín hacia dentro de la casilla
+        const inset = 0.16;
+        const px = horizontal ? x + 0.5 : side === 'o' ? x + inset : x + 1 - inset;
+        const pz = horizontal ? (side === 'n' ? y + inset : y + 1 - inset) : y + 0.5;
+        lights.push({ x: px * map.gridSize, y: 0.62, z: pz * map.gridSize, dim: room.revealed === false });
+      }
+    }
+    for (const [c, r] of room.lightCells ?? []) {
+      lights.push({
+        x: (room.col + c + 0.5) * map.gridSize,
+        y: 0.3,
+        z: (room.row + r + 0.5) * map.gridSize,
+        dim: room.revealed === false,
+      });
+    }
+  }
+  return lights;
+}
+
+function BoardLights({ map }) {
+  const lights = useMemo(() => collectBoardLights(map), [map]);
+  if (!lights.length) return null;
+  return (
+    <group>
+      {lights.map((light, index) => (
+        <group key={`${light.x},${light.z}`} position={[light.x, light.y, light.z]}>
+          <mesh raycast={() => null}>
+            <sphereGeometry args={[map.gridSize * 0.08, 8, 8]} />
+            <meshStandardMaterial
+              color="#ffcf6e"
+              emissive="#ff8c1a"
+              emissiveIntensity={light.dim ? 0.6 : 2.4}
+            />
+          </mesh>
+          {index < MAX_REAL_LIGHTS && !light.dim && (
+            <pointLight color="#ff9a3c" intensity={2.4} distance={map.gridSize * 4.5} decay={1.7} />
+          )}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 // Suelo del tablero compuesto: cada sala visible se pinta por separado, con
 // su imagen (subida o generada en el editor) o con piedra lisa si no tiene.
 export default function MapFloor({ map }) {
@@ -131,8 +254,11 @@ export default function MapFloor({ map }) {
             <RoomPlainFloor room={room} gridSize={map.gridSize} />
           )}
           <RoomObstacles room={room} gridSize={map.gridSize} />
+          <RoomWalls room={room} gridSize={map.gridSize} wallColor={map.wallColor} />
+          <RoomElevation room={room} gridSize={map.gridSize} />
         </group>
       ))}
+      <BoardLights map={map} />
     </group>
   );
 }

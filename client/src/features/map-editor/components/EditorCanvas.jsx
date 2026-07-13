@@ -72,6 +72,7 @@ export default function EditorCanvas({
   selection,
   mode,
   doorDraft,
+  wallColor = '#9b8555',
   busy,
   onSelect,
   onPlaceRoom,
@@ -80,6 +81,9 @@ export default function EditorCanvas({
   onObstacleCellClick,
   onTerrainCellClick,
   onSpawnCellClick,
+  onWallEdgeClick,
+  onElevationCellClick,
+  onLightCellClick,
   onMoveRoom,
   onMoveToken,
 }) {
@@ -105,6 +109,27 @@ export default function EditorCanvas({
       x: Math.floor((e.clientX - rect.left) / cell) + bounds.minX,
       y: Math.floor((e.clientY - rect.top) / cell) + bounds.minY,
     };
+  }
+
+  // Casilla pulsada + lado más cercano al punto del clic ('n'|'e'|'s'|'o'),
+  // para el pincel de paredes: pulsar cerca de un borde alterna la pared de
+  // ese lado de la casilla.
+  function eventEdge(e) {
+    const rect = svgRef.current.getBoundingClientRect();
+    const fx = (e.clientX - rect.left) / cell + bounds.minX;
+    const fy = (e.clientY - rect.top) / cell + bounds.minY;
+    const x = Math.floor(fx);
+    const y = Math.floor(fy);
+    const dLeft = fx - x;
+    const dTop = fy - y;
+    const distances = [
+      ['o', dLeft],
+      ['e', 1 - dLeft],
+      ['n', dTop],
+      ['s', 1 - dTop],
+    ];
+    distances.sort((a, b) => a[1] - b[1]);
+    return { x, y, side: distances[0][0] };
   }
 
   function roomAt(cellPos) {
@@ -165,6 +190,37 @@ export default function EditorCanvas({
           !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
       );
       if (target) onSpawnCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'elevation') {
+      // Como el terreno: se pinta también sobre una casilla ya elevada (para
+      // cambiar o quitar el nivel), por eso no usa roomAt
+      const target = rooms.find(
+        (r) =>
+          cellPos.x >= r.x &&
+          cellPos.x < r.x + r.width &&
+          cellPos.y >= r.y &&
+          cellPos.y < r.y + r.height &&
+          !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
+      );
+      if (target) onElevationCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'light') {
+      // Como el resto de pinceles por casilla: también sobre una ya marcada
+      const target = rooms.find(
+        (r) =>
+          cellPos.x >= r.x &&
+          cellPos.x < r.x + r.width &&
+          cellPos.y >= r.y &&
+          cellPos.y < r.y + r.height &&
+          !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
+      );
+      if (target) onLightCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'wall') {
+      // La pared puede tocar cualquier casilla dentro de la sala, también
+      // las desactivadas (un muro que bordea la roca tallada es legítimo)
+      const edge = eventEdge(e);
+      const target = rooms.find(
+        (r) => edge.x >= r.x && edge.x < r.x + r.width && edge.y >= r.y && edge.y < r.y + r.height
+      );
+      if (target) onWallEdgeClick({ roomId: target.id, x: edge.x, y: edge.y, side: edge.side });
     } else if (!room) {
       onSelect(null);
     }
@@ -241,7 +297,7 @@ export default function EditorCanvas({
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
-            : mode === 'door' || mode === 'obstacle' || mode === 'terrain' || mode === 'spawn'
+            : mode === 'door' || mode === 'obstacle' || mode === 'terrain' || mode === 'spawn' || mode === 'wall' || mode === 'elevation' || mode === 'light'
               ? 'cursor-crosshair'
               : 'cursor-default'
         }
@@ -335,6 +391,71 @@ export default function EditorCanvas({
                   strokeDasharray="3 2"
                 />
               ))}
+              {/* Elevación: tinte (azul foso / cálido plataforma) + número de nivel */}
+              {(room.elevationCells ?? []).map(([c, r, level]) => (
+                <g key={`elev-${c},${r}`} className="pointer-events-none">
+                  <rect
+                    x={pos.left + c * cell + 1}
+                    y={pos.top + r * cell + 1}
+                    width={cell - 2}
+                    height={cell - 2}
+                    fill={level > 0 ? '#c98a3a' : '#3a6ea5'}
+                    fillOpacity={Math.min(0.55, 0.18 + Math.abs(level) * 0.12)}
+                  />
+                  <text
+                    x={pos.left + c * cell + cell / 2}
+                    y={pos.top + r * cell + cell * 0.68}
+                    textAnchor="middle"
+                    fill="#f2ead8"
+                    fontSize={cell * 0.42}
+                    className="select-none font-mono"
+                  >
+                    {level > 0 ? `+${level}` : level}
+                  </text>
+                </g>
+              ))}
+              {/* Fuentes de luz manuales: brasa cálida con halo */}
+              {(room.lightCells ?? []).map(([c, r]) => (
+                <g key={`light-${c},${r}`} className="pointer-events-none">
+                  <circle
+                    cx={pos.left + c * cell + cell / 2}
+                    cy={pos.top + r * cell + cell / 2}
+                    r={cell * 0.3}
+                    fill="#ffb347"
+                    fillOpacity={0.25}
+                  />
+                  <circle
+                    cx={pos.left + c * cell + cell / 2}
+                    cy={pos.top + r * cell + cell / 2}
+                    r={cell * 0.13}
+                    fill="#ffcf6e"
+                    stroke="#b3661a"
+                    strokeWidth={1.5}
+                  />
+                </g>
+              ))}
+              {/* Paredes por arista: trazo grueso sobre el borde de la casilla */}
+              {(room.wallEdges ?? []).map(([c, r, side]) => {
+                const x0 = pos.left + c * cell;
+                const y0 = pos.top + r * cell;
+                const horizontal = side === 'n' || side === 's';
+                const wx1 = side === 'e' ? x0 + cell : x0;
+                const wy1 = side === 's' ? y0 + cell : y0;
+                return (
+                  <line
+                    key={`wall-${c},${r},${side}`}
+                    x1={wx1}
+                    y1={wy1}
+                    x2={horizontal ? wx1 + cell : wx1}
+                    y2={horizontal ? wy1 : wy1 + cell}
+                    stroke={wallColor}
+                    strokeWidth={Math.max(4, cell * 0.22)}
+                    strokeLinecap="round"
+                    opacity={0.95}
+                    className="pointer-events-none"
+                  />
+                );
+              })}
               <rect
                 x={pos.left}
                 y={pos.top}

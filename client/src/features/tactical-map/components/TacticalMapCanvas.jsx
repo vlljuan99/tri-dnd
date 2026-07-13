@@ -88,6 +88,12 @@ export default function TacticalMapCanvas({
 }) {
   const missedHandlerRef = useRef(null);
 
+  // Con antorchas o braseros en el mapa, el ambiente baja para que las pozas
+  // de luz cálida se noten; sin luces, iluminación plana como siempre
+  const hasLights =
+    (map.rooms ?? []).some((room) => room.lightCells?.length) ||
+    ((map.wallLightEvery ?? 0) > 0 && (map.rooms ?? []).some((room) => room.wallEdges?.length));
+
   return (
     <Canvas
       className="h-full w-full"
@@ -97,7 +103,11 @@ export default function TacticalMapCanvas({
       onPointerMissed={(event) => missedHandlerRef.current?.(event)}
     >
       <color attach="background" args={['#14110f']} />
-      <ambientLight intensity={1.25} />
+      {/* Ambiente + una direccional en ángulo: las caras superiores de las
+          plataformas (elevación) y muros reciben más luz que las laterales,
+          dando relieve incluso en vista cenital */}
+      <ambientLight intensity={hasLights ? 0.6 : 0.95} />
+      <directionalLight position={[-6, 12, -4]} intensity={hasLights ? 0.45 : 0.7} />
       <TacticalCamera map={map} command={cameraCommand} />
       <PointerMissedMovement
         measureMode={measureMode}

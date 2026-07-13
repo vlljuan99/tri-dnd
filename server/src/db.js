@@ -561,6 +561,62 @@ const migrations = [
   );
   CREATE INDEX idx_event_links_campaign ON event_links(campaign_id);
   `,
+
+  // v29 — Paredes por arista de casilla (prerrequisito del importador UVTT).
+  // JSON [[col, fila, lado], ...] relativo al origen de la sala, con lado
+  // 'n'|'e'|'s'|'o': una pared fina sobre ese borde de la casilla. Bloquea el
+  // paso (pathfinding) y la línea de visión (niebla fina), validado siempre
+  // en servidor. A diferencia de un obstáculo, la casilla sigue siendo
+  // pisable: solo se cierra ese lado.
+  `
+  ALTER TABLE map_rooms ADD COLUMN wall_edges TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v30 — Color de las paredes por mapa: el DM lo elige con un selector en el
+  // editor y aplica a todas las paredes de ese mapa (tablero 3D y lienzo 2D).
+  // Es solo cosmético, así que también viaja al jugador.
+  `
+  ALTER TABLE maps ADD COLUMN wall_color TEXT NOT NULL DEFAULT '#9b8555';
+  `,
+
+  // v31 — Refino del combate por turnos: más acciones y estados de combatiente.
+  // dashed: acción Correr gastada este turno → dobla el presupuesto de
+  //   movimiento (se resetea al empezar SU turno, como el resto de recursos).
+  // stance: postura tomada con la acción este turno, 'esquivar' | 'destrabarse'
+  //   | NULL — solo informativa/narrativa (la app no autodetecta disparadores),
+  //   también por turno.
+  // conditions: JSON con las condiciones activas (envenenado, derribado…). A
+  //   diferencia de los recursos del turno, PERSISTE entre turnos: la quita el
+  //   DM a mano (o la lógica que la puso).
+  // death_successes/death_failures: salvaciones de muerte de un PJ a 0 PG
+  //   (0..3 cada una). Se ponen a 0 al caer, se limpian al estabilizarse,
+  //   curarse o al terminar el combate (borrado del tracker).
+  `
+  ALTER TABLE combatants ADD COLUMN dashed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN stance TEXT;
+  ALTER TABLE combatants ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE combatants ADD COLUMN death_successes INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN death_failures INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  // v32 — Elevación por casilla: JSON [[col, fila, nivel], ...] relativo al
+  // origen de la sala (mismo patrón que terrain_cells). nivel es un entero de
+  // "escalones" de 5 pies: positivo = plataforma/altura, negativo = foso. Las
+  // casillas sin listar están a nivel 0. Subir cuesta movimiento extra
+  // (pathfinding); es geometría visible, así que también viaja al jugador.
+  `
+  ALTER TABLE map_rooms ADD COLUMN elevation_cells TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v33 — Luces del tablero (visuales, la niebla por niveles de luz queda
+  // para la fase 12). light_cells: JSON [[col, fila]] relativo a la sala,
+  // fuentes de luz puestas a mano por el DM (braseros, velas...).
+  // wall_light_every: cada cuántas casillas brota una antorcha automática en
+  // las paredes del mapa (0 = desactivadas, el DM las pone todas a mano).
+  `
+  ALTER TABLE map_rooms ADD COLUMN light_cells TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE maps ADD COLUMN wall_light_every INTEGER NOT NULL DEFAULT 4;
+  `,
 ];
 
 export function runMigrations() {

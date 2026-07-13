@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../api.js';
+import { parseUvtt, uvttImageBlob } from '../lib/uvtt.js';
 
 // Estado y llamadas a la API del editor de mapas del DM. Tras cada mutación
 // se recarga el mapa completo del servidor: a la escala de un editor de
@@ -92,6 +93,53 @@ export function useMapEditor(campaignId) {
     createMap: (name) =>
       mutate(async () => {
         const { map: created } = await api(base, { method: 'POST', body: { name } });
+        setSelectedMapId(created.id);
+        return created;
+      }),
+
+    // Importa un archivo Universal VTT (.dd2vtt/.uvtt): crea un mapa nuevo
+    // con una sala del tamaño exacto del archivo, sube su imagen (la
+    // cuadrícula viene definida, no hace falta calibrar) y aplica los muros
+    // como paredes por arista.
+    importUvtt: (file) =>
+      mutate(async () => {
+        const parsed = parseUvtt(await file.text());
+        if (parsed.cols > 100 || parsed.rows > 100) {
+          throw new Error(
+            `El mapa UVTT mide ${parsed.cols}×${parsed.rows} casillas y el máximo por sala es 100`
+          );
+        }
+        const name = file.name.replace(/\.[^.]+$/, '') || 'Mapa UVTT';
+        const { map: created } = await api(base, { method: 'POST', body: { name } });
+
+        let floorId = created.floors?.[0]?.id;
+        if (!floorId) {
+          const { floor } = await api(`${base}/${created.id}/plantas`, { method: 'POST', body: {} });
+          floorId = floor.id;
+        }
+        const { room } = await api(`${base}/${created.id}/plantas/${floorId}/salas`, {
+          method: 'POST',
+          body: { name, x: 0, y: 0, width: parsed.cols, height: parsed.rows },
+        });
+
+        const blob = await uvttImageBlob(parsed);
+        const upload = await fetch(`/api${base}/${created.id}/salas/${room.id}/imagen`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': blob.type || 'image/webp' },
+          body: blob,
+          credentials: 'same-origin',
+        });
+        if (!upload.ok) {
+          const data = await upload.json().catch(() => ({}));
+          throw new Error(data.error || 'No se pudo subir la imagen del UVTT');
+        }
+
+        if (parsed.wallEdges.length) {
+          await api(`${base}/${created.id}/salas/${room.id}`, {
+            method: 'PATCH',
+            body: { wallEdges: parsed.wallEdges },
+          });
+        }
         setSelectedMapId(created.id);
         return created;
       }),

@@ -2,8 +2,11 @@
 // casillas pisables de una planta, con coste por casilla (terreno difícil).
 // Entrar en una casilla normal cuesta 1; en una de terreno difícil, su
 // coste. Diagonales al mismo coste que ortogonales (regla simplificada de
-// 5e, la misma Chebyshev que ya usaba el tablero). El cliente replica este
-// algoritmo para la vista previa; la validación de verdad es esta.
+// 5e, la misma Chebyshev que ya usaba el tablero). Subir de nivel (elevación)
+// añade coste extra por paso. El cliente replica este algoritmo para la vista
+// previa; la validación de verdad es esta.
+
+import { wallBlocksStep } from './walls.js';
 
 // Construye el mapa de casillas pisables de un conjunto de salas (filas
 // crudas de map_rooms): clave "x,y" absoluta → coste de entrar. Quedan
@@ -35,6 +38,30 @@ export function buildWalkableGrid(rooms) {
   return walkable;
 }
 
+// Nivel de elevación por casilla absoluta (clave "x,y" → nivel entero). Las
+// casillas sin elevar quedan fuera (se tratan como nivel 0). Si dos salas
+// solapan, gana la más alta (borde de plataforma).
+export function buildElevationMap(rooms) {
+  const elevation = new Map();
+  for (const room of rooms) {
+    for (const [c, r, level] of JSON.parse(room.elevation_cells || '[]')) {
+      const key = `${room.x + c},${room.y + r}`;
+      const lvl = Math.trunc(Number(level) || 0);
+      elevation.set(key, Math.max(elevation.get(key) ?? -Infinity, lvl));
+    }
+  }
+  return elevation;
+}
+
+// Coste extra de un paso por subir de nivel: cada nivel que se sube (5 pies)
+// cuesta 1 casilla más de movimiento (escalar); bajar no cuesta extra.
+function climbCost(elevation, fromKey, toKey) {
+  if (!elevation || elevation.size === 0) return 0;
+  const from = elevation.get(fromKey) ?? 0;
+  const to = elevation.get(toKey) ?? 0;
+  return Math.max(0, to - from);
+}
+
 const NEIGHBORS = [
   [-1, -1], [0, -1], [1, -1],
   [-1, 0], [1, 0],
@@ -44,8 +71,11 @@ const NEIGHBORS = [
 // Coste del camino más barato entre dos casillas absolutas sobre el grid
 // pisable. Devuelve un entero o null si no hay camino (o excede maxCost).
 // Dijkstra con cola de cubos por coste entero: los costes son pequeños
-// (1..10) y los tableros modestos, sobra rendimiento.
-export function findPathCost(walkable, from, to, maxCost = 100) {
+// (1..10) y los tableros modestos, sobra rendimiento. `walls` (opcional) es
+// el Set de buildWallSet: las aristas con pared cortan el paso entre
+// casillas vecinas aunque ambas sean pisables. `elevation` (opcional) es el
+// Map de buildElevationMap: subir de nivel añade coste al paso.
+export function findPathCost(walkable, from, to, maxCost = 100, walls = null, elevation = null) {
   const fromKey = `${from.x},${from.y}`;
   const toKey = `${to.x},${to.y}`;
   if (fromKey === toKey) return 0;
@@ -66,7 +96,8 @@ export function findPathCost(walkable, from, to, maxCost = 100) {
         const nKey = `${x + dx},${y + dy}`;
         const enterCost = walkable.get(nKey);
         if (enterCost === undefined) continue;
-        const next = cost + enterCost;
+        if (wallBlocksStep(walls, x, y, x + dx, y + dy)) continue;
+        const next = cost + enterCost + climbCost(elevation, key, nKey);
         if (next > maxCost) continue;
         if (next < (dist.get(nKey) ?? Infinity)) {
           dist.set(nKey, next);

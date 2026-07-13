@@ -24,6 +24,13 @@ export default function MapControls({
   onCenter,
   onZoomIn,
   onZoomOut,
+  onRotateLeft,
+  onRotateRight,
+  tiltLabel,
+  canTiltDown,
+  canTiltUp,
+  onTiltDown,
+  onTiltUp,
   onToggleGrid,
   onClearSelection,
   onNudgeToken,
@@ -32,51 +39,100 @@ export default function MapControls({
 }) {
   return (
     <div className="pointer-events-auto flex w-[45%] flex-col items-start gap-2">
-      <div className="grid grid-cols-3 gap-1 rounded-sm border border-gold/25 bg-night-900/95 p-1.5 shadow-xl backdrop-blur">
-        <span />
-        <button
-          type="button"
-          aria-label="Mover token al norte"
-          disabled={!selectedToken}
-          onClick={() => onNudgeToken(0, -1)}
-          className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-        >
-          N
-        </button>
-        <span />
-        <button
-          type="button"
-          aria-label="Mover token al oeste"
-          disabled={!selectedToken}
-          onClick={() => onNudgeToken(-1, 0)}
-          className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-        >
-          O
-        </button>
-        <button
-          type="button"
-          aria-label="Mover token al sur"
-          disabled={!selectedToken}
-          onClick={() => onNudgeToken(0, 1)}
-          className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-        >
-          S
-        </button>
-        <button
-          type="button"
-          aria-label="Mover token al este"
-          disabled={!selectedToken}
-          onClick={() => onNudgeToken(1, 0)}
-          className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-        >
-          E
-        </button>
+      {/* Pad del TOKEN seleccionado (mover casilla a casilla) */}
+      <div className="rounded-sm border border-gold/25 bg-night-900/95 p-1.5 shadow-xl backdrop-blur">
+        <p className="pb-1 text-center text-[0.6rem] uppercase tracking-widest text-bone/40">Token</p>
+        <div className="grid grid-cols-3 gap-1">
+          <span />
+          <button
+            type="button"
+            aria-label="Mover token al norte"
+            disabled={!selectedToken}
+            onClick={() => onNudgeToken(0, -1)}
+            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
+          >
+            N
+          </button>
+          <span />
+          <button
+            type="button"
+            aria-label="Mover token al oeste"
+            disabled={!selectedToken}
+            onClick={() => onNudgeToken(-1, 0)}
+            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
+          >
+            O
+          </button>
+          <button
+            type="button"
+            aria-label="Mover token al sur"
+            disabled={!selectedToken}
+            onClick={() => onNudgeToken(0, 1)}
+            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
+          >
+            S
+          </button>
+          <button
+            type="button"
+            aria-label="Mover token al este"
+            disabled={!selectedToken}
+            onClick={() => onNudgeToken(1, 0)}
+            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
+          >
+            E
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-2">
+        {/* Cámara: rotar el tablero, cenital/inclinada, zoom y centrar */}
         <div className={BOX}>
-          <button type="button" aria-label="Centrar mapa" onClick={onCenter} className={BTN_IDLE}>
-            Centrar
+          <span className="self-center pl-1 pr-0.5 text-[0.6rem] uppercase tracking-widest text-bone/40">
+            Cámara
+          </span>
+          <button
+            type="button"
+            aria-label="Rotar el tablero a la izquierda"
+            title="Rotar 45° a la izquierda"
+            onClick={onRotateLeft}
+            className={`${BTN_IDLE} min-w-9 justify-center`}
+          >
+            ⟲
+          </button>
+          <button
+            type="button"
+            aria-label="Rotar el tablero a la derecha"
+            title="Rotar 45° a la derecha"
+            onClick={onRotateRight}
+            className={`${BTN_IDLE} min-w-9 justify-center`}
+          >
+            ⟳
+          </button>
+          <button
+            type="button"
+            aria-label="Menos inclinación (hacia cenital)"
+            title="Menos inclinación: hacia la vista cenital (plano puro)"
+            disabled={!canTiltDown}
+            onClick={onTiltDown}
+            className={`${BTN_IDLE} min-w-9 justify-center`}
+          >
+            ▽
+          </button>
+          <span
+            className="inline-flex min-h-9 min-w-14 items-center justify-center rounded-sm border border-bone/10 px-1.5 font-mono text-xs text-bone/70"
+            title="Inclinación de la cámara: Cenital = plano puro; a más grados, más relieve y escorzo"
+          >
+            {tiltLabel}
+          </span>
+          <button
+            type="button"
+            aria-label="Más inclinación"
+            title="Más inclinación: el tablero se ve más en escorzo y el relieve destaca"
+            disabled={!canTiltUp}
+            onClick={onTiltUp}
+            className={`${BTN_IDLE} min-w-9 justify-center`}
+          >
+            △
           </button>
           <button type="button" aria-label="Acercar" onClick={onZoomIn} className={`${BTN_IDLE} min-w-9 justify-center`}>
             +
@@ -84,6 +140,13 @@ export default function MapControls({
           <button type="button" aria-label="Alejar" onClick={onZoomOut} className={`${BTN_IDLE} min-w-9 justify-center`}>
             -
           </button>
+          <button type="button" aria-label="Centrar mapa" onClick={onCenter} className={BTN_IDLE}>
+            Centrar
+          </button>
+        </div>
+
+        {/* Herramientas de mesa */}
+        <div className={BOX}>
           <button
             type="button"
             aria-label={showGrid ? 'Ocultar rejilla' : 'Mostrar rejilla'}

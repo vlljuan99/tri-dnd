@@ -11,11 +11,12 @@ import {
   spawnRoomEnemies,
   touchMap,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap, notifyCombat } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyCombat, notifyCombatStarted } from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
 import { lootMarkerInto } from '../services/loot.js';
-import { buildWalkableGrid, findPathCost } from '../services/pathfinding.js';
+import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/pathfinding.js';
+import { buildWallSet } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 import { serializeEvent } from './events.js';
 
@@ -540,7 +541,14 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     const traversable = db
       .prepare('SELECT * FROM map_rooms WHERE floor_id = ? AND (revealed = 1 OR id = ?)')
       .all(currentRoom.floor_id, token.room_id);
-    const cost = findPathCost(buildWalkableGrid(traversable), { x: token.x, y: token.y }, { x, y }, 150);
+    const cost = findPathCost(
+      buildWalkableGrid(traversable),
+      { x: token.x, y: token.y },
+      { x, y },
+      150,
+      buildWallSet(traversable),
+      buildElevationMap(traversable)
+    );
     if (cost === null) {
       return res.status(400).json({ error: 'No hay camino hasta esa casilla' });
     }
@@ -592,7 +600,9 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
   if (newlyRevealed.length) {
-    if (spawnRoomEnemies(req.params.id, newlyRevealed) > 0) notifyCombat(req.params.id);
+    const spawned = spawnRoomEnemies(req.params.id, newlyRevealed);
+    if (spawned.added > 0) notifyCombat(req.params.id);
+    if (spawned.startedCombat) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }
   res.json({ ok: true });
@@ -687,7 +697,9 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
   if (newlyRevealed.length) {
-    if (spawnRoomEnemies(req.params.id, newlyRevealed) > 0) notifyCombat(req.params.id);
+    const spawned = spawnRoomEnemies(req.params.id, newlyRevealed);
+    if (spawned.added > 0) notifyCombat(req.params.id);
+    if (spawned.startedCombat) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }
 

@@ -1,13 +1,40 @@
 import { useEffect, useRef, useState } from 'react';
 import RollCard from '../../../components/RollCard.jsx';
 import InitiativeTracker from '../../../components/InitiativeTracker.jsx';
+import CombatantTooltip from '../../../components/CombatantTooltip.jsx';
 import { useRoom } from '../../../store/socket.js';
+
+const ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g;
+
+/** Texto de una narración del sistema, con el nombre de cada combatiente
+ * mencionado envuelto en un bocadillo de estado rápido (PG, condiciones,
+ * salvaciones de muerte) — así no hace falta abrir la pestaña Iniciativa
+ * para saber cómo sigue alguien tras leer "Kael recibe daño y cae...". */
+function NarratedText({ text }) {
+  const combatants = useRoom((s) => s.combat.combatants);
+  const names = [...new Set(combatants.map((c) => c.name).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (names.length === 0) return text;
+
+  const pattern = new RegExp(`(${names.map((n) => n.replace(ESCAPE_REGEXP, '\\$&')).join('|')})`, 'g');
+  return text
+    .split(pattern)
+    .filter((part) => part !== '')
+    .map((part, i) =>
+      names.includes(part) ? (
+        <CombatantTooltip key={i} name={part}>
+          {part}
+        </CombatantTooltip>
+      ) : (
+        <span key={i}>{part}</span>
+      )
+    );
+}
 
 function Message({ message, selfId }) {
   if (message.type === 'system') {
     return (
       <p className="py-1 text-center font-display text-xs uppercase tracking-widest text-gold/60">
-        — {message.body} —
+        — <NarratedText text={message.body} /> —
       </p>
     );
   }

@@ -20,9 +20,10 @@ import {
   serializeFullMap,
   spawnRoomEnemies,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap, notifyIfActive, notifyCombat } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyIfActive, notifyCombat, notifyCombatStarted } from '../services/liveMap.js';
 import { trySpendEnemyMovement } from '../services/turnEconomy.js';
-import { buildWalkableGrid, findPathCost } from '../services/pathfinding.js';
+import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/pathfinding.js';
+import { buildWallSet, isValidWallEdges } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 
 // Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
@@ -138,7 +139,7 @@ mapsRouter.patch('/:mapId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
 
-  const { name, gridSize, visionMode, visionRadius } = req.body ?? {};
+  const { name, gridSize, visionMode, visionRadius, wallColor, wallLightEvery } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El mapa necesita un nombre' });
   }
@@ -151,16 +152,27 @@ mapsRouter.patch('/:mapId', (req, res) => {
   if (visionRadius !== undefined && (!Number.isInteger(visionRadius) || visionRadius < 1 || visionRadius > 30)) {
     return res.status(400).json({ error: 'El radio de visión debe ser un entero entre 1 y 30 casillas' });
   }
+  // Color hex #rgb o #rrggbb (lo que emite <input type="color">)
+  if (wallColor !== undefined && !(typeof wallColor === 'string' && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(wallColor))) {
+    return res.status(400).json({ error: 'Color de pared no válido' });
+  }
+  // Antorchas automáticas de pared: cada N casillas (0 = desactivadas)
+  if (wallLightEvery !== undefined && !(Number.isInteger(wallLightEvery) && wallLightEvery >= 0 && wallLightEvery <= 20)) {
+    return res.status(400).json({ error: 'Frecuencia de luces de pared no válida' });
+  }
 
   db.prepare(
     `UPDATE maps SET name = COALESCE(?, name), grid_size = COALESCE(?, grid_size),
        vision_mode = COALESCE(?, vision_mode), vision_radius = COALESCE(?, vision_radius),
+       wall_color = COALESCE(?, wall_color), wall_light_every = COALESCE(?, wall_light_every),
        updated_at = datetime('now') WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : null,
     gridSize ?? null,
     visionMode ?? null,
     visionRadius ?? null,
+    wallColor ?? null,
+    wallLightEvery ?? null,
     map.id
   );
   notifyIfActive(map.campaign_id, map.id);
@@ -282,7 +294,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, terrainCells, notes, revealed } = req.body ?? {};
+  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, terrainCells, wallEdges, elevationCells, lightCells, notes, revealed } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'La sala necesita un nombre' });
   }
@@ -318,23 +330,48 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   ) {
     return res.status(400).json({ error: 'Lista de terreno no válida' });
   }
+  if (wallEdges !== undefined && !isValidWallEdges(wallEdges)) {
+    return res.status(400).json({ error: 'Lista de paredes no válida' });
+  }
+  // Elevación: [col, fila, nivel] con nivel entero no nulo entre -10 y 10
+  if (
+    elevationCells !== undefined &&
+    !(
+      Array.isArray(elevationCells) &&
+      elevationCells.length <= 2500 &&
+      elevationCells.every(
+        ([c, r, level]) =>
+          Number.isInteger(c) && Number.isInteger(r) && c >= 0 && r >= 0 &&
+          Number.isInteger(level) && level !== 0 && level >= -10 && level <= 10
+      )
+    )
+  ) {
+    return res.status(400).json({ error: 'Lista de elevación no válida' });
+  }
+  // Fuentes de luz manuales: pares [col, fila] como el resto de capas
+  if (lightCells !== undefined && !isValidDisabledCells(lightCells)) {
+    return res.status(400).json({ error: 'Lista de luces no válida' });
+  }
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json({ error: 'Las notas deben ser texto' });
   }
 
   const nextWidth = width ?? room.width;
   const nextHeight = height ?? room.height;
-  // Al encoger la sala, las casillas desactivadas, obstáculos o puntos de
-  // aparición fuera de los nuevos límites se descartan
+  // Al encoger la sala, las casillas desactivadas, obstáculos, puntos de
+  // aparición o paredes fuera de los nuevos límites se descartan
   const insideRoom = ([col, row]) => col < nextWidth && row < nextHeight;
   const nextDisabled = (disabledCells ?? JSON.parse(room.disabled_cells || '[]')).filter(insideRoom);
   const nextObstacles = (obstacleCells ?? JSON.parse(room.obstacle_cells || '[]')).filter(insideRoom);
   const nextSpawns = (spawnCells ?? JSON.parse(room.spawn_cells || '[]')).filter(insideRoom);
   const nextTerrain = (terrainCells ?? JSON.parse(room.terrain_cells || '[]')).filter(insideRoom);
+  const nextWalls = (wallEdges ?? JSON.parse(room.wall_edges || '[]')).filter(insideRoom);
+  const nextElevation = (elevationCells ?? JSON.parse(room.elevation_cells || '[]')).filter(insideRoom);
+  const nextLights = (lightCells ?? JSON.parse(room.light_cells || '[]')).filter(insideRoom);
 
   db.prepare(
     `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, wall_edges = ?, elevation_cells = ?, light_cells = ?, notes = ?, revealed = ? WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : room.name,
     x ?? room.x,
@@ -345,6 +382,9 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     JSON.stringify(nextObstacles),
     JSON.stringify(nextSpawns),
     JSON.stringify(nextTerrain),
+    JSON.stringify(nextWalls),
+    JSON.stringify(nextElevation),
+    JSON.stringify(nextLights),
     notes ?? room.notes,
     revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
     room.id
@@ -355,7 +395,9 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   // y saltan sus eventos de revelado (Fase 19)
   const becameRevealed = revealed !== undefined && Boolean(revealed) && !room.revealed;
   if (becameRevealed && getActiveMapId(req.params.campaignId) === map.id) {
-    if (spawnRoomEnemies(map.campaign_id, [room.id]) > 0) notifyCombat(map.campaign_id);
+    const spawned = spawnRoomEnemies(map.campaign_id, [room.id]);
+    if (spawned.added > 0) notifyCombat(map.campaign_id);
+    if (spawned.startedCombat) notifyCombatStarted(map.campaign_id);
     fireRevealEvents(map.campaign_id, [room.id]);
   }
 
@@ -592,7 +634,9 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       buildWalkableGrid(floorRooms),
       { x: token.x, y: token.y },
       { x: nextX, y: nextY },
-      150
+      150,
+      buildWallSet(floorRooms),
+      buildElevationMap(floorRooms)
     );
     const distance = pathCost ?? Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
     const spend = trySpendEnemyMovement(req.params.campaignId, token.id, distance);

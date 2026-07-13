@@ -73,9 +73,12 @@ export function orderedCombatants(campaignId) {
 }
 
 export function resetCombatantResources(combatantId) {
-  db.prepare('UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0 WHERE id = ?').run(
-    combatantId
-  );
+  // Correr (dashed) y la postura (stance) son recursos del turno: se olvidan
+  // al empezar el siguiente, igual que el movimiento/acción. Las condiciones
+  // y las salvaciones de muerte NO se tocan aquí (persisten entre turnos).
+  db.prepare(
+    'UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0, dashed = 0, stance = NULL WHERE id = ?'
+  ).run(combatantId);
 }
 
 // Marca a un combatiente como el que actúa ahora y resetea sus recursos del
@@ -118,7 +121,7 @@ export function activateTurnMode(campaignId) {
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
-     reaction_used_round = NULL WHERE campaign_id = ?`
+     dashed = 0, stance = NULL, reaction_used_round = NULL WHERE campaign_id = ?`
   ).run(campaignId);
   for (const c of orderedCombatants(campaignId)) {
     db.prepare('UPDATE combatants SET initiative = ? WHERE id = ?').run(rollInitiativeValue(c), c.id);
@@ -163,13 +166,29 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
   return true;
 }
 
+// ¿Está este personaje a 0 PG o menos? Inconsciente (agonizando o ya
+// muerto): en 5e no puede moverse ni actuar en ningún caso, tenga o no el
+// modo por turnos activo. Se comprueba siempre sobre characters.hp_current,
+// la fuente de verdad (combatants.hp_current no se mantiene sincronizado
+// para PJs).
+function isPjDowned(characterId) {
+  if (!characterId) return false;
+  const character = db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(characterId);
+  return Boolean(character) && Number.isInteger(character.hp_current) && character.hp_current <= 0;
+}
+
 // ¿Puede este personaje moverse/actuar ahora mismo?
+// - Inconsciente (0 PG o menos, agonizando o muerto): nunca, ni en modo libre.
 // - Modo libre (combat_active = 0): siempre sí, sin gasto de recursos.
 // - Modo por turnos pero el personaje no está en el tracker todavía: se
 //   permite igualmente (no debería pasar tras ensureCombatantForCharacter,
 //   pero un tracker vaciado a mano por el DM no debe dejar a nadie bloqueado).
 // - Modo por turnos y el personaje sí está en el tracker: solo en su turno.
 function checkTurn(campaignId, characterId) {
+  if (isPjDowned(characterId)) {
+    return { ok: false, error: 'Estás inconsciente y no puedes moverte ni actuar', gated: true, combatant: null };
+  }
+
   const table = db
     .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
@@ -195,7 +214,8 @@ export function trySpendMovement(campaignId, characterId, squares) {
   if (!check.gated || squares <= 0) return { ok: true };
 
   const character = db.prepare('SELECT speed FROM characters WHERE id = ?').get(characterId);
-  const budget = Math.floor((character?.speed ?? 30) / 5);
+  // Correr (Dash) dobla el presupuesto de movimiento del turno
+  const budget = Math.floor((character?.speed ?? 30) / 5) * (check.combatant.dashed ? 2 : 1);
   const nextTotal = check.combatant.moved_squares + squares;
   if (nextTotal > budget) {
     const left = Math.max(0, budget - check.combatant.moved_squares);
@@ -243,13 +263,156 @@ export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
   const speedFeet = Number.isInteger(overrides.speed)
     ? overrides.speed
     : monsterSpeedFeet(combatant.monster_index) ?? 30;
-  const budget = Math.floor(speedFeet / 5);
+  // Correr (Dash) dobla el presupuesto también para un enemigo del DM
+  const budget = Math.floor(speedFeet / 5) * (combatant.dashed ? 2 : 1);
   const nextTotal = combatant.moved_squares + squares;
   if (nextTotal > budget) {
     const left = Math.max(0, budget - combatant.moved_squares);
     return { ok: false, error: `Sin movimiento suficiente (le quedan ${left} casillas este turno)` };
   }
   db.prepare('UPDATE combatants SET moved_squares = ? WHERE id = ?').run(nextTotal, combatant.id);
+  return { ok: true };
+}
+
+// Condiciones de combate reconocidas (5e básicas + inconsciente/muerto). El
+// cliente muestra su icono/etiqueta; la app no aplica ningún efecto mecánico
+// automático (la mesa las narra), solo las lleva como estado del combatiente.
+export const COMBAT_CONDITIONS = [
+  'envenenado',
+  'derribado',
+  'agarrado',
+  'aturdido',
+  'cegado',
+  'ensordecido',
+  'asustado',
+  'hechizado',
+  'paralizado',
+  'petrificado',
+  'apresado',
+  'invisible',
+  'inconsciente',
+];
+
+// Acciones especiales del turno que gastan la acción (Correr, Esquivar,
+// Destrabarse). Solo el combatiente activo, y solo si aún no ha actuado.
+// - 'correr' dobla el presupuesto de movimiento (marca dashed).
+// - 'esquivar'/'destrabarse' fijan la postura (informativa; el DM narra su
+//   efecto sobre reacciones y ataques de oportunidad, sin autodetección).
+export function trySpecialAction(campaignId, combatantId, kind) {
+  const valid = { correr: 'dash', esquivar: 'esquivar', destrabarse: 'destrabarse' };
+  if (!valid[kind]) return { ok: false, error: 'Acción no válida' };
+  const table = db
+    .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
+  if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es tu turno' };
+  const row = db
+    .prepare('SELECT action_used, kind, character_id FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  if (row.kind === 'pj' && isPjDowned(row.character_id)) {
+    return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
+  if (row.action_used) return { ok: false, error: 'Ya has usado tu acción este turno' };
+
+  if (kind === 'correr') {
+    db.prepare('UPDATE combatants SET action_used = 1, dashed = 1 WHERE id = ?').run(combatantId);
+  } else {
+    db.prepare('UPDATE combatants SET action_used = 1, stance = ? WHERE id = ?').run(kind, combatantId);
+  }
+  return { ok: true };
+}
+
+// Alterna una condición del combatiente (la pone si no está, la quita si sí).
+// Persiste entre turnos: la gestiona el DM a mano. Devuelve la lista resultante.
+export function toggleCondition(campaignId, combatantId, condition) {
+  if (!COMBAT_CONDITIONS.includes(condition)) return { ok: false, error: 'Condición no válida' };
+  const row = db
+    .prepare('SELECT conditions FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  let list;
+  try {
+    list = JSON.parse(row.conditions || '[]');
+  } catch {
+    list = [];
+  }
+  const has = list.includes(condition);
+  const next = has ? list.filter((c) => c !== condition) : [...list, condition];
+  db.prepare('UPDATE combatants SET conditions = ? WHERE id = ?').run(JSON.stringify(next), combatantId);
+  return { ok: true, conditions: next, added: !has };
+}
+
+// Pone a un combatiente PJ "agonizando": 0 salvaciones de muerte pendientes.
+// Se llama al caer a 0 PG. Idempotente si ya estaba agonizando con marcas.
+export function startDeathSaves(combatantId) {
+  db.prepare('UPDATE combatants SET death_successes = 0, death_failures = 0 WHERE id = ?').run(combatantId);
+}
+
+export function resetDeathSaves(combatantId) {
+  startDeathSaves(combatantId);
+}
+
+// Registra una salvación de muerte a partir de un d20 ya tirado por el cliente
+// (mismo patrón que atacar: el cliente tira, el servidor decide). Aplica las
+// reglas 5e: 20 natural → recupera 1 PG; 1 natural → 2 fallos; ≥10 → éxito;
+// <10 → fallo. Con 3 éxitos se estabiliza; con 3 fallos, muere. Devuelve el
+// estado y un texto para narrar. No toca los PG salvo el 20 natural (lo hace
+// quien llama, que tiene el characterId).
+export function recordDeathSave(campaignId, combatantId, d20) {
+  const row = db
+    .prepare("SELECT * FROM combatants WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
+    .get(combatantId, campaignId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  const natural = Math.max(1, Math.min(20, Math.round(Number(d20)) || 1));
+
+  let successes = row.death_successes;
+  let failures = row.death_failures;
+  let outcome;
+
+  if (natural === 20) {
+    successes = 0;
+    failures = 0;
+    outcome = 'revive'; // recupera 1 PG (lo aplica el llamador sobre la ficha)
+  } else if (natural === 1) {
+    failures = Math.min(3, failures + 2);
+    outcome = failures >= 3 ? 'muere' : 'fallo';
+  } else if (natural >= 10) {
+    successes = Math.min(3, successes + 1);
+    outcome = successes >= 3 ? 'estable' : 'exito';
+  } else {
+    failures = Math.min(3, failures + 1);
+    outcome = failures >= 3 ? 'muere' : 'fallo';
+  }
+
+  if (outcome === 'estable') {
+    successes = 0;
+    failures = 0;
+  }
+  db.prepare('UPDATE combatants SET death_successes = ?, death_failures = ? WHERE id = ?').run(
+    successes,
+    failures,
+    combatantId
+  );
+  return { ok: true, outcome, successes, failures, natural, characterId: row.character_id };
+}
+
+// Gasta la acción del turno de un combatiente por su id directo (a
+// diferencia de trySpendAction, que solo vale para un PJ por characterId):
+// usado por el ataque de un enemigo/aliado controlado por el DM. Sin modo
+// por turnos, o si el combatiente no está en el tracker, no hay economía
+// que aplicar (se deja actuar libre, mismo criterio que el resto de casos
+// "no bloqueados" de este módulo).
+export function trySpendActionForCombatant(campaignId, combatantId) {
+  const table = db
+    .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active) return { ok: true };
+  if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es el turno de este combatiente' };
+  const row = db.prepare('SELECT action_used FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+  if (!row) return { ok: true };
+  if (row.action_used) return { ok: false, error: 'Ya se ha usado la acción de este combatiente este turno' };
+  db.prepare('UPDATE combatants SET action_used = 1 WHERE id = ?').run(combatantId);
   return { ok: true };
 }
 
@@ -262,8 +425,11 @@ export function tryUseBonusAction(campaignId, combatantId) {
     .get(campaignId);
   if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
   if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es tu turno' };
-  const row = db.prepare('SELECT bonus_used FROM combatants WHERE id = ?').get(combatantId);
+  const row = db.prepare('SELECT bonus_used, kind, character_id FROM combatants WHERE id = ?').get(combatantId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  if (row.kind === 'pj' && isPjDowned(row.character_id)) {
+    return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
   if (row.bonus_used) return { ok: false, error: 'Ya has usado tu acción adicional este turno' };
   db.prepare('UPDATE combatants SET bonus_used = 1 WHERE id = ?').run(combatantId);
   return { ok: true };
@@ -276,8 +442,13 @@ export function tryUseReaction(campaignId, combatantId) {
     .prepare('SELECT combat_active, combat_round FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
   if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
-  const row = db.prepare('SELECT reaction_used_round FROM combatants WHERE id = ?').get(combatantId);
+  const row = db
+    .prepare('SELECT reaction_used_round, kind, character_id FROM combatants WHERE id = ?')
+    .get(combatantId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  if (row.kind === 'pj' && isPjDowned(row.character_id)) {
+    return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
   if (row.reaction_used_round === table.combat_round) {
     return { ok: false, error: 'Ya has usado tu reacción esta ronda' };
   }

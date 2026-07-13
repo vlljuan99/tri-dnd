@@ -1,121 +1,106 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../../api.js';
-import {
-  abilityModifier,
-  proficiencyBonus,
-  weaponAttackBonus,
-  weaponDamageModifier,
-  formatModifier,
-  DAMAGE_TYPE_NAMES,
-} from '../../../lib/dnd.js';
+import { formatModifier } from '../../../lib/dnd.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
+import { D20Chips } from './AttackPanel.jsx';
+import { parseDamageDice, extractDamageFromDesc, DAMAGE_TYPE_ES } from '../../../components/MonsterStatBlock.jsx';
 
-// Golpe desarmado de 5e: ataque FUE + competencia, daño fijo 1 + FUE
-function unarmedWeapon(char) {
-  const str = abilityModifier(char.abilities.str);
-  return {
-    id: 'desarmado',
-    name: 'Golpe desarmado',
-    unarmed: true,
-    attackBonus: str + proficiencyBonus(char.level),
-    damageTotal: Math.max(1, 1 + str),
-  };
+// Del texto de la acción del SRD ("Melee Weapon Attack:"/"Ranged Weapon
+// Attack:") se deduce si exige adyacencia; sin pista clara se asume cuerpo a
+// cuerpo (lo más común en el compendio), el servidor igualmente re-valida.
+function isRangedAction(action) {
+  return /ranged/i.test(`${action.name} ${action.desc ?? ''}`);
 }
 
-// Chips con los d20 de la tirada: con ventaja/desventaja se ven los dos
-// dados y el descartado queda tachado; el 20 natural en dorado, el 1 en rojo
-export function D20Chips({ roll }) {
-  const group = roll.groups?.find((g) => g.sides === 20);
-  if (!group) return null;
-  return (
-    <span className="flex items-center gap-0.5">
-      {group.results.map((r, i) =>
-        r.rolls.map((value, j) => {
-          const discarded = r.rolls.length > 1 && value !== r.kept;
-          return (
-            <span
-              key={`${i}-${j}`}
-              className={`rounded-sm border px-1.5 py-0.5 font-mono ${
-                discarded
-                  ? 'border-bone/10 text-bone/30 line-through'
-                  : value === 20
-                    ? 'border-gold bg-gold/15 text-gold'
-                    : value === 1
-                      ? 'border-blood bg-blood/15 text-blood'
-                      : 'border-bone/25 text-bone/90'
-              }`}
-            >
-              {value}
-            </span>
-          );
-        })
-      )}
-    </span>
-  );
+// Acciones atacables del monstruo, con los deltas de la variante por
+// instancia (Fase 17) ya aplicados — mismo cálculo que MonsterStatsContent,
+// pero aquí cada fila lleva además el flag de adyacencia para el ataque real.
+function buildRowsFromMonster(data, overrides) {
+  const atkDelta = Number.isInteger(overrides.attackBonus) ? overrides.attackBonus : 0;
+  const dmgDelta = Number.isInteger(overrides.damageBonus) ? overrides.damageBonus : 0;
+  return (data.actions ?? [])
+    .map((action, i) => {
+      const canAttack = Number.isInteger(action.attack_bonus);
+      const explicit = (action.damage ?? [])
+        .map((d) => ({ parsed: parseDamageDice(d.damage_dice), typeName: DAMAGE_TYPE_ES[d.damage_type?.index] ?? d.damage_type?.name ?? '' }))
+        .filter((d) => d.parsed);
+      const damageOptions = (explicit.length > 0 ? explicit : extractDamageFromDesc(action.desc)).map((d) => ({
+        ...d,
+        parsed: { ...d.parsed, modifier: d.parsed.modifier + dmgDelta },
+      }));
+      return {
+        id: `action-${i}`,
+        name: action.name,
+        attackBonus: canAttack ? action.attack_bonus + atkDelta : null,
+        damageOptions,
+        melee: !isRangedAction(action),
+      };
+    })
+    .filter((row) => row.attackBonus != null || row.damageOptions.length > 0);
 }
 
 /**
- * Panel de combate del tablero: con tu token seleccionado y un objetivo
- * pulsado, ataca con tus armas equipadas. El cliente tira los dados (los ve
- * toda la mesa), y el servidor resuelve el impacto contra la CA y aplica el
- * daño; aquí se desglosa el porqué: dados, bonificador, total contra la CA,
- * y cuánta vida ha quitado el golpe.
+ * Panel de combate del tablero para un enemigo/aliado controlado por el DM:
+ * mismo flujo en dos pasos que AttackPanel (impacto → daño), pero el
+ * atacante no tiene ficha de personaje, así que sus ataques salen de su
+ * ficha de monstruo del SRD (con la variante por instancia aplicada). Si no
+ * tiene monstruo enlazado (un enemigo añadido a mano), se ofrece un ataque
+ * manual con bonificador y dados de daño libres.
  */
-export default function AttackPanel({ attacker, target, highGround = false, onClose }) {
-  const attackTarget = useRoom((s) => s.attackTarget);
-  const dealDamage = useRoom((s) => s.dealDamage);
-  const [char, setChar] = useState(null);
+export default function MonsterAttackPanel({ attacker, target, onClose }) {
+  const attackMarker = useRoom((s) => s.attackMarker);
+  const dealDamageMarker = useRoom((s) => s.dealDamageMarker);
+  const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  // Resultado de la última acción, anclado a su arma:
-  // { type: 'attack', weaponId, hit, crit, ac, roll } |
-  // { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
+  const [manualBonus, setManualBonus] = useState('0');
+  const [manualDice, setManualDice] = useState('1d6');
+  const [manualMelee, setManualMelee] = useState(true);
+  // { type: 'attack', weaponId, hit, crit, ac, roll } | { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
   const [feedback, setFeedback] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setChar(null);
+    setData(null);
+    setLoadError('');
     setFeedback(null);
     setError('');
-    api(`/characters/${attacker.characterId}`)
-      .then(({ character }) => {
-        if (!cancelled) setChar(character);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e.message || 'No se pudo cargar tu ficha.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attacker.characterId]);
+    if (!attacker.monsterIndex) return;
+    api(`/srd/monsters/${attacker.monsterIndex}`)
+      .then((entry) => setData(entry.data))
+      .catch(() => setLoadError('No se pudo cargar la ficha del monstruo: usa el ataque manual.'));
+  }, [attacker.monsterIndex]);
 
-  // Al cambiar de objetivo se descarta el resultado pendiente
   useEffect(() => setFeedback(null), [target.id]);
 
   const targetRef = target.serverId
     ? { kind: 'marcador', id: target.serverId }
     : { kind: 'personaje', id: target.characterId };
 
-  const weapons = char ? char.inventory.filter((i) => i.weapon && i.equipped) : [];
-  const rows = char ? [...weapons, unarmedWeapon(char)] : [];
+  const overrides = attacker.overrides ?? {};
+  const monsterRows = data ? buildRowsFromMonster(data, overrides) : [];
+  const rows =
+    monsterRows.length > 0
+      ? monsterRows
+      : [{ id: 'manual', name: 'Ataque manual', manual: true, melee: manualMelee }];
 
   async function attack(row, advantage) {
-    if (!char || busy) return;
+    if (busy) return;
     setBusy(true);
     setError('');
-    const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
+    const bonus = row.manual ? Number(manualBonus) || 0 : row.attackBonus ?? 0;
     const roll = rollAttack(bonus, {
       advantage,
       label: `${row.name} — ataque contra ${target.name}`,
-      actorName: char.name,
+      actorName: attacker.name,
     });
-    const resp = await attackTarget({
-      characterId: char.id,
+    const resp = await attackMarker({
+      tokenId: attacker.serverId,
       target: targetRef,
       weaponName: row.name,
-      melee: row.unarmed || row.weapon.weaponRange !== 'Ranged',
+      melee: row.melee,
       roll,
     });
     setBusy(false);
@@ -127,35 +112,33 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
   }
 
   async function damage(row) {
-    if (!char || busy || feedback?.type !== 'attack' || !feedback.hit) return;
+    if (busy || feedback?.type !== 'attack' || !feedback.hit) return;
     setBusy(true);
     setError('');
-    const label = (typeName) =>
-      `${row.name} — daño a ${target.name}${typeName ? ` (${typeName})` : ''}${feedback.crit ? ' crítico' : ''}`;
     let roll;
-    if (row.unarmed) {
-      // Daño fijo (1 + FUE): sin dados, se comparte como total plano
-      roll = {
-        kind: 'damage',
-        label: label(''),
-        actorName: char.name,
-        formula: `1 ${formatModifier(row.damageTotal - 1)}`,
-        groups: [],
-        modifier: row.damageTotal - 1,
-        advantage: 'none',
-        total: row.damageTotal,
+    if (row.manual) {
+      const parsed = parseDamageDice(manualDice);
+      if (!parsed) {
+        setBusy(false);
+        setError('Dados de daño no válidos (ej. 2d6)');
+        return;
+      }
+      roll = rollDamage(parsed.dice, {
+        modifier: parsed.modifier,
         crit: feedback.crit,
-        fumble: false,
-      };
+        label: `${row.name} — daño a ${target.name}${feedback.crit ? ' crítico' : ''}`,
+        actorName: attacker.name,
+      });
     } else {
-      roll = rollDamage(row.weapon.damageDice, {
-        modifier: weaponDamageModifier(char, row.weapon),
+      const opt = row.damageOptions[0];
+      roll = rollDamage(opt.parsed.dice, {
+        modifier: opt.parsed.modifier,
         crit: feedback.crit,
-        label: label(DAMAGE_TYPE_NAMES[row.weapon.damageType] ?? ''),
-        actorName: char.name,
+        label: `${row.name} — daño a ${target.name}${opt.typeName ? ` (${opt.typeName})` : ''}${feedback.crit ? ' crítico' : ''}`,
+        actorName: attacker.name,
       });
     }
-    const resp = await dealDamage({ characterId: char.id, target: targetRef, roll });
+    const resp = await dealDamageMarker({ tokenId: attacker.serverId, target: targetRef, roll });
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -187,33 +170,55 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
         </button>
       </div>
 
-      {!char && !error && <p className="text-sm text-bone/50">Cargando armas…</p>}
+      {loadError && <p className="mb-2 text-xs text-gold/70">{loadError}</p>}
       {error && <p className="mb-2 text-xs text-blood">{error}</p>}
 
       <div className="space-y-2">
         {rows.map((row) => {
-          const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
           const fb = feedback?.weaponId === row.id ? feedback : null;
-          // Cota alta: un arma a distancia disparada desde más arriba tiene
-          // ventaja automática (el botón central ataca con ventaja)
-          const isRanged = !row.unarmed && row.weapon.weaponRange === 'Ranged';
-          const rangedAdv = isRanged && highGround;
           return (
             <div key={row.id} className="rounded-sm border border-bone/10 bg-night-950/60 p-2">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm font-medium">
-                  {row.name}
-                  {rangedAdv && (
-                    <span className="ml-1.5 rounded-sm border border-moss/60 bg-moss/15 px-1 py-0.5 text-[0.6rem] uppercase tracking-wider text-bone/90">
-                      ⛰ cota alta · ventaja
-                    </span>
-                  )}
-                </span>
-                <span className="font-mono text-xs text-bone/60">
-                  {formatModifier(bonus)}
-                  {row.unarmed ? ` · ${row.damageTotal} contundente` : ` · ${row.weapon.damageDice}`}
-                </span>
+                <span className="text-sm font-medium">{row.name}</span>
+                {!row.manual && row.attackBonus != null && (
+                  <span className="font-mono text-xs text-bone/60">{formatModifier(row.attackBonus)}</span>
+                )}
               </div>
+
+              {row.manual && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                  <label className="flex items-center gap-1 text-bone/60">
+                    Bonif.
+                    <input
+                      type="number"
+                      value={manualBonus}
+                      onChange={(e) => setManualBonus(e.target.value)}
+                      className="w-12 rounded-sm border border-bone/20 bg-night-950 px-1 py-0.5 text-bone focus:border-gold focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-bone/60">
+                    Daño
+                    <input
+                      value={manualDice}
+                      onChange={(e) => setManualDice(e.target.value)}
+                      placeholder="1d6+2"
+                      className="w-16 rounded-sm border border-bone/20 bg-night-950 px-1 py-0.5 text-bone focus:border-gold focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-bone/60">
+                    <input
+                      type="checkbox"
+                      checked={manualMelee}
+                      onChange={(e) => {
+                        setManualMelee(e.target.checked);
+                        row.melee = e.target.checked;
+                      }}
+                    />
+                    Cuerpo a cuerpo
+                  </label>
+                </div>
+              )}
+
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <button
                   onClick={() => attack(row, 'dis')}
@@ -223,15 +228,11 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
                   Desv.
                 </button>
                 <button
-                  onClick={() => attack(row, rangedAdv ? 'adv' : 'none')}
+                  onClick={() => attack(row, 'none')}
                   disabled={busy}
-                  className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
-                    rangedAdv
-                      ? 'border-moss bg-moss/15 text-bone/90 hover:bg-moss/25'
-                      : 'border-gold/50 text-gold hover:bg-gold/10'
-                  }`}
+                  className="rounded-sm border border-gold/50 px-3 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
                 >
-                  {rangedAdv ? 'Atacar (ventaja)' : 'Atacar'}
+                  Atacar
                 </button>
                 <button
                   onClick={() => attack(row, 'adv')}
@@ -243,7 +244,6 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
               </div>
 
               <AnimatePresence mode="wait">
-                {/* Paso 1 — ¿impacta?: dados + bonificador = total contra la CA */}
                 {fb?.type === 'attack' && (
                   <motion.div
                     key="attack"
@@ -277,7 +277,7 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
                     >
                       {fb.hit ? `¡Impacta${fb.crit ? ' — crítico!' : '!'}` : 'Falla'}
                     </motion.p>
-                    {fb.hit && (
+                    {fb.hit && (row.manual || row.damageOptions.length > 0) && (
                       <button
                         onClick={() => damage(row)}
                         disabled={busy}
@@ -289,7 +289,6 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
                   </motion.div>
                 )}
 
-                {/* Paso 2 — daño: cuánta vida quita y cuánta le queda */}
                 {fb?.type === 'damage' && (
                   <motion.div
                     key="damage"

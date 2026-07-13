@@ -15,6 +15,10 @@ export const useRoom = create((set, get) => ({
   online: [],
   joinError: null,
   combat: { active: false, round: 1, turnId: null, combatants: [] },
+  // Sube cada vez que el servidor avisa de que ACABA de empezar el combate
+  // (arranque manual del DM o automático al descubrir enemigos): la mesa lo
+  // observa para mostrar el cartel de aviso a pantalla unos segundos.
+  combatAlert: 0,
   // Contador que sube cuando el servidor avisa de que el mapa activo cambió;
   // quien muestre el mapa lo observa y vuelve a pedir /mapa-activo
   mapVersion: 0,
@@ -54,6 +58,7 @@ export const useRoom = create((set, get) => ({
     socket.on('room:members', (online) => set({ online }));
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
+    socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
     socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
     socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));
     socket.on('mapa:ping', (ping) => {
@@ -142,6 +147,20 @@ export const useRoom = create((set, get) => ({
     return new Promise((resolve) => socket.emit('combate:danio', { campaignId, ...payload }, resolve));
   },
 
+  /** Ataque de un enemigo/aliado controlado por el DM a un objetivo. */
+  attackMarker(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combate:atacar-marcador', { campaignId, ...payload }, resolve));
+  },
+
+  /** Daño de un enemigo/aliado controlado por el DM a un objetivo. */
+  dealDamageMarker(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combate:danio-marcador', { campaignId, ...payload }, resolve));
+  },
+
   /** Usa un objeto del inventario en tu turno; gasta la acción, como atacar. */
   useItem(characterId, itemId) {
     const { campaignId } = get();
@@ -215,6 +234,33 @@ export const useRoom = create((set, get) => ({
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
       socket.emit('combat:use-resource', { campaignId, combatantId, resource }, resolve)
+    );
+  },
+
+  /** Acción especial del turno: 'correr' | 'esquivar' | 'destrabarse' (gasta la acción). */
+  specialAction(combatantId, kind) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:special-action', { campaignId, combatantId, kind }, resolve)
+    );
+  },
+
+  /** Pone/quita una condición de combate a un combatiente (solo DM). */
+  toggleCondition(combatantId, condition) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:toggle-condition', { campaignId, combatantId, condition }, resolve)
+    );
+  },
+
+  /** Tira una salvación de muerte para un PJ agonizante (dueño o DM). */
+  deathSave(combatantId, roll, d20) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:death-save', { campaignId, combatantId, roll, d20 }, resolve)
     );
   },
 }));

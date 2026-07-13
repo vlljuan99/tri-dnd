@@ -35,6 +35,15 @@ export function notifyCombat(campaignId) {
   combatBroadcaster?.(campaignId);
 }
 
+// Señal de "acaba de empezar el combate": el cartel de aviso a pantalla en la
+// mesa (todos los clientes) y el mensaje de sistema en el chat. Se emite tanto
+// desde el arranque manual del DM como desde el automático al descubrir
+// enemigos, para que el aviso sea el mismo por cualquier vía.
+export function notifyCombatStarted(campaignId) {
+  ioRef?.to(`campaign:${campaignId}`).emit('combat:started');
+  postSystemMessage(campaignId, 'El combate ha comenzado.');
+}
+
 export function notifyCampaignMap(campaignId) {
   ioRef?.to(`campaign:${campaignId}`).emit('mapa:actualizado');
 }
