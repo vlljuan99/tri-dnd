@@ -362,6 +362,47 @@ mapsRouter.post('/:mapId/salas/:roomId/guardar-plantilla', (req, res) => {
   res.status(201).json({ template: serializeTemplate(template) });
 });
 
+// Guarda un trazo completo del pincel de paredes en una única transacción.
+// Un arrastre puede atravesar varias salas; si una de ellas no es válida no
+// se modifica ninguna, evitando paredes guardadas a medias.
+mapsRouter.patch('/:mapId/paredes', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
+
+  const updates = req.body?.rooms;
+  if (!Array.isArray(updates) || updates.length < 1 || updates.length > 100) {
+    return res.status(400).json({ error: 'El trazo de paredes no es válido' });
+  }
+
+  const seenRoomIds = new Set();
+  const prepared = [];
+  for (const update of updates) {
+    const roomId = update?.roomId;
+    if (!Number.isInteger(roomId) || seenRoomIds.has(roomId) || !isValidWallEdges(update?.wallEdges)) {
+      return res.status(400).json({ error: 'El trazo de paredes no es válido' });
+    }
+    const room = getRoom(map.id, roomId);
+    if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+    if (update.wallEdges.some(([col, row]) => col >= room.width || row >= room.height)) {
+      return res.status(400).json({ error: 'Hay paredes fuera de los límites de la sala' });
+    }
+    seenRoomIds.add(roomId);
+    prepared.push({ room, wallEdges: update.wallEdges });
+  }
+
+  const updateWalls = db.prepare('UPDATE map_rooms SET wall_edges = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const { room, wallEdges } of prepared) {
+      updateWalls.run(JSON.stringify(wallEdges), room.id);
+    }
+  })();
+  touchAndNotify(map);
+
+  res.json({
+    rooms: prepared.map(({ room }) => serializeRoom(getRoom(map.id, room.id))),
+  });
+});
+
 mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   const room = map && getRoom(map.id, req.params.roomId);
@@ -612,7 +653,7 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
 
   const {
     kind = 'enemigo', name, x, y, monsterIndex, characterId, hidden, dc, skill,
-    perceptionDc, visionRadius, successConsequence, failureConsequence,
+    perceptionDc, visionRadius, successConsequence, failureConsequence, loot,
   } = req.body ?? {};
   if (!TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
@@ -646,6 +687,16 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   ) {
     return res.status(400).json({ error: 'Alcance de visión no válido' });
   }
+  let lootJson = '[]';
+  if (loot !== undefined) {
+    if (!Array.isArray(loot) || loot.length > 40) {
+      return res.status(400).json({ error: 'Botín no válido' });
+    }
+    lootJson = JSON.stringify(loot);
+    if (lootJson.length > 12000) {
+      return res.status(400).json({ error: 'Botín demasiado largo' });
+    }
+  }
 
   let monsterIdx = null;
   if ((kind === 'enemigo' || kind === 'aliado') && typeof monsterIndex === 'string' && monsterIndex) {
@@ -671,13 +722,13 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
     .prepare(
       `INSERT INTO map_tokens
        (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
-        success_consequence, failure_consequence, perception_dc, vision_radius)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        success_consequence, failure_consequence, perception_dc, vision_radius, loot)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       room.id, kind, cleanName, monsterIdx, bossId, x, y, isHidden, dc ?? null, skill ?? null,
       successConsequence ?? '', failureConsequence ?? '',
-      perceptionDc ?? (kind === 'trampa' ? 10 : null), visionRadius ?? 6
+      perceptionDc ?? (kind === 'trampa' ? 10 : null), visionRadius ?? 6, lootJson
     );
   touchAndNotify(map);
 

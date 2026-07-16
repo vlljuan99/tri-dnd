@@ -1,21 +1,30 @@
 import { inputClass, labelClass, labelTextClass, errorTextClass } from '../wizard/styles.js';
 
-export function validateIdentidad(campaign) {
+export function validateConcepto(campaign) {
   const errors = {};
   if (!campaign.name?.trim()) errors.name = 'El nombre es obligatorio.';
+  if ((campaign.description ?? '').length > 2000) {
+    errors.description = 'La sinopsis no puede superar los 2000 caracteres.';
+  }
   return errors;
 }
 
-/**
- * Paso 1 — Identidad: nombre y plazas. Lo mínimo para reconocer la campaña
- * y saber cuántos jugadores caben, antes de invitar a nadie.
- */
+// Alias conservado para cualquier import antiguo mientras el asistente pasa
+// de «Identidad» a «Concepto».
+export const validateIdentidad = validateConcepto;
+
+/** Paso 1 — La semilla de la campaña antes de entrar en su archivo vivo. */
 export default function StepIdentidad({ campaign, patch, errors }) {
   return (
     <div className="space-y-4">
+      <div>
+        <p className="font-mono text-[0.65rem] uppercase tracking-[0.2em] text-gold/60">Paso 1</p>
+        <h2 className="font-display text-2xl tracking-wide text-gold">Concepto de la campaña</h2>
+      </div>
+
       <p className="text-sm text-bone/70">
-        El nombre y las plazas son lo primero que verán tus jugadores al unirse con el código de
-        invitación.
+        Ponle nombre a la aventura y resume su premisa. No tienes que escribir ahora todo el lore:
+        el archivo del DM será tu espacio de trabajo permanente.
       </p>
 
       <label className={labelClass}>
@@ -37,6 +46,28 @@ export default function StepIdentidad({ campaign, patch, errors }) {
       </label>
 
       <label className={labelClass}>
+        <span className={labelTextClass}>Sinopsis / concepto</span>
+        <textarea
+          value={campaign.description ?? ''}
+          onChange={(e) => patch({ description: e.target.value })}
+          rows={5}
+          maxLength={2000}
+          placeholder="Una expedición hacia un reino aislado donde los recuerdos se convierten en moneda…"
+          className={`${inputClass} w-full resize-y`}
+          aria-invalid={Boolean(errors.description)}
+          aria-describedby={errors.description ? 'error-description' : undefined}
+        />
+        <span className="text-right font-mono text-[0.65rem] text-bone/35">
+          {(campaign.description ?? '').length}/2000
+        </span>
+        {errors.description && (
+          <span id="error-description" className={errorTextClass}>
+            {errors.description}
+          </span>
+        )}
+      </label>
+
+      <label className={labelClass}>
         <span className={labelTextClass}>Plazas (opcional)</span>
         <input
           type="number"
@@ -53,6 +84,7 @@ export default function StepIdentidad({ campaign, patch, errors }) {
           placeholder="Sin límite"
           className={`${inputClass} w-40 font-mono`}
         />
+        <span className="text-xs text-bone/45">Podrás cambiarlo cuando invites al grupo.</span>
       </label>
     </div>
   );

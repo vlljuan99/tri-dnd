@@ -727,6 +727,112 @@ const migrations = [
   ALTER TABLE characters ADD COLUMN dm_category TEXT;
   UPDATE characters SET dm_category = 'jefe' WHERE kind = 'boss';
   `,
+
+  // v39 — Tipo de partida independiente del mapa de mundo y archivo
+  // narrativo privado por campaña. Una campaña puede existir sin mapa de
+  // mundo y una escaramuza sigue siendo una mesa rápida: has_world_map deja
+  // de ser el discriminador de producto. El archivo usa un árbol de
+  // secciones/entradas y bloques ordenados. image_path es siempre una clave
+  // privada bajo data/narrative-media; nunca una URL pública de /uploads.
+  `
+  ALTER TABLE campaigns ADD COLUMN campaign_type TEXT NOT NULL DEFAULT 'campana'
+    CHECK (campaign_type IN ('campana', 'escaramuza'));
+  UPDATE campaigns
+     SET campaign_type = CASE WHEN has_world_map = 1 THEN 'campana' ELSE 'escaramuza' END;
+
+  CREATE TABLE campaign_narrative_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES campaign_narrative_nodes(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'entrada' CHECK (kind IN ('seccion', 'entrada')),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_campaign_narrative_nodes_tree
+    ON campaign_narrative_nodes(campaign_id, parent_id, position, id);
+
+  CREATE TABLE campaign_narrative_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id INTEGER NOT NULL REFERENCES campaign_narrative_nodes(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'texto'
+      CHECK (type IN ('texto', 'imagen', 'video', 'enlace', 'musica')),
+    content TEXT NOT NULL DEFAULT '',
+    url TEXT,
+    caption TEXT NOT NULL DEFAULT '',
+    alt_text TEXT NOT NULL DEFAULT '',
+    image_path TEXT,
+    image_mime TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (image_path IS NULL OR type = 'imagen')
+  );
+  CREATE INDEX idx_campaign_narrative_blocks_node
+    ON campaign_narrative_blocks(node_id, position, id);
+
+  INSERT INTO campaign_narrative_nodes (campaign_id, kind, title, position)
+    SELECT id, 'seccion', 'Lore general', 0 FROM campaigns WHERE campaign_type = 'campana';
+  INSERT INTO campaign_narrative_nodes (campaign_id, kind, title, position)
+    SELECT id, 'seccion', 'Personajes', 1 FROM campaigns WHERE campaign_type = 'campana';
+  INSERT INTO campaign_narrative_nodes (campaign_id, kind, title, position)
+    SELECT id, 'seccion', 'Facciones', 2 FROM campaigns WHERE campaign_type = 'campana';
+  INSERT INTO campaign_narrative_nodes (campaign_id, kind, title, position)
+    SELECT id, 'seccion', 'Lugares', 3 FROM campaigns WHERE campaign_type = 'campana';
+  INSERT INTO campaign_narrative_nodes (campaign_id, kind, title, position)
+    SELECT id, 'seccion', 'Tramas y sesiones', 4 FROM campaigns WHERE campaign_type = 'campana';
+  `,
+
+  // v40 — Conservación del lore anterior al archivo. campaigns.lore sigue
+  // siendo la introducción pública para los jugadores; esta migración hace
+  // además una copia privada editable bajo «Lore general» para que ningún DM
+  // pierda el texto que ya había preparado al adoptar el nuevo archivo.
+  `
+  INSERT INTO campaign_narrative_nodes
+    (campaign_id, parent_id, kind, title, summary, position)
+  SELECT c.id, section.id, 'entrada', 'Introducción heredada',
+         'Copia del lore público existente al crear el archivo narrativo.',
+         COALESCE((
+           SELECT MAX(sibling.position) + 1
+             FROM campaign_narrative_nodes sibling
+            WHERE sibling.parent_id = section.id
+         ), 0)
+    FROM campaigns c
+    JOIN campaign_narrative_nodes section
+      ON section.campaign_id = c.id
+     AND section.parent_id IS NULL
+     AND section.kind = 'seccion'
+     AND section.title = 'Lore general'
+   WHERE c.campaign_type = 'campana'
+     AND trim(c.lore) <> ''
+     AND NOT EXISTS (
+       SELECT 1 FROM campaign_narrative_nodes existing
+        WHERE existing.campaign_id = c.id
+          AND existing.parent_id = section.id
+          AND existing.title = 'Introducción heredada'
+     );
+
+  INSERT INTO campaign_narrative_blocks
+    (node_id, type, content, position)
+  SELECT entry.id, 'texto', c.lore, 0
+    FROM campaigns c
+    JOIN campaign_narrative_nodes entry
+      ON entry.id = (
+        SELECT MAX(candidate.id)
+          FROM campaign_narrative_nodes candidate
+          JOIN campaign_narrative_nodes parent ON parent.id = candidate.parent_id
+         WHERE candidate.campaign_id = c.id
+           AND candidate.title = 'Introducción heredada'
+           AND parent.title = 'Lore general'
+      )
+   WHERE c.campaign_type = 'campana'
+     AND trim(c.lore) <> ''
+     AND NOT EXISTS (
+       SELECT 1 FROM campaign_narrative_blocks block WHERE block.node_id = entry.id
+     );
+  `,
 ];
 
 export function runMigrations() {

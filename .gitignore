@@ -12,3 +12,6 @@ server/data/jwt-secret.txt
 
 # Subidas de usuarios (avatares, mapas)
 server/data/uploads/
+
+# Imágenes privadas del archivo narrativo del DM
+server/data/narrative-media/

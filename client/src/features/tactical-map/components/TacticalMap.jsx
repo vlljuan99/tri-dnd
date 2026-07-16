@@ -61,6 +61,7 @@ export default function TacticalMap({
   playerView,
   onTogglePlayerView,
   editorHref,
+  showArchive,
   ownCharacterId,
   campaignId,
 }) {
@@ -714,6 +715,7 @@ export default function TacticalMap({
           playerView={playerView}
           onTogglePlayerView={onTogglePlayerView}
           editorHref={editorHref}
+          showArchive={showArchive}
           onCenter={() => sendCameraCommand('center')}
           onZoomIn={() => sendCameraCommand('zoom-in')}
           onZoomOut={() => sendCameraCommand('zoom-out')}

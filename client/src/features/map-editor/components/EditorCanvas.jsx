@@ -1,4 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  canonicalWallEdge,
+  collectWallKeys,
+  nearestWallSide,
+  roomWallEdgeKey,
+  samplePointerSegment,
+} from '../lib/wallBrush.js';
 
 // Lienzo 2D del editor: plano cenital de una planta con sus salas y puertas.
 // Coordenadas en casillas del lienzo de la planta (pueden ser negativas);
@@ -65,6 +72,13 @@ function isEdgeDoor(door) {
   const dx = door.toX - door.fromX;
   const dy = door.toY - door.fromY;
   return (dx === 0 && Math.abs(dy) === 1) || (dy === 0 && Math.abs(dx) === 1);
+}
+
+function edgeDoorKey(door) {
+  if (!isEdgeDoor(door)) return null;
+  return door.fromY === door.toY
+    ? `v:${Math.max(door.fromX, door.toX)},${door.fromY}`
+    : `h:${door.fromX},${Math.max(door.fromY, door.toY)}`;
 }
 
 // Marcador de una puerta en muro: barra sobre el borde compartido, a lo largo
@@ -146,7 +160,7 @@ export default function EditorCanvas({
   onObstacleCellClick,
   onTerrainCellClick,
   onSpawnCellClick,
-  onWallEdgeClick,
+  onWallStroke,
   onElevationCellClick,
   onLightCellClick,
   onMoveRoom,
@@ -155,6 +169,10 @@ export default function EditorCanvas({
   const [zoom, setZoom] = useState(1);
   // { type: 'room'|'token', id, startX, startY, origX, origY, dx, dy, moved }
   const [drag, setDrag] = useState(null);
+  // El trazo se conserva hasta que el guardado agrupado termina para que su
+  // vista previa no parpadee mientras el servidor recarga el mapa.
+  const [wallStroke, setWallStroke] = useState(null);
+  const wallStrokeRef = useRef(null);
   const svgRef = useRef(null);
   const cell = BASE_CELL * zoom;
 
@@ -167,6 +185,37 @@ export default function EditorCanvas({
     y: (cy) => (cy - bounds.minY) * cell,
   };
   const roomById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+  const doorWallKeys = useMemo(() => {
+    const keys = new Set();
+    for (const door of doors) {
+      if (!roomById.has(door.fromRoomId) && !roomById.has(door.toRoomId)) continue;
+      const key = edgeDoorKey(door);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }, [doors, roomById]);
+  const openDoorWallKeys = useMemo(() => {
+    const keys = new Set();
+    for (const door of doors) {
+      if (!door.isOpen || (!roomById.has(door.fromRoomId) && !roomById.has(door.toRoomId))) continue;
+      const key = edgeDoorKey(door);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }, [doors, roomById]);
+  const wallKeys = useMemo(() => collectWallKeys(rooms), [rooms]);
+  const removedWallKeys = useMemo(
+    () =>
+      wallStroke?.operation === 'remove'
+        ? new Set(wallStroke.targets.map((target) => canonicalWallEdge(target.x, target.y, target.side)))
+        : new Set(),
+    [wallStroke]
+  );
+
+  useEffect(() => {
+    wallStrokeRef.current = null;
+    setWallStroke(null);
+  }, [mode, floor?.id]);
 
   function eventCell(e) {
     const rect = svgRef.current.getBoundingClientRect();
@@ -179,22 +228,112 @@ export default function EditorCanvas({
   // Casilla pulsada + lado más cercano al punto del clic ('n'|'e'|'s'|'o'),
   // para el pincel de paredes: pulsar cerca de un borde alterna la pared de
   // ese lado de la casilla.
-  function eventEdge(e) {
+  function edgeAtClient(clientX, clientY, preferredSide = null) {
     const rect = svgRef.current.getBoundingClientRect();
-    const fx = (e.clientX - rect.left) / cell + bounds.minX;
-    const fy = (e.clientY - rect.top) / cell + bounds.minY;
+    const fx = (clientX - rect.left) / cell + bounds.minX;
+    const fy = (clientY - rect.top) / cell + bounds.minY;
     const x = Math.floor(fx);
     const y = Math.floor(fy);
     const dLeft = fx - x;
     const dTop = fy - y;
-    const distances = [
-      ['o', dLeft],
-      ['e', 1 - dLeft],
-      ['n', dTop],
-      ['s', 1 - dTop],
-    ];
-    distances.sort((a, b) => a[1] - b[1]);
-    return { x, y, side: distances[0][0] };
+    return { x, y, side: nearestWallSide(dLeft, dTop, preferredSide) };
+  }
+
+  function eventEdge(e) {
+    return edgeAtClient(e.clientX, e.clientY);
+  }
+
+  function wallTargetAt(clientX, clientY, preferredSide = null) {
+    const edge = edgeAtClient(clientX, clientY, preferredSide);
+    if (doorWallKeys.has(canonicalWallEdge(edge.x, edge.y, edge.side))) return null;
+    // Las paredes pueden bordear también casillas desactivadas. Si hay salas
+    // solapadas, la que está primero en la planta es la propietaria estable.
+    const room = rooms.find(
+      (candidate) =>
+        edge.x >= candidate.x &&
+        edge.x < candidate.x + candidate.width &&
+        edge.y >= candidate.y &&
+        edge.y < candidate.y + candidate.height
+    );
+    return room ? { roomId: room.id, x: edge.x, y: edge.y, side: edge.side } : null;
+  }
+
+  function publishWallStroke(stroke) {
+    wallStrokeRef.current = stroke;
+    setWallStroke(stroke);
+  }
+
+  function appendWallStroke(clientX, clientY) {
+    const current = wallStrokeRef.current;
+    if (!current || current.saving) return current;
+    const next = {
+      ...current,
+      lastClient: { x: clientX, y: clientY },
+      targets: [...current.targets],
+      visited: new Set(current.visited),
+    };
+    let changed = false;
+    const points = samplePointerSegment(current.lastClient, next.lastClient, Math.max(4, cell / 3));
+    let preferredSide = next.targets.at(-1)?.side ?? null;
+    for (const point of points) {
+      const target = wallTargetAt(point.x, point.y, preferredSide);
+      if (!target) continue;
+      preferredSide = target.side;
+      const key = canonicalWallEdge(target.x, target.y, target.side);
+      if (!key || next.visited.has(key)) continue;
+      next.visited.add(key);
+      next.targets.push(target);
+      changed = true;
+    }
+    // Aunque no aparezca una arista nueva, se avanza el origen de muestreo.
+    wallStrokeRef.current = next;
+    if (changed) setWallStroke(next);
+    return next;
+  }
+
+  function beginWallStroke(e) {
+    if (mode !== 'wall' || busy || wallStrokeRef.current) return;
+    if (!e.isPrimary || e.button !== 0) return;
+    const target = wallTargetAt(e.clientX, e.clientY);
+    if (!target) return;
+
+    e.preventDefault();
+    const key = canonicalWallEdge(target.x, target.y, target.side);
+    const stroke = {
+      pointerId: e.pointerId,
+      operation: wallKeys.has(key) ? 'remove' : 'add',
+      targets: [target],
+      visited: new Set([key]),
+      lastClient: { x: e.clientX, y: e.clientY },
+      saving: false,
+    };
+    svgRef.current.setPointerCapture?.(e.pointerId);
+    publishWallStroke(stroke);
+  }
+
+  function finishWallStroke(e, includeLastPoint = true) {
+    let current = wallStrokeRef.current;
+    if (!current || current.pointerId !== e.pointerId || current.saving) return false;
+    e.preventDefault();
+    if (includeLastPoint) current = appendWallStroke(e.clientX, e.clientY) ?? current;
+
+    // Se marca como guardando antes de liberar la captura: lostpointercapture
+    // puede dispararse de forma síncrona y no debe confirmar dos veces.
+    const committing = { ...current, saving: true };
+    publishWallStroke(committing);
+    if (svgRef.current.hasPointerCapture?.(e.pointerId)) {
+      svgRef.current.releasePointerCapture?.(e.pointerId);
+    }
+    Promise.resolve()
+      .then(() => onWallStroke?.({ operation: committing.operation, targets: committing.targets }))
+      .catch(() => {})
+      .finally(() => {
+        if (wallStrokeRef.current === committing) {
+          wallStrokeRef.current = null;
+          setWallStroke(null);
+        }
+      });
+    return true;
   }
 
   function roomAt(cellPos) {
@@ -209,7 +348,9 @@ export default function EditorCanvas({
   }
 
   function handleCanvasClick(e) {
-    if (busy || drag?.moved) return;
+    // El gesto de pared se resuelve con Pointer Events; se ignora el click
+    // sintético que el navegador emite después de soltar mouse o dedo.
+    if (mode === 'wall' || busy || drag?.moved) return;
     const cellPos = eventCell(e);
     const room = roomAt(cellPos);
 
@@ -285,14 +426,6 @@ export default function EditorCanvas({
           !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
       );
       if (target) onLightCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
-    } else if (mode === 'wall') {
-      // La pared puede tocar cualquier casilla dentro de la sala, también
-      // las desactivadas (un muro que bordea la roca tallada es legítimo)
-      const edge = eventEdge(e);
-      const target = rooms.find(
-        (r) => edge.x >= r.x && edge.x < r.x + r.width && edge.y >= r.y && edge.y < r.y + r.height
-      );
-      if (target) onWallEdgeClick({ roomId: target.id, x: edge.x, y: edge.y, side: edge.side });
     } else if (!room) {
       onSelect(null);
     }
@@ -317,6 +450,14 @@ export default function EditorCanvas({
   }
 
   function handlePointerMove(e) {
+    const stroke = wallStrokeRef.current;
+    if (stroke) {
+      if (stroke.pointerId === e.pointerId && !stroke.saving) {
+        e.preventDefault();
+        appendWallStroke(e.clientX, e.clientY);
+      }
+      return;
+    }
     if (!drag) return;
     const dx = Math.round((e.clientX - drag.startX) / cell);
     const dy = Math.round((e.clientY - drag.startY) / cell);
@@ -325,7 +466,8 @@ export default function EditorCanvas({
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e) {
+    if (finishWallStroke(e)) return;
     if (!drag) return;
     if (drag.moved && (drag.dx !== 0 || drag.dy !== 0)) {
       const next = { x: drag.origX + drag.dx, y: drag.origY + drag.dy };
@@ -333,6 +475,17 @@ export default function EditorCanvas({
       else onMoveToken(drag.id, next);
     }
     setDrag(null);
+  }
+
+  function handlePointerCancel(e) {
+    // Conserva lo ya pintado si el sistema interrumpe el gesto (por ejemplo,
+    // al cambiar la orientación del móvil).
+    finishWallStroke(e, false);
+  }
+
+  function handleLostPointerCapture(e) {
+    // Respaldo para navegadores que pierdan la captura sin enviar pointerup.
+    finishWallStroke(e, false);
   }
 
   function roomScreenPos(room) {
@@ -383,9 +536,19 @@ export default function EditorCanvas({
         ref={svgRef}
         width={cols * cell}
         height={rows * cell}
+        onPointerDown={beginWallStroke}
         onClick={handleCanvasClick}
+        onClickCapture={(e) => {
+          if (mode === 'wall') {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onLostPointerCapture={handleLostPointerCapture}
+        style={mode === 'wall' ? { touchAction: 'none' } : undefined}
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
@@ -402,7 +565,11 @@ export default function EditorCanvas({
           const h = room.height * cell;
           const isSelected = selection?.type === 'room' && selection.id === room.id;
           return (
-            <g key={room.id} onPointerDown={(e) => handleRoomPointerDown(e, room)} className="cursor-move">
+            <g
+              key={room.id}
+              onPointerDown={(e) => handleRoomPointerDown(e, room)}
+              className={mode === 'select' ? 'cursor-move' : undefined}
+            >
               {room.backgroundUrl ? (
                 <image
                   href={room.backgroundUrl}
@@ -528,6 +695,10 @@ export default function EditorCanvas({
               ))}
               {/* Paredes por arista: trazo grueso sobre el borde de la casilla */}
               {(room.wallEdges ?? []).map(([c, r, side]) => {
+                const key = roomWallEdgeKey(room, [c, r, side]);
+                // El muro puede seguir guardado bajo una puerta abierta, pero
+                // no debe cerrar visualmente ese hueco. Cerrada sí conserva muro.
+                if (removedWallKeys.has(key) || openDoorWallKeys.has(key)) return null;
                 const x0 = pos.left + c * cell;
                 const y0 = pos.top + r * cell;
                 const horizontal = side === 'n' || side === 's';
@@ -569,6 +740,31 @@ export default function EditorCanvas({
                 {!room.revealed && ' · oculta'}
               </text>
             </g>
+          );
+        })}
+
+        {/* Vista previa del trazo. Al borrar, las paredes base ya se ocultan y
+            esta guía roja deja claro por dónde está pasando el pincel. */}
+        {wallStroke?.targets.map((target) => {
+          const horizontal = target.side === 'n' || target.side === 's';
+          const x1 = toPx.x(target.x + (target.side === 'e' ? 1 : 0));
+          const y1 = toPx.y(target.y + (target.side === 's' ? 1 : 0));
+          const key = canonicalWallEdge(target.x, target.y, target.side);
+          if (doorWallKeys.has(key)) return null;
+          return (
+            <line
+              key={`wall-stroke-${key}`}
+              x1={x1}
+              y1={y1}
+              x2={horizontal ? x1 + cell : x1}
+              y2={horizontal ? y1 : y1 + cell}
+              stroke={wallStroke.operation === 'remove' ? '#b33939' : wallColor}
+              strokeWidth={wallStroke.operation === 'remove' ? Math.max(2, cell * 0.1) : Math.max(4, cell * 0.22)}
+              strokeLinecap="round"
+              strokeDasharray={wallStroke.operation === 'remove' ? '4 3' : undefined}
+              opacity={wallStroke.saving ? 0.65 : 0.95}
+              className="pointer-events-none"
+            />
           );
         })}
 

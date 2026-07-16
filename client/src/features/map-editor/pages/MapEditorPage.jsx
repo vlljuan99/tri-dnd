@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import BestiaryBrowser from '../../../components/BestiaryBrowser.jsx';
+import SrdPicker from '../../../components/SrdPicker.jsx';
 import { useMapEditor } from '../hooks/useMapEditor.js';
+import { buildObjectMarkerLoot } from '../lib/objectMarker.js';
+import { applyWallStroke } from '../lib/wallBrush.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
 import DoorPanel from '../components/DoorPanel.jsx';
@@ -61,6 +64,8 @@ export default function MapEditorPage() {
   const [elevationLevel, setElevationLevel] = useState(1); // nivel del pincel de elevación
   const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
+  const [tokenItem, setTokenItem] = useState(null); // equipo SRD o de la biblioteca propia
+  const [showItemPicker, setShowItemPicker] = useState(false);
   const [bosses, setBosses] = useState([]); // personajes kind='boss' del DM
   const [tokenBossId, setTokenBossId] = useState('');
   const [tokenTemplateId, setTokenTemplateId] = useState(''); // plantilla de enemigo configurado
@@ -180,6 +185,7 @@ export default function MapEditorPage() {
       tokenName.trim() ||
       boss?.name ||
       (CHARACTER_LINKABLE.has(tokenKind) && tokenMonster?.name) ||
+      (tokenKind === 'objeto' && tokenItem?.name) ||
       TOKEN_KINDS.find((k) => k.key === tokenKind)?.label ||
       'Marcador';
     const { token } = await editor.addToken(target.roomId, {
@@ -189,6 +195,9 @@ export default function MapEditorPage() {
       y: target.y,
       monsterIndex: CHARACTER_LINKABLE.has(tokenKind) && !boss ? tokenMonster?.index : undefined,
       characterId: boss?.id,
+      // Reutiliza el formato de botín existente: los objetos elegidos desde
+      // el selector se pueden saquear y las plantillas ya conservan `loot`.
+      loot: tokenKind === 'objeto' ? buildObjectMarkerLoot(tokenItem) : undefined,
     });
     setSelection({ type: 'token', id: token.id });
     setMode('select');
@@ -220,24 +229,12 @@ export default function MapEditorPage() {
     await editor.patchRoom(room.id, { terrainCells: next });
   }
 
-  // Pone o quita una pared en la arista pulsada de una casilla de la sala.
-  // Se normaliza la entrada a la representación exacta que ya exista (el
-  // mismo borde puede describirse desde la casilla de al lado) para que
-  // repetir el clic siempre la quite.
-  async function toggleWall(target) {
-    const room = allRooms.find((r) => r.id === target.roomId);
-    if (!room) return;
-    const entry = [target.x - room.x, target.y - room.y, target.side];
-    // Representación equivalente del mismo borde vista desde la casilla vecina
-    const TWIN = { n: ['s', 0, -1], s: ['n', 0, 1], o: ['e', -1, 0], e: ['o', 1, 0] };
-    const [twinSide, dx, dy] = TWIN[entry[2]];
-    const twin = [entry[0] + dx, entry[1] + dy, twinSide];
-    const walls = room.wallEdges ?? [];
-    const matches = ([c, r, s]) =>
-      (c === entry[0] && r === entry[1] && s === entry[2]) ||
-      (c === twin[0] && r === twin[1] && s === twin[2]);
-    const next = walls.some(matches) ? walls.filter((w) => !matches(w)) : [...walls, entry];
-    await editor.patchRoom(room.id, { wallEdges: next });
+  // Persiste de una vez todas las aristas recorridas por el pincel. La
+  // operación se fija al empezar: sobre un muro borra; sobre un hueco pinta.
+  async function saveWallStroke(stroke) {
+    if (!activeFloor) return;
+    const updates = applyWallStroke(activeFloor.rooms, stroke.targets, stroke.operation);
+    if (updates.length) await editor.patchWalls(updates);
   }
 
   // Pinta el nivel de elevación en la casilla pulsada: si ya tiene ese mismo
@@ -756,7 +753,7 @@ export default function MapEditorPage() {
                       />
                     </label>
                     <span className="text-xs italic text-bone/50">
-                      clic cerca del borde de una casilla para poner o quitar una pared (bloquea paso y visión)
+                      pulsa cerca de un borde y arrastra para pintar paredes; empieza sobre una pared para borrarlas. Un clic pinta una sola
                     </span>
                   </>
                 )}
@@ -793,6 +790,7 @@ export default function MapEditorPage() {
                         setTokenMonster(null);
                         setTokenBossId('');
                         setTokenTemplateId('');
+                        setTokenItem(null);
                       }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
@@ -815,6 +813,20 @@ export default function MapEditorPage() {
                         {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Bestiario o personaje…'}
                       </button>
                     )}
+                    {tokenKind === 'objeto' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowItemPicker(true)}
+                        className="max-w-52 truncate rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10"
+                        title={
+                          tokenItem
+                            ? `${tokenItem.name}: se colocará como objeto saqueable`
+                            : 'Busca en el compendio SRD y en tu biblioteca de objetos'
+                        }
+                      >
+                        {tokenItem ? `Objeto: ${tokenItem.name}` : 'Elegir objeto…'}
+                      </button>
+                    )}
                     {tokenKind === 'enemigo' && enemyTemplates.length > 0 && !tokenMonster && !tokenBossId && (
                       <select
                         value={tokenTemplateId}
@@ -833,6 +845,17 @@ export default function MapEditorPage() {
                         type="button"
                         onClick={() => setTokenMonster(null)}
                         aria-label="Quitar monstruo del compendio"
+                        className="text-xs text-bone/50 hover:text-blood"
+                      >
+                        ✕
+                      </button>
+                    )}
+                    {tokenKind === 'objeto' && tokenItem && (
+                      <button
+                        type="button"
+                        onClick={() => setTokenItem(null)}
+                        aria-label="Quitar objeto seleccionado"
+                        title="Dejar el marcador como objeto informativo, sin botín"
                         className="text-xs text-bone/50 hover:text-blood"
                       >
                         ✕
@@ -875,7 +898,7 @@ export default function MapEditorPage() {
                 onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
                 onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}
                 onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
-                onWallEdgeClick={(target) => toggleWall(target).catch(() => {})}
+                onWallStroke={saveWallStroke}
                 onElevationCellClick={(target) => toggleElevation(target).catch(() => {})}
                 onLightCellClick={(target) => toggleLight(target).catch(() => {})}
                 onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
@@ -1037,6 +1060,23 @@ export default function MapEditorPage() {
             setShowMonsterPicker(false);
           }}
           onClose={() => setShowMonsterPicker(false)}
+        />
+      )}
+      {showItemPicker && (
+        <SrdPicker
+          title="Elegir objeto para el marcador"
+          category="equipment"
+          onPick={(entry) => {
+            setTokenItem({
+              index: entry.index,
+              name: entry.name,
+              custom: Boolean(entry.custom),
+            });
+            setTokenName(entry.name);
+            setShowItemPicker(false);
+          }}
+          onClose={() => setShowItemPicker(false)}
+          renderMeta={(entry) => entry.meta?.damage?.dice ?? ''}
         />
       )}
     </div>

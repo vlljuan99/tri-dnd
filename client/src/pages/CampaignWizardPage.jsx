@@ -2,25 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import WizardProgress from '../components/wizard/WizardProgress.jsx';
-import StepIdentidad, { validateIdentidad } from '../components/campaign-wizard/StepIdentidad.jsx';
-import StepLore, { validateLore } from '../components/campaign-wizard/StepLore.jsx';
-import StepObjetivos, { validateObjetivos } from '../components/campaign-wizard/StepObjetivos.jsx';
+import StepConcepto, { validateConcepto } from '../components/campaign-wizard/StepIdentidad.jsx';
+import StepEstructura, { validateEstructura } from '../components/campaign-wizard/StepEstructura.jsx';
+import StepPresentacion, { validatePresentacion } from '../components/campaign-wizard/StepLore.jsx';
 import StepResumen from '../components/campaign-wizard/StepResumen.jsx';
 
-// Escaramuza (un solo tablero, partida rápida) salta lore y objetivos;
-// campaña (mundo con N tableros) los incluye. El tipo se fija al crear el
-// borrador (hasWorldMap) y no cambia dentro del asistente.
-function stepsFor(hasWorldMap) {
-  const base = [{ id: 'identidad', label: 'Identidad', Component: StepIdentidad, validate: validateIdentidad }];
-  if (hasWorldMap) {
-    base.push(
-      { id: 'lore', label: 'Lore', Component: StepLore, validate: validateLore },
-      { id: 'objetivos', label: 'Objetivos', Component: StepObjetivos, validate: validateObjetivos }
-    );
-  }
-  base.push({ id: 'resumen', label: 'Resumen y confirmación', Component: StepResumen, validate: () => ({}) });
-  return base;
+function campaignTypeOf(campaign) {
+  if (!campaign) return 'campana';
+  return campaign.campaignType ?? (campaign.hasWorldMap ? 'campana' : 'escaramuza');
 }
+
+const STEPS = [
+  { id: 'concepto', label: 'Concepto', Component: StepConcepto, validate: validateConcepto },
+  { id: 'estructura', label: 'Estructura del archivo', Component: StepEstructura, validate: validateEstructura },
+  {
+    id: 'presentacion',
+    label: 'Presentación al grupo',
+    Component: StepPresentacion,
+    validate: validatePresentacion,
+  },
+  { id: 'resumen', label: 'Abrir el estudio', Component: StepResumen, validate: () => ({}) },
+];
 
 export default function CampaignWizardPage() {
   const { id } = useParams();
@@ -39,29 +41,38 @@ export default function CampaignWizardPage() {
   const timerRef = useRef(null);
   const stepHeadingRef = useRef(null);
 
-  const STEPS = useMemo(() => stepsFor(campaign?.hasWorldMap), [campaign?.hasWorldMap]);
-
   useEffect(() => {
     api(`/campaigns/${id}`)
-      .then(({ campaign: loaded }) => {
+      .then(async ({ campaign: loaded }) => {
         if (loaded.role !== 'dm') {
-          setError('Solo el DM puede editar esta campaña.');
+          setError('Solo el DM puede preparar esta campaña.');
+          return;
+        }
+        const loadedType = campaignTypeOf(loaded);
+        // Las escaramuzas nuevas ya nacen completas y van directas al editor.
+        // Este caso solo cubre enlaces o borradores antiguos sin recuperar un
+        // asistente que ya no forma parte de su flujo rápido.
+        if (loadedType === 'escaramuza') {
+          if (loaded.status !== 'complete') {
+            await api(`/campaigns/${id}`, { method: 'PATCH', body: { status: 'complete' } });
+          }
+          navigate(`/campanas/${id}/editor`, { replace: true });
           return;
         }
         if (loaded.status === 'complete') {
-          navigate(`/campanas/${id}`, { replace: true });
+          navigate(`/campanas/${id}/archivo`, { replace: true });
           return;
         }
         setCampaign(loaded);
-        const steps = stepsFor(loaded.hasWorldMap);
-        setStep(Math.min(loaded.wizardStep ?? 0, steps.length - 1));
-        setMaxStepReached(Math.min(loaded.wizardStep ?? 0, steps.length - 1));
+        const savedStep = Math.min(loaded.wizardStep ?? 0, STEPS.length - 1);
+        setStep(savedStep);
+        setMaxStepReached(savedStep);
       })
       .catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async ({ throwOnError = false } = {}) => {
     const body = pendingRef.current;
     pendingRef.current = {};
     if (Object.keys(body).length === 0) return;
@@ -69,15 +80,16 @@ export default function CampaignWizardPage() {
     try {
       await api(`/campaigns/${id}`, { method: 'PATCH', body });
       setSaveState('saved');
-    } catch {
+    } catch (saveError) {
       setSaveState('error');
       Object.assign(pendingRef.current, body);
+      if (throwOnError) throw saveError;
     }
   }, [id]);
 
   const patch = useCallback(
     (fields) => {
-      setCampaign((c) => (c ? { ...c, ...fields } : c));
+      setCampaign((current) => (current ? { ...current, ...fields } : current));
       Object.assign(pendingRef.current, fields);
       setSaveState('pending');
       clearTimeout(timerRef.current);
@@ -86,9 +98,9 @@ export default function CampaignWizardPage() {
     [flush]
   );
 
-  async function flushNow() {
+  async function flushNow(throwOnError = false) {
     clearTimeout(timerRef.current);
-    await flush();
+    await flush({ throwOnError });
   }
 
   useEffect(() => {
@@ -112,10 +124,10 @@ export default function CampaignWizardPage() {
 
   const stepStatuses = useMemo(() => {
     if (!campaign) return STEPS.map(() => 'locked');
-    return STEPS.map((s, i) => {
-      if (i > maxStepReached) return 'locked';
-      if (i === step) return 'current';
-      const errs = s.validate(campaign);
+    return STEPS.map((currentStep, index) => {
+      if (index > maxStepReached) return 'locked';
+      if (index === step) return 'current';
+      const errs = currentStep.validate(campaign);
       return Object.keys(errs).length > 0 ? 'error' : 'done';
     });
   }, [campaign, maxStepReached, step, STEPS]);
@@ -126,25 +138,25 @@ export default function CampaignWizardPage() {
     if (Object.keys(errs).length > 0) return;
     const next = Math.min(step + 1, STEPS.length - 1);
     setStep(next);
-    setMaxStepReached((m) => Math.max(m, next));
+    setMaxStepReached((current) => Math.max(current, next));
     setStepErrors({});
     patch({ wizardStep: next });
     flushNow();
   }
 
   function goBack() {
-    const prev = Math.max(step - 1, 0);
-    setStep(prev);
+    const previous = Math.max(step - 1, 0);
+    setStep(previous);
     setStepErrors({});
-    patch({ wizardStep: prev });
+    patch({ wizardStep: previous });
     flushNow();
   }
 
-  function jumpTo(i) {
-    if (i > maxStepReached) return;
-    setStep(i);
+  function jumpTo(index) {
+    if (index > maxStepReached) return;
+    setStep(index);
     setStepErrors({});
-    patch({ wizardStep: i });
+    patch({ wizardStep: index });
     flushNow();
   }
 
@@ -163,11 +175,9 @@ export default function CampaignWizardPage() {
     setFinishError('');
     setFinishing(true);
     try {
-      await flushNow();
+      await flushNow(true);
       await api(`/campaigns/${id}`, { method: 'PATCH', body: { status: 'complete' } });
-      // Campaña: siguiente paso natural es montar el mundo (localizaciones);
-      // escaramuza: montar directamente el único tablero.
-      navigate(campaign.hasWorldMap ? `/campanas/${id}/mundo` : `/campanas/${id}/editor`);
+      navigate(`/campanas/${id}/archivo`);
     } catch (e) {
       setFinishError(e.message);
     } finally {
@@ -196,11 +206,15 @@ export default function CampaignWizardPage() {
     error: 'Error al guardar',
   };
   const { Component } = STEPS[step];
-  const steps = STEPS.map((s, i) => ({ id: s.id, label: s.label, status: stepStatuses[i] }));
+  const progressSteps = STEPS.map((currentStep, index) => ({
+    id: currentStep.id,
+    label: currentStep.label,
+    status: stepStatuses[index],
+  }));
 
   return (
     <div className="min-h-full bg-night-950 text-bone">
-      <div className="mx-auto grid max-w-3xl gap-4 p-4 pb-28 sm:grid-cols-[220px_1fr] sm:pb-6">
+      <div className="mx-auto grid max-w-4xl gap-4 p-4 pb-28 sm:grid-cols-[230px_1fr] sm:pb-6">
         <div className="flex items-center justify-between sm:hidden">
           <button onClick={discardDraft} className="text-sm text-bone/50 hover:text-blood">
             Cancelar
@@ -211,13 +225,19 @@ export default function CampaignWizardPage() {
         </div>
 
         <aside className="sm:sticky sm:top-4 sm:self-start">
-          <WizardProgress steps={steps} current={step} onJump={jumpTo} />
+          <div className="mb-3 hidden rounded-sm border border-gold/15 bg-night-900/70 p-3 sm:block">
+            <p className="font-display text-sm tracking-wide text-gold">Crear campaña</p>
+            <p className="mt-1 text-xs leading-relaxed text-bone/45">
+              La base de tu archivo y estudio como DM.
+            </p>
+          </div>
+          <WizardProgress steps={progressSteps} current={step} onJump={jumpTo} />
         </aside>
 
         <main
           ref={stepHeadingRef}
           tabIndex={-1}
-          className="rounded-md border border-gold/15 bg-night-900 p-4 focus:outline-none"
+          className="rounded-md border border-gold/15 bg-night-900 p-5 focus:outline-none"
         >
           <Component
             campaign={campaign}

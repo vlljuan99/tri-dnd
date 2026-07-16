@@ -16,6 +16,7 @@ import DiceOverlay from './components/DiceOverlay.jsx';
 const CampaignGamePage = lazy(() => import('./features/tactical-map/pages/CampaignGamePage.jsx'));
 const MapEditorPage = lazy(() => import('./features/map-editor/pages/MapEditorPage.jsx'));
 const WorldMapEditorPage = lazy(() => import('./features/world-map/pages/WorldMapEditorPage.jsx'));
+const CampaignArchivePage = lazy(() => import('./features/campaign-archive/pages/CampaignArchivePage.jsx'));
 
 // La mesa de juego (chat) y el tablero eran dos pantallas; ahora es una
 // sola en /campanas/:id — este enlace antiguo sigue funcionando
@@ -103,6 +104,20 @@ export default function App() {
         />
         <Route path="/campanas/:id/tablero" element={<RedirectToCampaign />} />
         <Route path="/campanas/:id/gestion" element={<CampaignManagementPage />} />
+        <Route
+          path="/campanas/:id/archivo"
+          element={
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center bg-night-950 text-bone">
+                  <p className="font-display text-lg tracking-wide text-gold">Abriendo el Archivo de campaña...</p>
+                </div>
+              }
+            >
+              <CampaignArchivePage />
+            </Suspense>
+          }
+        />
         <Route path="/campanas/:id/asistente" element={<CampaignWizardPage />} />
         <Route
           path="/campanas/:id/mundo"

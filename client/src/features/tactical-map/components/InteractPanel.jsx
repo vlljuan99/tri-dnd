@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../../api.js';
 import { SKILLS, skillBonus, formatModifier } from '../../../lib/dnd.js';
 import { rollAttack } from '../../../lib/dice.js';
+import { isLootInteraction } from '../domain/interactions.js';
 
 const DOOR_LABELS = { puerta: 'Puerta', escalera: 'Escalera', portal: 'Portal' };
 
@@ -20,7 +21,7 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
   const [looted, setLooted] = useState(null); // [{name, qty}] tras saquear
 
   // Un marcador de botín se saquea (pasa al inventario), no se "interactúa"
-  const isLoot = type === 'token' && target.hasLoot;
+  const isLoot = isLootInteraction(type, target);
   const skill = !isLoot && target.skill ? SKILLS.find((s) => s.index === target.skill) : null;
 
   async function loot() {

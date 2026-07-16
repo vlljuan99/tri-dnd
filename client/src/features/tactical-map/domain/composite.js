@@ -97,6 +97,9 @@ export function composeBoardFromMap(map, preferredFloorId) {
       // kind crudo (además del type genérico de render): permite distinguir
       // trampa/objeto interactuables de un npc cualquiera
       kind: t.kind,
+      // El marcador conserva si contiene botín para que InteractPanel abra
+      // el flujo de saqueo en vez de tratarlo como un objeto informativo.
+      hasLoot: Boolean(t.hasLoot),
       // Enlace al compendio SRD y variante por instancia (Fase 17): datos de
       // DM, ya filtrados en servidor (undefined para el jugador). Necesarios
       // para que el DM pueda atacar con este enemigo (ficha de monstruo).

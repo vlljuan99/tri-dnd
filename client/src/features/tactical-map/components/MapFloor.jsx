@@ -58,6 +58,28 @@ function dimmedProps(room) {
   return room.revealed === false ? { transparent: true, opacity: 0.4 } : {};
 }
 
+function roomWallKey(room, col, row, side) {
+  const x = room.col + col;
+  const y = room.row + row;
+  if (side === 'n') return `h:${x},${y}`;
+  if (side === 's') return `h:${x},${y + 1}`;
+  if (side === 'o') return `v:${x},${y}`;
+  return `v:${x + 1},${y}`;
+}
+
+function boardDoorEdges(doors = []) {
+  const edges = new Set();
+  for (const door of doors) {
+    if (!door.isOpen || door.kind !== 'puerta' || !door.edge || (!door.dirX && !door.dirY)) continue;
+    edges.add(
+      door.dirX
+        ? `v:${door.col + (door.dirX > 0 ? 1 : 0)},${door.row}`
+        : `h:${door.col},${door.row + (door.dirY > 0 ? 1 : 0)}`
+    );
+  }
+  return edges;
+}
+
 function RoomImageFloor({ room, gridSize }) {
   const texture = useLoader(THREE.TextureLoader, room.backgroundUrl);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -104,7 +126,7 @@ function RoomObstacles({ room, gridSize }) {
 // Paredes por arista de la sala: muros gruesos y altos sobre el borde de la
 // casilla. Bloquean paso y visión (validado en servidor); aquí solo se pintan.
 // El color lo elige el DM por mapa (wallColor).
-function RoomWalls({ room, gridSize, wallColor }) {
+function RoomWalls({ room, gridSize, wallColor, doorEdges }) {
   const edges = room.wallEdges ?? [];
   if (!edges.length) return null;
   const thickness = gridSize * 0.22;
@@ -112,6 +134,7 @@ function RoomWalls({ room, gridSize, wallColor }) {
   return (
     <group>
       {edges.map(([c, r, side]) => {
+        if (doorEdges.has(roomWallKey(room, c, r, side))) return null;
         const horizontal = side === 'n' || side === 's';
         // Punto medio de la arista en coordenadas de mundo
         const x = (room.col + c + (side === 'e' ? 1 : horizontal ? 0.5 : 0)) * gridSize;
@@ -172,9 +195,11 @@ const MAX_REAL_LIGHTS = 16;
 function collectBoardLights(map) {
   const lights = [];
   const every = map.wallLightEvery ?? 0;
+  const doorEdges = boardDoorEdges(map.doors);
   for (const room of map.rooms ?? []) {
     if (every > 0) {
       for (const [c, r, side] of room.wallEdges ?? []) {
+        if (doorEdges.has(roomWallKey(room, c, r, side))) continue;
         const x = room.col + c;
         const y = room.row + r;
         // Determinista y ~1 por cada `every` casillas a lo largo de un muro
@@ -241,6 +266,7 @@ export default function MapFloor({ map }) {
           disabledCells: map.disabledCells ?? [],
         },
       ];
+  const doorEdges = useMemo(() => boardDoorEdges(map.doors), [map.doors]);
 
   return (
     <group>
@@ -254,7 +280,7 @@ export default function MapFloor({ map }) {
             <RoomPlainFloor room={room} gridSize={map.gridSize} />
           )}
           <RoomObstacles room={room} gridSize={map.gridSize} />
-          <RoomWalls room={room} gridSize={map.gridSize} wallColor={map.wallColor} />
+          <RoomWalls room={room} gridSize={map.gridSize} wallColor={map.wallColor} doorEdges={doorEdges} />
           <RoomElevation room={room} gridSize={map.gridSize} />
         </group>
       ))}

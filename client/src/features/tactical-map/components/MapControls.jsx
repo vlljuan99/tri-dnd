@@ -21,6 +21,7 @@ export default function MapControls({
   playerView,
   onTogglePlayerView,
   editorHref,
+  showArchive,
   onCenter,
   onZoomIn,
   onZoomOut,
@@ -190,6 +191,15 @@ export default function MapControls({
               <Link to={editorHref} className={BTN_IDLE}>
                 Editor
               </Link>
+              {showArchive && (
+                <Link
+                  to={editorHref.replace(/\/editor$/, '/archivo')}
+                  className={BTN_IDLE}
+                  title="Lore, narrativa, personajes, lugares y recursos de la campaña"
+                >
+                  Archivo
+                </Link>
+              )}
               <Link to={editorHref.replace(/\/editor$/, '/gestion')} className={BTN_IDLE} title="PNJ, jefes y biblioteca de la campaña">
                 Gestión
               </Link>

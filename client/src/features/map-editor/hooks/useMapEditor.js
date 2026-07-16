@@ -167,6 +167,11 @@ export function useMapEditor(campaignId, { initialMapId = null } = {}) {
       ),
     patchRoom: (roomId, fields) =>
       mutate(() => api(`${base}/${selectedMapId}/salas/${roomId}`, { method: 'PATCH', body: fields })),
+    // Un trazo del pincel puede afectar a varias salas. El backend aplica
+    // todas sus paredes de forma atómica y aquí solo recargamos el mapa una
+    // vez al terminar, en lugar de lanzar una petición por arista.
+    patchWalls: (rooms) =>
+      mutate(() => api(`${base}/${selectedMapId}/paredes`, { method: 'PATCH', body: { rooms } })),
     deleteRoom: (roomId) =>
       mutate(() => api(`${base}/${selectedMapId}/salas/${roomId}`, { method: 'DELETE' })),
 

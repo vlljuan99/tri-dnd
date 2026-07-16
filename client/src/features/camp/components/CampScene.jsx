@@ -370,12 +370,22 @@ export default function CampScene({
               <p className="text-sm italic text-bone/50">El DM aún no ha escrito nada en el diario.</p>
             )}
             {isDm && (
-              <Link
-                to={`/campanas/${campaignId}/gestion`}
-                className="text-xs text-gold underline hover:text-gold/80"
-              >
-                Gestión de la campaña
-              </Link>
+              <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gold/15 pt-3">
+                {(campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
+                  <Link
+                    to={`/campanas/${campaignId}/archivo`}
+                    className="rounded-sm border border-gold/35 px-3 py-1.5 font-display text-xs tracking-wide text-gold hover:bg-gold/10"
+                  >
+                    Abrir archivo del DM
+                  </Link>
+                )}
+                <Link
+                  to={`/campanas/${campaignId}/gestion`}
+                  className="text-xs text-gold/70 underline hover:text-gold"
+                >
+                  Recursos y gestión
+                </Link>
+              </div>
             )}
           </CampPanel>
         )}

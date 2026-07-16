@@ -464,6 +464,9 @@ export default function CampaignGamePage() {
           })
         }
         editorHref={`/campanas/${campaignId}/editor`}
+        showArchive={
+          (campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana'
+        }
         ownCharacterId={ownCharacterId}
         campaignId={campaignId}
       />

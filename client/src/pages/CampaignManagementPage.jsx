@@ -3,13 +3,28 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import CampaignEventsPanel from '../components/CampaignEventsPanel.jsx';
 
-// Panel de gestión del DM dentro de una campaña (Fase 16): organiza sus
-// PNJ/jefes (personajes kind='boss') y qué objetos/hechizos de su biblioteca
-// están asignados a esta campaña. Solo el DM.
+const settingsInputClass =
+  'w-full rounded-sm border border-bone/20 bg-night-950 px-3 py-2 text-sm text-bone placeholder:text-bone/30 focus:border-gold focus:outline-none disabled:opacity-50';
+const settingsLabelClass = 'flex flex-col gap-1 text-xs uppercase tracking-wider text-bone/50';
+
+function settingsFromCampaign(campaign) {
+  return {
+    name: campaign.name ?? '',
+    description: campaign.description ?? '',
+    maxPlayers: campaign.maxPlayers == null ? '' : String(campaign.maxPlayers),
+    lore: campaign.lore ?? '',
+    objectives: (campaign.objectives ?? []).join('\n'),
+  };
+}
+
+// Panel permanente del DM: identidad y presentación pública de la campaña,
+// PNJ/enemigos, eventos y recursos asignados. Solo el DM.
 export default function CampaignManagementPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [campaign, setCampaign] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [settingsNotice, setSettingsNotice] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,7 +36,12 @@ export default function CampaignManagementPage() {
   }
 
   useEffect(() => {
-    api(`/campaigns/${id}`).then(({ campaign: c }) => setCampaign(c)).catch((e) => setError(e.message));
+    api(`/campaigns/${id}`)
+      .then(({ campaign: c }) => {
+        setCampaign(c);
+        setSettings(settingsFromCampaign(c));
+      })
+      .catch((e) => setError(e.message));
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -74,6 +94,70 @@ export default function CampaignManagementPage() {
     }
   }
 
+  function changeSetting(field, value) {
+    setSettings((current) => ({ ...current, [field]: value }));
+    setError('');
+    setSettingsNotice('');
+  }
+
+  async function saveSettings(event) {
+    event.preventDefault();
+    if (!settings) return;
+
+    const name = settings.name.trim();
+    if (!name) {
+      setError('La campaña necesita un nombre.');
+      return;
+    }
+
+    const maxPlayers = settings.maxPlayers === '' ? null : Number(settings.maxPlayers);
+    if (maxPlayers !== null && (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 20)) {
+      setError('Las plazas deben ser un número entre 1 y 20.');
+      return;
+    }
+
+    const objectives = settings.objectives
+      .split('\n')
+      .map((objective) => objective.trim())
+      .filter(Boolean);
+    if (objectives.length > 30) {
+      setError('Puedes publicar como máximo 30 objetivos.');
+      return;
+    }
+    if (objectives.some((objective) => objective.length > 200)) {
+      setError('Cada objetivo puede ocupar como máximo 200 caracteres.');
+      return;
+    }
+
+    const narrativeCampaign =
+      (campaign.campaignType ?? (campaign.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana';
+    const body = { name, maxPlayers };
+    if (narrativeCampaign) {
+      Object.assign(body, {
+        description: settings.description,
+        lore: settings.lore,
+        objectives,
+      });
+    }
+
+    setBusy(true);
+    setError('');
+    setSettingsNotice('');
+    try {
+      const { campaign: updated } = await api(`/campaigns/${id}`, { method: 'PATCH', body });
+      setCampaign(updated);
+      setSettings(settingsFromCampaign(updated));
+      setSettingsNotice('Ajustes guardados ✓');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const narrativeCampaign =
+    campaign && (campaign.campaignType ?? (campaign.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana';
+
   if (campaign && campaign.role !== 'dm') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-night-950 text-bone">
@@ -86,8 +170,19 @@ export default function CampaignManagementPage() {
   return (
     <div className="min-h-full bg-night-950 text-bone">
       <div className="mx-auto max-w-3xl px-4 py-6">
-        <div className="mb-2 flex items-center justify-between">
-          <Link to={`/campanas/${id}`} className="font-display text-sm text-gold/80 hover:text-gold">← Mesa</Link>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Link to={`/campanas/${id}`} className="font-display text-sm text-gold/80 hover:text-gold">← Mesa</Link>
+            {campaign &&
+              (campaign.campaignType ?? (campaign.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
+                <Link
+                  to={`/campanas/${id}/archivo`}
+                  className="rounded-sm border border-gold/30 px-2.5 py-1 font-display text-sm text-gold hover:bg-gold/10"
+                >
+                  Archivo del DM
+                </Link>
+              )}
+          </div>
           <Link to={`/campanas/${id}/editor`} className="font-display text-sm text-gold/80 hover:text-gold">Editor de mapas →</Link>
         </div>
         <h1 className="font-display text-2xl tracking-wide text-gold">Gestión de la campaña</h1>
@@ -98,6 +193,108 @@ export default function CampaignManagementPage() {
           <p className="text-bone/50">Cargando…</p>
         ) : (
           <div className="space-y-8">
+            {/* Ajustes permanentes: el asistente solo es la primera visita. */}
+            {settings && (
+              <section className="rounded-md border border-gold/20 bg-night-900/70 p-4">
+                <form onSubmit={saveSettings}>
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-display text-lg tracking-wide text-gold">
+                        {narrativeCampaign ? 'Ajustes de campaña' : 'Ajustes de la escaramuza'}
+                      </h2>
+                      <p className="mt-1 max-w-2xl text-xs leading-relaxed text-bone/50">
+                        {narrativeCampaign
+                          ? 'Edita aquí la identidad y la presentación pública. El lore privado y los recursos narrativos siguen en el Archivo del DM.'
+                          : 'La partida rápida solo necesita su nombre y el número de plazas.'}
+                      </p>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={busy || !settings.name.trim()}
+                      className="rounded-sm bg-gold px-4 py-2 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90 disabled:opacity-40"
+                    >
+                      {busy ? 'Guardando…' : 'Guardar ajustes'}
+                    </button>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
+                    <label className={settingsLabelClass}>
+                      Nombre
+                      <input
+                        value={settings.name}
+                        onChange={(event) => changeSetting('name', event.target.value)}
+                        maxLength={80}
+                        required
+                        className={`${settingsInputClass} normal-case tracking-normal`}
+                      />
+                    </label>
+                    <label className={settingsLabelClass}>
+                      Plazas
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={settings.maxPlayers}
+                        onChange={(event) => changeSetting('maxPlayers', event.target.value)}
+                        placeholder="Sin límite"
+                        className={`${settingsInputClass} font-mono normal-case tracking-normal`}
+                      />
+                    </label>
+                  </div>
+
+                  {narrativeCampaign && (
+                    <div className="mt-4 space-y-4 border-t border-bone/10 pt-4">
+                      <label className={settingsLabelClass}>
+                        Concepto / sinopsis
+                        <textarea
+                          value={settings.description}
+                          onChange={(event) => changeSetting('description', event.target.value)}
+                          rows={4}
+                          maxLength={2000}
+                          placeholder="La premisa central de la campaña…"
+                          className={`${settingsInputClass} resize-y normal-case tracking-normal`}
+                        />
+                        <span className="text-right font-mono text-[0.65rem] text-bone/35">
+                          {settings.description.length}/2000
+                        </span>
+                      </label>
+
+                      <label className={settingsLabelClass}>
+                        Introducción pública
+                        <textarea
+                          value={settings.lore}
+                          onChange={(event) => changeSetting('lore', event.target.value)}
+                          rows={7}
+                          maxLength={5000}
+                          placeholder="Lo que el grupo conoce al comenzar la aventura…"
+                          className={`${settingsInputClass} resize-y normal-case tracking-normal`}
+                        />
+                        <span className="text-xs normal-case tracking-normal text-bone/40">
+                          Aparece en el diario del campamento; no incluyas aquí secretos del DM.
+                        </span>
+                      </label>
+
+                      <label className={settingsLabelClass}>
+                        Objetivos conocidos
+                        <textarea
+                          value={settings.objectives}
+                          onChange={(event) => changeSetting('objectives', event.target.value)}
+                          rows={5}
+                          placeholder={'Encontrar la espada perdida\nDescubrir quién controla el puerto'}
+                          className={`${settingsInputClass} resize-y normal-case tracking-normal`}
+                        />
+                        <span className="text-xs normal-case tracking-normal text-bone/40">
+                          Un objetivo por línea, hasta 30.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
+                  {settingsNotice && <p className="mt-3 text-sm text-sage">{settingsNotice}</p>}
+                </form>
+              </section>
+            )}
+
             {/* PNJ, enemigos y jefes */}
             <section>
               <div className="mb-3 flex items-center justify-between">

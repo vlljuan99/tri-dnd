@@ -19,6 +19,11 @@ import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/
 import { buildWallSet } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 import { serializeEvent } from './events.js';
+import {
+  narrativeImagesForCampaign,
+  removeNarrativeImage,
+  seedDefaultNarrativeSections,
+} from '../services/campaignArchive.js';
 
 export const campaignsRouter = Router();
 campaignsRouter.use(requireAuth);
@@ -41,12 +46,17 @@ export function getMembership(campaignId, userId) {
 
 function serializeCampaign(row, role) {
   const table = db.prepare('SELECT is_live FROM game_tables WHERE campaign_id = ?').get(row.id);
+  const isDm = role === 'dm';
   return {
     id: row.id,
     name: row.name,
-    description: row.description,
+    // La sinopsis es la brújula privada de preparación del DM. La presentación
+    // pública al grupo vive en lore/objectives y sí se entrega a jugadores.
+    description: isDm ? row.description : null,
     scene: row.scene,
-    inviteCode: row.invite_code,
+    // Ocultarlo en el cliente no basta: un jugador ya unido no necesita volver
+    // a recibir el código con el que otras personas pueden entrar.
+    inviteCode: isDm ? row.invite_code : null,
     dmUserId: row.dm_user_id,
     role,
     isLive: Boolean(table?.is_live),
@@ -55,6 +65,7 @@ function serializeCampaign(row, role) {
     objectives: JSON.parse(row.objectives || '[]'),
     hasWorldMap: Boolean(row.has_world_map),
     worldMapUrl: row.world_map_url ?? null,
+    campaignType: row.campaign_type ?? (row.has_world_map ? 'campana' : 'escaramuza'),
     status: row.status,
     wizardStep: row.wizard_step,
   };
@@ -84,19 +95,61 @@ campaignsRouter.get('/', (req, res) => {
 // el asistente guiado (/campanas/:id/asistente) rellena el resto paso a
 // paso, igual que un personaje nuevo nace en borrador para el asistente de PJ.
 campaignsRouter.post('/', (req, res) => {
-  const isAdventure = Boolean(req.body?.hasWorldMap);
+  const requestedType = req.body?.campaignType;
+  if (requestedType !== undefined && requestedType !== 'campana' && requestedType !== 'escaramuza') {
+    return res.status(400).json({ error: 'El tipo debe ser campana o escaramuza' });
+  }
+  if (req.body?.hasWorldMap !== undefined && typeof req.body.hasWorldMap !== 'boolean') {
+    return res.status(400).json({ error: 'La opción de mapa de mundo no es válida' });
+  }
+
+  // Compatibilidad con el cliente anterior: hasWorldMap=true era una campaña
+  // y false una escaramuza. Los clientes nuevos envían campaignType y el mapa
+  // queda como una capacidad independiente.
+  const campaignType = requestedType ?? (req.body?.hasWorldMap ? 'campana' : 'escaramuza');
+  const hasWorldMap = req.body?.hasWorldMap ?? campaignType === 'campana';
+  const requestedName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (requestedName.length > 80) return res.status(400).json({ error: 'El nombre admite hasta 80 caracteres' });
+  const defaultName = campaignType === 'campana' ? 'Nueva campaña' : 'Nueva escaramuza';
 
   const create = db.transaction(() => {
     const info = db
       .prepare(
-        "INSERT INTO campaigns (name, dm_user_id, invite_code, has_world_map, status) VALUES (?, ?, ?, ?, 'draft')"
+        `INSERT INTO campaigns
+           (name, dm_user_id, invite_code, has_world_map, campaign_type, status)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(isAdventure ? 'Nueva aventura' : 'Nueva escaramuza', req.user.id, generateInviteCode(), isAdventure ? 1 : 0);
-    const id = info.lastInsertRowid;
+      .run(
+        requestedName || defaultName,
+        req.user.id,
+        generateInviteCode(),
+        hasWorldMap ? 1 : 0,
+        campaignType,
+        campaignType === 'campana' ? 'draft' : 'complete'
+      );
+    const id = Number(info.lastInsertRowid);
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
     // combat_active nace en 1: el modo por turnos está activo por defecto
     // en toda mesa nueva (Fase 8.5); el DM lo alterna a modo libre cuando quiera.
     db.prepare('INSERT INTO game_tables (campaign_id, combat_active) VALUES (?, 1)').run(id);
+
+    if (campaignType === 'campana') {
+      seedDefaultNarrativeSections(id);
+    } else {
+      // La escaramuza es deliberadamente inmediata: nace completa y con un
+      // tablero mínimo activo, sin pasar por el asistente ni por el archivo.
+      const mapInfo = db.prepare("INSERT INTO maps (campaign_id, name) VALUES (?, 'Escaramuza')").run(id);
+      const mapId = Number(mapInfo.lastInsertRowid);
+      const floorInfo = db
+        .prepare("INSERT INTO map_floors (map_id, name, position) VALUES (?, 'Campo de batalla', 0)")
+        .run(mapId);
+      db.prepare(
+        `INSERT INTO map_rooms
+           (floor_id, name, x, y, width, height, revealed)
+         VALUES (?, 'Escena inicial', 0, 0, 12, 8, 1)`
+      ).run(floorInfo.lastInsertRowid);
+      db.prepare('UPDATE game_tables SET active_map_id = ? WHERE campaign_id = ?').run(mapId, id);
+    }
     return id;
   });
   const id = create();
@@ -160,7 +213,8 @@ campaignsRouter.patch('/:id', (req, res) => {
     return res.status(403).json({ error: 'Solo el DM puede editar la campaña' });
   }
 
-  const { name, lore, objectives, maxPlayers, hasWorldMap, status, wizardStep } = req.body ?? {};
+  const { name, description, lore, objectives, maxPlayers, hasWorldMap, campaignType, status, wizardStep } =
+    req.body ?? {};
   const sets = [];
   const values = [];
 
@@ -170,6 +224,13 @@ campaignsRouter.patch('/:id', (req, res) => {
     }
     sets.push('name = ?');
     values.push(name.trim());
+  }
+  if (description !== undefined) {
+    if (typeof description !== 'string' || description.length > 2000) {
+      return res.status(400).json({ error: 'La sinopsis admite hasta 2.000 caracteres' });
+    }
+    sets.push('description = ?');
+    values.push(description);
   }
   if (lore !== undefined) {
     if (typeof lore !== 'string' || lore.length > 5000) {
@@ -193,8 +254,18 @@ campaignsRouter.patch('/:id', (req, res) => {
     values.push(maxPlayers ?? null);
   }
   if (hasWorldMap !== undefined) {
+    if (typeof hasWorldMap !== 'boolean') {
+      return res.status(400).json({ error: 'La opción de mapa de mundo no es válida' });
+    }
     sets.push('has_world_map = ?');
     values.push(hasWorldMap ? 1 : 0);
+  }
+  if (campaignType !== undefined) {
+    if (campaignType !== 'campana' && campaignType !== 'escaramuza') {
+      return res.status(400).json({ error: 'El tipo debe ser campana o escaramuza' });
+    }
+    sets.push('campaign_type = ?');
+    values.push(campaignType);
   }
   if (wizardStep !== undefined) {
     if (!(Number.isInteger(wizardStep) && wizardStep >= 0 && wizardStep <= 10)) {
@@ -216,7 +287,10 @@ campaignsRouter.patch('/:id', (req, res) => {
   }
 
   if (sets.length) {
-    db.prepare(`UPDATE campaigns SET ${sets.join(', ')} WHERE id = ?`).run(...values, row.id);
+    db.transaction(() => {
+      db.prepare(`UPDATE campaigns SET ${sets.join(', ')} WHERE id = ?`).run(...values, row.id);
+      if (campaignType === 'campana') seedDefaultNarrativeSections(row.id);
+    })();
   }
   const updated = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(row.id);
   res.json({ campaign: serializeCampaign(updated, 'dm') });
@@ -232,11 +306,13 @@ campaignsRouter.delete('/:id', (req, res) => {
     return res.status(403).json({ error: 'Solo el DM puede borrar la campaña' });
   }
 
+  const narrativeImages = narrativeImagesForCampaign(row.id);
   db.transaction(() => {
     // active_map_id no tiene ON DELETE: se limpia antes de que caigan los mapas
     db.prepare('UPDATE game_tables SET active_map_id = NULL WHERE campaign_id = ?').run(row.id);
     db.prepare('DELETE FROM campaigns WHERE id = ?').run(row.id);
   })();
+  narrativeImages.forEach(removeNarrativeImage);
   res.json({ ok: true });
 });
 
