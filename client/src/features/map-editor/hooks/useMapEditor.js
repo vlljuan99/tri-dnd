@@ -5,7 +5,7 @@ import { parseUvtt, uvttImageBlob } from '../lib/uvtt.js';
 // Estado y llamadas a la API del editor de mapas del DM. Tras cada mutación
 // se recarga el mapa completo del servidor: a la escala de un editor de
 // preparación es más simple y fiable que mantener el estado a mano.
-export function useMapEditor(campaignId) {
+export function useMapEditor(campaignId, { initialMapId = null } = {}) {
   const [maps, setMaps] = useState(null);
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [map, setMap] = useState(null);
@@ -38,7 +38,7 @@ export function useMapEditor(campaignId) {
     loadMaps()
       .then((loaded) => {
         if (cancelled || !loaded.length) return;
-        const initial = loaded.find((m) => m.isActive) || loaded[0];
+        const initial = loaded.find((m) => m.id === initialMapId) || loaded.find((m) => m.isActive) || loaded[0];
         setSelectedMapId(initial.id);
       })
       .catch((e) => {
@@ -47,7 +47,7 @@ export function useMapEditor(campaignId) {
     return () => {
       cancelled = true;
     };
-  }, [loadMaps]);
+  }, [loadMaps, initialMapId]);
 
   useEffect(() => {
     let cancelled = false;

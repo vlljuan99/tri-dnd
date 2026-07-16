@@ -5,6 +5,7 @@ import AuthPage from './pages/AuthPage.jsx';
 import HubPage from './pages/HubPage.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import BibliotecaPage from './pages/BibliotecaPage.jsx';
+import CompendiumPage from './pages/CompendiumPage.jsx';
 import CampaignManagementPage from './pages/CampaignManagementPage.jsx';
 import CharacterSheetPage from './pages/CharacterSheetPage.jsx';
 import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
@@ -73,6 +74,14 @@ export default function App() {
           element={
             <ParchmentShell>
               <BibliotecaPage />
+            </ParchmentShell>
+          }
+        />
+        <Route
+          path="/compendio"
+          element={
+            <ParchmentShell>
+              <CompendiumPage />
             </ParchmentShell>
           }
         />

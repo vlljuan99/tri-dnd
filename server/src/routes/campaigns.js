@@ -140,10 +140,13 @@ campaignsRouter.get('/:id', (req, res) => {
     .all(row.id);
   const characters = db
     .prepare(
-      `SELECT id, user_id, name, class_index, race_index, level, hp_current, hp_max, ac, avatar_path AS avatarUrl
+      `SELECT id, user_id, name, kind, class_index, race_index, level, hp_current, hp_max, ac, avatar_path AS avatarUrl
        FROM characters WHERE campaign_id = ?`
     )
-    .all(row.id);
+    .all(row.id)
+    // Las fichas completas del DM pueden contener PG/CA exactos de enemigos.
+    // El jugador solo recibe PJ; el DM conserva su vista completa.
+    .filter((character) => membership.role === 'dm' || character.kind === 'pj');
 
   res.json({ campaign: serializeCampaign(row, membership.role), members, characters });
 });
@@ -264,7 +267,7 @@ campaignsRouter.get('/:id/gestion', (req, res) => {
   // `assigned` = ya vinculado a esta campaña (characters.campaign_id).
   const characters = db
     .prepare(
-      `SELECT id, name, level, hp_max, ac, avatar_path AS avatarUrl, campaign_id
+      `SELECT id, name, level, hp_max, ac, avatar_path AS avatarUrl, campaign_id, dm_category
        FROM characters WHERE user_id = ? AND kind = 'boss' ORDER BY name`
     )
     .all(req.user.id)
@@ -275,6 +278,7 @@ campaignsRouter.get('/:id/gestion', (req, res) => {
       hpMax: c.hp_max,
       ac: c.ac,
       avatarUrl: c.avatarUrl,
+      dmCategory: c.dm_category ?? 'jefe',
       assigned: c.campaign_id === campaign.id,
       otherCampaign: c.campaign_id != null && c.campaign_id !== campaign.id,
     }));
@@ -818,7 +822,13 @@ campaignsRouter.post('/:id/marcadores/:tokenId/interactuar', (req, res) => {
     return res.status(400).json({ error: 'Ese marcador no se interactúa así' });
   }
 
-  if (isDm) return res.json({ ok: true, success: true });
+  if (isDm) {
+    return res.json({
+      ok: true,
+      success: true,
+      consequence: token.success_consequence || '',
+    });
+  }
 
   const character = db
     .prepare('SELECT * FROM characters WHERE id = ? AND campaign_id = ? AND user_id = ?')
@@ -847,10 +857,24 @@ campaignsRouter.post('/:id/marcadores/:tokenId/interactuar', (req, res) => {
       return res.status(400).json({ error: 'Falta la tirada de habilidad' });
     }
     if (roll.total < token.dc) {
-      return res.json({ ok: true, success: false, dc: token.dc });
+      return res.json({
+        ok: true,
+        success: false,
+        dc: token.dc,
+        consequence: token.failure_consequence || '',
+      });
     }
-    return res.json({ ok: true, success: true, dc: token.dc });
+    return res.json({
+      ok: true,
+      success: true,
+      dc: token.dc,
+      consequence: token.success_consequence || '',
+    });
   }
-  res.json({ ok: true, success: true });
+  res.json({
+    ok: true,
+    success: true,
+    consequence: token.success_consequence || '',
+  });
 });
 

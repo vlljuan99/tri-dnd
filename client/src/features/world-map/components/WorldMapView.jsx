@@ -16,6 +16,8 @@ export default function WorldMapView({
   travelError,
 }) {
   const currentId = world?.currentLocationId ?? null;
+  const currentLocation =
+    world?.maps?.flatMap((map) => map.locations ?? []).find((location) => location.id === currentId) ?? null;
   const currentMap =
     world?.maps?.find((m) => m.id === world.currentMapId) ??
     world?.maps?.find((m) => m.id === world.rootMapId) ??
@@ -55,7 +57,7 @@ export default function WorldMapView({
               Editar mundo
             </Link>
           )}
-          {currentId && (
+          {currentLocation?.mapId && (
             <button
               type="button"
               onClick={onEnterBoard}

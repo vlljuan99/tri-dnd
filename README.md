@@ -6,7 +6,7 @@ Mesa de juego virtual para D&D 5e pensada para un grupo de amigos: fichas de per
 
 ## Stack
 
-- **Frontend**: React + Vite, Tailwind CSS, Zustand, Framer Motion (más adelante: Konva para el mapa táctico, react-img-mapper para las escenas de campamento/hub)
+- **Frontend**: React + Vite, Tailwind CSS, Zustand, Framer Motion, react-three-fiber (mapa táctico 3D)
 - **Backend**: Node.js + Express + Socket.io
 - **Base de datos**: SQLite (better-sqlite3)
 - **Datos de D&D**: SRD 5e vía [dnd5eapi.co](https://www.dnd5eapi.co), sincronizado a la base de datos local con una capa de traducción al español

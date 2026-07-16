@@ -702,6 +702,31 @@ const migrations = [
   );
   CREATE INDEX idx_dm_templates_user ON dm_templates(user_id);
   `,
+
+  // v36 — Percepción y visión de criaturas (Fase 10.5). La CD de
+  // percepción pertenece a la trampa y nunca se envía al jugador mientras
+  // siga oculta; vision_radius permite al DM previsualizar qué detecta cada
+  // enemigo/PNJ sin mezclarlo con el radio global del mapa.
+  `
+  ALTER TABLE map_tokens ADD COLUMN perception_dc INTEGER;
+  ALTER TABLE map_tokens ADD COLUMN vision_radius INTEGER NOT NULL DEFAULT 6;
+  `,
+
+  // v37 — Consecuencias informativas de trampas y objetos. Se guardan las
+  // dos ramas, pero el jugador solo recibe la que corresponda después de
+  // resolver la interacción; nunca viajan por adelantado en el mapa.
+  `
+  ALTER TABLE map_tokens ADD COLUMN success_consequence TEXT NOT NULL DEFAULT '';
+  ALTER TABLE map_tokens ADD COLUMN failure_consequence TEXT NOT NULL DEFAULT '';
+  `,
+
+  // v38 — Organización de las fichas del DM. Internamente siguen siendo
+  // characters.kind='boss' para conservar compatibilidad con mapas, combate
+  // y avatares; esta categoría solo separa enemigos, jefes y PNJ en la UI.
+  `
+  ALTER TABLE characters ADD COLUMN dm_category TEXT;
+  UPDATE characters SET dm_category = 'jefe' WHERE kind = 'boss';
+  `,
 ];
 
 export function runMigrations() {

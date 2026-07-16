@@ -23,6 +23,7 @@ const JSON_FIELDS = [
   'custom_sections',
 ];
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const DM_CATEGORIES = new Set(['enemigo', 'jefe', 'pnj']);
 
 function serialize(row) {
   const c = { ...row };
@@ -51,16 +52,23 @@ charactersRouter.get('/', (req, res) => {
 });
 
 charactersRouter.post('/', (req, res) => {
-  const { name, kind } = req.body ?? {};
+  const { name, kind, dm_category: dmCategory } = req.body ?? {};
   const trimmed = typeof name === 'string' ? name.trim().slice(0, 60) : '';
   const isBoss = kind === 'boss';
+  const cleanDmCategory = isBoss && DM_CATEGORIES.has(dmCategory) ? dmCategory : isBoss ? 'jefe' : null;
   // Todo PJ nuevo nace como borrador: el cliente debe llevarlo al asistente
   // guiado en vez de abrir la ficha completa vacía. Un jefe/boss no pasa por
   // el asistente (no elige clase/raza del SRD) — nace "completo" y el DM
   // rellena su ficha directamente (stats, avatar, notas).
   const info = db
-    .prepare('INSERT INTO characters (user_id, name, status, kind) VALUES (?, ?, ?, ?)')
-    .run(req.user.id, trimmed || (isBoss ? 'Nuevo jefe' : 'Nuevo personaje'), isBoss ? 'complete' : 'draft', isBoss ? 'boss' : 'pj');
+    .prepare('INSERT INTO characters (user_id, name, status, kind, dm_category) VALUES (?, ?, ?, ?, ?)')
+    .run(
+      req.user.id,
+      trimmed || (cleanDmCategory === 'enemigo' ? 'Nuevo enemigo' : cleanDmCategory === 'pnj' ? 'Nuevo PNJ' : isBoss ? 'Nuevo jefe' : 'Nuevo personaje'),
+      isBoss ? 'complete' : 'draft',
+      isBoss ? 'boss' : 'pj',
+      cleanDmCategory
+    );
   const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ character: serialize(row) });
 });
@@ -69,6 +77,11 @@ charactersRouter.post('/', (req, res) => {
 charactersRouter.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Personaje no encontrado' });
+  // Las fichas de enemigos/PNJ contienen CA, PG y notas privadas del DM. A
+  // diferencia de un PJ compañero, nunca se sirven a otro usuario.
+  if (row.kind === 'boss' && row.user_id !== req.user.id) {
+    return res.status(404).json({ error: 'Personaje no encontrado' });
+  }
   res.json({ character: serialize(row), editable: row.user_id === req.user.id });
 });
 
@@ -177,6 +190,7 @@ const UPDATABLE = {
   status: (v) => v === 'draft' || v === 'complete',
   wizard_step: (v) => Number.isInteger(v) && v >= 0 && v <= 10,
   wizard_data: (v) => v && typeof v === 'object' && JSON.stringify(v).length < 20000,
+  dm_category: (v) => DM_CATEGORIES.has(v),
 };
 
 // Requisitos mínimos para marcar un personaje como completo: identidad y
@@ -207,6 +221,9 @@ charactersRouter.put('/:id', (req, res) => {
     if (!(key in (req.body ?? {}))) continue;
     const value = req.body[key];
     if (!validate(value)) return res.status(400).json({ error: `Valor no válido para "${key}"` });
+    if (key === 'dm_category' && row.kind !== 'boss') {
+      return res.status(400).json({ error: 'Solo las fichas del DM se pueden clasificar así' });
+    }
     if (key === 'campaign_id' && value !== null) {
       const member = db
         .prepare('SELECT 1 FROM campaign_members WHERE campaign_id = ? AND user_id = ?')

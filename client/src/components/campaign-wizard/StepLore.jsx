@@ -5,8 +5,8 @@ export function validateLore() {
 }
 
 /**
- * Paso — Lore de apertura (solo campañas): lo que ven los jugadores en la
- * pantalla de espera antes de que el DM abra la sesión (CampaignLobby).
+ * Paso — Lore de apertura (solo campañas): lo que leen los jugadores en el
+ * diario del campamento mientras esperan a que el DM abra la sesión.
  */
 export default function StepLore({ campaign, patch }) {
   return (

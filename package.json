@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently -n servidor,cliente -c yellow,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
-    "sync-srd": "npm run sync-srd --prefix server"
+    "sync-srd": "npm run sync-srd --prefix server",
+    "test": "npm test --prefix server && npm test --prefix client"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

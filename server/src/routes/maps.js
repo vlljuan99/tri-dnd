@@ -610,7 +610,10 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { kind = 'enemigo', name, x, y, monsterIndex, characterId, hidden, dc, skill } = req.body ?? {};
+  const {
+    kind = 'enemigo', name, x, y, monsterIndex, characterId, hidden, dc, skill,
+    perceptionDc, visionRadius, successConsequence, failureConsequence,
+  } = req.body ?? {};
   if (!TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
   }
@@ -625,9 +628,27 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
     return res.status(400).json({ error: 'Habilidad no válida' });
   }
+  if (successConsequence !== undefined && !(typeof successConsequence === 'string' && successConsequence.length <= 2000)) {
+    return res.status(400).json({ error: 'Consecuencia de éxito no válida' });
+  }
+  if (failureConsequence !== undefined && !(typeof failureConsequence === 'string' && failureConsequence.length <= 2000)) {
+    return res.status(400).json({ error: 'Consecuencia de fallo no válida' });
+  }
+  if (
+    perceptionDc !== undefined && perceptionDc !== null &&
+    !(Number.isInteger(perceptionDc) && perceptionDc >= 1 && perceptionDc <= 30)
+  ) {
+    return res.status(400).json({ error: 'CD de percepción no válida' });
+  }
+  if (
+    visionRadius !== undefined &&
+    !(Number.isInteger(visionRadius) && visionRadius >= 1 && visionRadius <= 30)
+  ) {
+    return res.status(400).json({ error: 'Alcance de visión no válido' });
+  }
 
   let monsterIdx = null;
-  if (kind === 'enemigo' && typeof monsterIndex === 'string' && monsterIndex) {
+  if ((kind === 'enemigo' || kind === 'aliado') && typeof monsterIndex === 'string' && monsterIndex) {
     const monster = db
       .prepare("SELECT idx FROM srd_entries WHERE category = 'monsters' AND idx = ?")
       .get(monsterIndex);
@@ -648,9 +669,16 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
 
   const info = db
     .prepare(
-      'INSERT INTO map_tokens (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      `INSERT INTO map_tokens
+       (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
+        success_consequence, failure_consequence, perception_dc, vision_radius)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(room.id, kind, cleanName, monsterIdx, bossId, x, y, isHidden, dc ?? null, skill ?? null);
+    .run(
+      room.id, kind, cleanName, monsterIdx, bossId, x, y, isHidden, dc ?? null, skill ?? null,
+      successConsequence ?? '', failureConsequence ?? '',
+      perceptionDc ?? (kind === 'trampa' ? 10 : null), visionRadius ?? 6
+    );
   touchAndNotify(map);
 
   const token = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(info.lastInsertRowid);
@@ -691,7 +719,10 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   const token = map && getToken(map.id, req.params.tokenId);
   if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
 
-  const { name, x, y, hidden, kind, dc, skill, overrides, loot } = req.body ?? {};
+  const {
+    name, x, y, hidden, kind, dc, skill, perceptionDc, visionRadius, successConsequence,
+    failureConsequence, overrides, loot,
+  } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
   }
@@ -703,6 +734,24 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   }
   if (skill !== undefined && skill !== null && !(typeof skill === 'string' && skill.length <= 30)) {
     return res.status(400).json({ error: 'Habilidad no válida' });
+  }
+  if (successConsequence !== undefined && !(typeof successConsequence === 'string' && successConsequence.length <= 2000)) {
+    return res.status(400).json({ error: 'Consecuencia de éxito no válida' });
+  }
+  if (failureConsequence !== undefined && !(typeof failureConsequence === 'string' && failureConsequence.length <= 2000)) {
+    return res.status(400).json({ error: 'Consecuencia de fallo no válida' });
+  }
+  if (
+    perceptionDc !== undefined && perceptionDc !== null &&
+    !(Number.isInteger(perceptionDc) && perceptionDc >= 1 && perceptionDc <= 30)
+  ) {
+    return res.status(400).json({ error: 'CD de percepción no válida' });
+  }
+  if (
+    visionRadius !== undefined &&
+    !(Number.isInteger(visionRadius) && visionRadius >= 1 && visionRadius <= 30)
+  ) {
+    return res.status(400).json({ error: 'Alcance de visión no válido' });
   }
   // Variante por instancia (Fase 17) y botín (Fase 20): JSON del propio DM,
   // validado por encima y acotado en tamaño.
@@ -767,7 +816,9 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   }
 
   db.prepare(
-    'UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ?, overrides = ?, loot = ? WHERE id = ?'
+    `UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ?,
+       success_consequence = ?, failure_consequence = ?, perception_dc = ?, vision_radius = ?, overrides = ?, loot = ?
+       WHERE id = ?`
   ).run(
     roomId,
     name !== undefined ? name.trim().slice(0, 60) : token.name,
@@ -777,6 +828,10 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     kind ?? token.kind,
     dc !== undefined ? dc : token.dc,
     skill !== undefined ? skill : token.skill,
+    successConsequence !== undefined ? successConsequence : token.success_consequence,
+    failureConsequence !== undefined ? failureConsequence : token.failure_consequence,
+    perceptionDc !== undefined ? perceptionDc : token.perception_dc,
+    visionRadius !== undefined ? visionRadius : token.vision_radius,
     overridesJson !== undefined ? overridesJson : token.overrides,
     lootJson !== undefined ? lootJson : token.loot,
     token.id

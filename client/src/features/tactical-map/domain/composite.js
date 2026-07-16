@@ -104,6 +104,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
       overrides: t.overrides ?? undefined,
       skill: t.skill ?? null,
       dc: t.dc ?? null,
+      perceptionDc: t.perceptionDc ?? undefined,
+      visionRadius: t.visionRadius ?? undefined,
       hp: Number.isInteger(t.hp) ? t.hp : null,
       hpMax: Number.isInteger(t.hpMax) ? t.hpMax : null,
       // Avatar del jefe (personaje kind='boss') enlazado, si lo hay

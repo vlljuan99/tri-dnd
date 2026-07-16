@@ -14,7 +14,7 @@ Mesa de juego virtual de D&D 5e para un grupo de ~4-6 amigos: fichas de personaj
 
 ## Stack
 
-- **Frontend**: React + Vite + Tailwind CSS v4 + Zustand (estado de sala/dados) + Framer Motion. Pendiente para fases de mapa/hub: Konva + react-konva (mapa táctico), react-img-mapper (escenas de campamento/hub).
+- **Frontend**: React + Vite + Tailwind CSS v4 + Zustand (estado de sala/dados) + Framer Motion. El mapa táctico es react-three-fiber/three.js y la escena de campamento son hotspots posicionados en % sobre una ilustración fija (el plan original preveía Konva y react-img-mapper; no se usan).
 - **Backend**: Node.js (ESM) + Express + Socket.io + better-sqlite3 (SQLite, WAL). Migraciones incrementales controladas por `PRAGMA user_version` en `server/src/db.js` — añadir nuevas migraciones al final del array `migrations`, nunca editar una ya aplicada.
 - **Auth**: usuario/contraseña simple (bcrypt), cookie httpOnly con JWT (`server/src/auth.js`). Sin OAuth.
 - **Tiempo real**: Socket.io autenticado por la misma cookie de sesión (`server/src/sockets.js`). Los sockets se unen a una sala `campaign:<id>`.

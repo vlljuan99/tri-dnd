@@ -161,6 +161,20 @@ export const useRoom = create((set, get) => ({
     return new Promise((resolve) => socket.emit('combate:danio-marcador', { campaignId, ...payload }, resolve));
   },
 
+  /** El DM aplica daño de caída ambiental a una criatura del tablero. */
+  makeFall(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combate:hacer-caer', { campaignId, ...payload }, resolve));
+  },
+
+  /** Busca trampas con la percepción del personaje; toda la resolución es de servidor. */
+  searchTraps(characterId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('percepcion:buscar', { campaignId, characterId }, resolve));
+  },
+
   /** Usa un objeto del inventario en tu turno; gasta la acción, como atacar. */
   useItem(characterId, itemId) {
     const { campaignId } = get();

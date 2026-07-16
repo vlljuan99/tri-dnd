@@ -16,7 +16,7 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
   const [char, setChar] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null); // { success, dc, opened }
+  const [result, setResult] = useState(null); // { success, dc, opened, consequence }
   const [looted, setLooted] = useState(null); // [{name, qty}] tras saquear
 
   // Un marcador de botín se saquea (pasa al inventario), no se "interactúa"
@@ -74,7 +74,12 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
               method: 'POST',
               body: { characterId, roll },
             });
-      setResult({ success: resp.success !== false, dc: resp.dc, opened: resp.opened });
+      setResult({
+        success: resp.success !== false,
+        dc: resp.dc,
+        opened: resp.opened,
+        consequence: resp.consequence ?? '',
+      });
     } catch (e) {
       setError(e.message || 'No se pudo completar la acción.');
     } finally {
@@ -179,6 +184,11 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
           >
             {result.success ? '¡Conseguido!' : 'No lo consigues'}
           </p>
+          {result.consequence && (
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-bone/80">
+              {result.consequence}
+            </p>
+          )}
         </div>
       )}
 

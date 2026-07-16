@@ -24,6 +24,7 @@ export default function ParchmentShell({ children }) {
           <nav className="flex gap-4">
             <NavLink to="/" end className={navClass}>Campañas</NavLink>
             <NavLink to="/personajes" className={navClass}>Personajes</NavLink>
+            <NavLink to="/compendio" className={navClass}>Compendio</NavLink>
           </nav>
         </div>
         <div className="flex items-center gap-3">

@@ -67,7 +67,9 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     roomId: row.room_id,
     kind: row.kind,
     name: row.name,
-    monsterIndex: row.monster_index,
+    // El índice permite consultar la ficha SRD completa, así que solo viaja
+    // al DM. El jugador recibe nombre, avatar y barra, pero no los stats base.
+    monsterIndex: forPlayer ? undefined : row.monster_index,
     x: row.x,
     y: row.y,
     hidden: Boolean(row.hidden),
@@ -79,12 +81,21 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     // Jefe (personaje kind='boss') enlazado, si lo hay: se pinta con su
     // avatar en vez del marcador genérico. Sin jefe, un monstruo del
     // compendio usa la imagen personalizada que el DM le puso en el bestiario
-    characterId: row.character_id ?? null,
+    characterId: forPlayer ? undefined : row.character_id ?? null,
     avatarUrl: row.boss_avatar_path ?? row.monster_avatar_path ?? null,
     // Igual que en la puerta: skill público (sabes qué tiras), dc secreto
     // hasta resolver el intento de interactuar (trampa/objeto).
     skill: row.skill ?? null,
     dc: forPlayer ? undefined : row.dc ?? null,
+    // Las dos ramas son notas privadas de preparación del DM. La ruta de
+    // interacción devuelve al jugador solo la consecuencia ya resuelta.
+    successConsequence: forPlayer ? undefined : row.success_consequence ?? '',
+    failureConsequence: forPlayer ? undefined : row.failure_consequence ?? '',
+    // La CD de detección y el alcance de criaturas son herramientas del DM.
+    // Una trampa oculta ni siquiera llega al jugador; al descubrirse tampoco
+    // se filtra su CD, para no revelar más información de la necesaria.
+    perceptionDc: forPlayer ? undefined : row.perception_dc ?? null,
+    visionRadius: forPlayer ? undefined : row.vision_radius ?? 6,
     // Variantes por instancia y botín (Fases 17/20): información de DM. El
     // jugador nunca ve los stats retocados de un enemigo ni su botín antes de
     // saquearlo; `hasLoot` sí viaja para poder pintar un marcador saqueable.

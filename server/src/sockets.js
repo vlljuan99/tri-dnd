@@ -8,6 +8,9 @@ import { getMembership, countPlayers } from './routes/campaigns.js';
 import { bindCombatBroadcaster, bindChatPoster, notifyCampaignMap, notifyCombatStarted } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
+import { buildFallDamageRoll, fallDiceForFeet } from './services/fallDamage.js';
+import { buildPerceptionRoll, discoverableTrapIds } from './services/perception.js';
+import { computeFloorVision } from './services/vision.js';
 import {
   orderedCombatants,
   rollInitiativeValue,
@@ -265,6 +268,47 @@ function resolveCombatTargetFromMarker(campaignId, attackerTokenId, target, { me
   return resolved;
 }
 
+// Objetivo de daño ambiental elegido por el DM. A diferencia de un ataque,
+// no hay atacante ni distancia que validar: basta con que la criatura siga
+// existiendo en el mapa activo. Los objetos y trampas no reciben daño.
+function resolveCombatDamageTarget(campaignId, target) {
+  const mapId = getActiveMapId(campaignId);
+  if (!mapId) return { error: 'La mesa no tiene mapa activo' };
+
+  if (target?.kind === 'marcador') {
+    const token = db
+      .prepare(
+        `SELECT t.*, r.floor_id FROM map_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id
+         WHERE t.id = ? AND f.map_id = ?`
+      )
+      .get(target.id, mapId);
+    if (!token || (token.kind !== 'enemigo' && token.kind !== 'aliado')) {
+      return { error: 'Objetivo no encontrado' };
+    }
+    const combatant = db
+      .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+      .get(campaignId, token.id);
+    return { name: token.name, kind: 'marcador', token, combatant };
+  }
+
+  if (target?.kind === 'personaje') {
+    const token = db
+      .prepare(
+        `SELECT t.*, r.floor_id FROM map_character_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         WHERE t.map_id = ? AND t.character_id = ?`
+      )
+      .get(mapId, target.id);
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(target.id);
+    if (!token || !character) return { error: 'Objetivo no encontrado' };
+    return { name: character.name, kind: 'personaje', token, character };
+  }
+
+  return { error: 'Objetivo no válido' };
+}
+
 // Aplica daño ya resuelto a un objetivo (personaje o marcador), sea cual sea
 // quien ataca (un PJ o un enemigo controlado por el DM): la resolución del
 // objetivo puede venir de cualquiera de los dos caminos de arriba, pero
@@ -496,6 +540,91 @@ export function setupSockets(io) {
       cb?.({ ok: true });
     });
 
+    // Percepción activa: el jugador elige únicamente su personaje. Posición,
+    // alcance, d20, bonificador, trampas y CD se resuelven en servidor para
+    // que un cliente modificado no pueda inspeccionar ni descubrir de más.
+    socket.on('percepcion:buscar', ({ campaignId, characterId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      if (!Number.isInteger(characterId)) return cb?.({ error: 'Personaje no válido' });
+
+      const character = db
+        .prepare('SELECT * FROM characters WHERE id = ? AND user_id = ? AND campaign_id = ?')
+        .get(characterId, user.id, campaignId);
+      if (!character) return cb?.({ error: 'Ese personaje no te pertenece' });
+
+      const mapId = getActiveMapId(campaignId);
+      if (!mapId) return cb?.({ error: 'La mesa no tiene mapa activo' });
+      const viewer = db
+        .prepare(
+          `SELECT t.*, r.floor_id FROM map_character_tokens t
+           JOIN map_rooms r ON r.id = t.room_id
+           WHERE t.map_id = ? AND t.character_id = ?`
+        )
+        .get(mapId, character.id);
+      if (!viewer) return cb?.({ error: 'Tu personaje no está en el tablero' });
+
+      const map = db.prepare('SELECT vision_radius FROM maps WHERE id = ?').get(mapId);
+      const rooms = db.prepare('SELECT * FROM map_rooms WHERE floor_id = ?').all(viewer.floor_id);
+      const doors = db
+        .prepare(
+          `SELECT d.* FROM map_doors d
+           JOIN map_rooms fr ON fr.id = d.from_room_id
+           JOIN map_rooms tr ON tr.id = d.to_room_id
+           WHERE d.map_id = ? AND fr.floor_id = ? AND tr.floor_id = ?`
+        )
+        .all(mapId, viewer.floor_id, viewer.floor_id);
+      const traps = db
+        .prepare(
+          `SELECT t.* FROM map_tokens t
+           JOIN map_rooms r ON r.id = t.room_id
+           WHERE r.floor_id = ? AND t.kind = 'trampa' AND t.hidden = 1`
+        )
+        .all(viewer.floor_id);
+
+      const spend = trySpendAction(campaignId, character.id);
+      if (!spend.ok) return cb?.({ error: spend.error });
+
+      const roll = buildPerceptionRoll(character);
+      const visibleCells = computeFloorVision({
+        rooms,
+        doors,
+        viewers: [{
+          x: viewer.x,
+          y: viewer.y,
+          radius: Math.max(map?.vision_radius ?? 6, character.darkvision ?? 0),
+        }],
+      });
+      const foundIds = discoverableTrapIds(traps, visibleCells, roll.total);
+      const found = traps.filter((trap) => foundIds.includes(trap.id));
+
+      if (foundIds.length) {
+        const placeholders = foundIds.map(() => '?').join(',');
+        db.transaction(() => {
+          db.prepare(`UPDATE map_tokens SET hidden = 0 WHERE id IN (${placeholders})`).run(...foundIds);
+          touchMap(mapId);
+        })();
+      }
+
+      const campaign = db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId);
+      const rollMessage = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'roll',
+        body: JSON.stringify(roll),
+      });
+      broadcastMessage(campaignId, rollMessage, { senderId: user.id, dmUserId: campaign.dm_user_id });
+
+      const narration = found.length
+        ? `${character.name} descubre ${found.length === 1 ? found[0].name : `${found.length} trampas`}.`
+        : `${character.name} busca trampas, pero no encuentra ninguna.`;
+      const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: narration });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      if (foundIds.length) notifyCampaignMap(campaignId);
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, found: found.map((trap) => ({ id: trap.id, name: trap.name })), roll });
+    });
+
     // Ping efímero sobre el tablero: no toca la base de datos, solo rebota
     // a la sala con coordenadas absolutas de planta (cada cliente lo dibuja
     // en su propio tablero compuesto)
@@ -543,7 +672,11 @@ export function setupSockets(io) {
 
       let charId = null;
       if (cleanKind === 'pj' && Number.isInteger(characterId)) {
-        const char = db.prepare('SELECT id FROM characters WHERE id = ? AND campaign_id = ?').get(characterId, campaignId);
+        // Una ficha del DM puede estar asignada a la campaña, pero nunca debe
+        // entrar por el flujo de PJ: expondría sus PG/CA al resto del grupo.
+        const char = db
+          .prepare("SELECT id FROM characters WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
+          .get(characterId, campaignId);
         if (char) charId = char.id;
       }
       const hpC = cleanKind === 'enemigo' && Number.isInteger(hpCurrent) ? hpCurrent : null;
@@ -573,7 +706,11 @@ export function setupSockets(io) {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede añadir al grupo' });
 
-      const characters = db.prepare('SELECT id, name FROM characters WHERE campaign_id = ?').all(campaignId);
+      // «Añadir grupo» significa únicamente personajes jugadores. Los PNJ,
+      // enemigos y jefes del DM se añaden por su flujo propio de combatiente.
+      const characters = db
+        .prepare("SELECT id, name FROM characters WHERE campaign_id = ? AND kind = 'pj'")
+        .all(campaignId);
       const existingIds = new Set(
         db
           .prepare("SELECT character_id FROM combatants WHERE campaign_id = ? AND kind = 'pj'")
@@ -1046,6 +1183,41 @@ export function setupSockets(io) {
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
       io.to(roomName(campaignId)).emit('chat:new', note);
       cb?.({ ok: true, ...detail });
+    });
+
+    // Daño ambiental manual del DM. No consume una acción: el DM decide que
+    // una criatura cae, el servidor tira 1d6 por cada 10 pies y reutiliza el
+    // mismo núcleo de daño que ataques y monstruos (inconsciencia, botín,
+    // salvaciones de muerte y fin automático del combate incluidos).
+    socket.on('combate:hacer-caer', ({ campaignId, target, feet }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede resolver una caída' });
+
+      const dice = fallDiceForFeet(feet);
+      if (!dice) return cb?.({ error: 'La altura debe ser un múltiplo de 10 entre 10 y 200 pies' });
+
+      const resolved = resolveCombatDamageTarget(campaignId, target);
+      if (resolved.error) return cb?.({ error: resolved.error });
+
+      const roll = buildFallDamageRoll({ feet, targetName: resolved.name });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
+
+      const { body, detail } = applyCombatDamage(campaignId, resolved, roll.total);
+      broadcastCombat(campaignId);
+
+      const mapId = getActiveMapId(campaignId);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+
+      const note = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'system',
+        body: `${resolved.name} cae ${feet} pies. ${body}`,
+      });
+      io.to(roomName(campaignId)).emit('chat:new', note);
+      cb?.({ ok: true, feet, dice, roll, ...detail });
     });
 
     // Usar un objeto del inventario en tu turno (Fase 8.6): gasta la acción,

@@ -4,11 +4,13 @@ import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
 import { buildBoardWalkable, findBoardPath, reachableWithin, buildBoardElevation } from '../domain/pathfinding.js';
 import { buildBoardWalls } from '../domain/walls.js';
+import { computeBoardVision } from '../domain/vision.js';
 import { useRoom } from '../../../store/socket.js';
 import { rollPool } from '../../../lib/dice.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
 import MonsterAttackPanel from './MonsterAttackPanel.jsx';
+import FallPanel from './FallPanel.jsx';
 import InventoryPanel from './InventoryPanel.jsx';
 import InteractPanel from './InteractPanel.jsx';
 import NotesPanel from './NotesPanel.jsx';
@@ -71,11 +73,14 @@ export default function TacticalMap({
   // coste calculados al pulsar una casilla; el token no se mueve hasta confirmar
   const [movePreview, setMovePreview] = useState(null); // { cell, cost, path, remaining } | null
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
+  const [fallTarget, setFallTarget] = useState(null); // { token, suggestedFeet } para una caída manual del DM
   const [interactTarget, setInteractTarget] = useState(null); // { type: 'door' | 'token', target }
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showSelectedVision, setShowSelectedVision] = useState(false);
+  const [perceptionState, setPerceptionState] = useState({ busy: false, message: '' });
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -89,6 +94,7 @@ export default function TacticalMap({
   const toggleTurnMode = useRoom((s) => s.toggleTurnMode);
   const specialAction = useRoom((s) => s.specialAction);
   const deathSave = useRoom((s) => s.deathSave);
+  const searchTraps = useRoom((s) => s.searchTraps);
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
@@ -140,6 +146,32 @@ export default function TacticalMap({
   const boardWalkable = useMemo(() => buildBoardWalkable(map), [map]);
   const boardWalls = useMemo(() => buildBoardWalls(map), [map]);
   const boardElevation = useMemo(() => buildBoardElevation(map), [map]);
+  const canMakeSelectedFall = Boolean(
+    isDm &&
+      selectedToken &&
+      (selectedToken.characterId ||
+        (selectedToken.serverId && (selectedToken.kind === 'enemigo' || selectedToken.kind === 'aliado')))
+  );
+  const selectedElevation = selectedCell
+    ? boardElevation.get(cellKey(selectedCell.col, selectedCell.row)) ?? 0
+    : 0;
+  // Una cota pintada equivale a 5 pies. Como el daño solo cuenta cada 10,
+  // se propone el tramo completo más cercano; el DM puede cambiarlo.
+  const suggestedFallFeet = Math.max(10, Math.min(200, Math.floor((Math.abs(selectedElevation) * 5) / 10) * 10 || 10));
+  const canShowSelectedVision = Boolean(
+    isDm &&
+      selectedToken?.serverId &&
+      (selectedToken.kind === 'enemigo' || selectedToken.kind === 'aliado') &&
+      Number.isInteger(selectedToken.visionRadius)
+  );
+  const visionCells = useMemo(() => {
+    if (!canShowSelectedVision || !showSelectedVision || !selectedCell) return [];
+    return computeBoardVision(map, {
+      col: selectedCell.col,
+      row: selectedCell.row,
+      radius: selectedToken.visionRadius,
+    });
+  }, [canShowSelectedVision, map, selectedCell, selectedToken?.visionRadius, showSelectedVision]);
 
   // Terreno difícil aplanado a coordenadas del tablero, para pintarlo
   const terrainCells = useMemo(() => {
@@ -182,7 +214,25 @@ export default function TacticalMap({
   // token pudo moverse por socket, el terreno cambiar, etc.)
   useEffect(() => {
     setMovePreview(null);
+    setShowSelectedVision(false);
   }, [selectedTokenId, map]);
+
+  async function handleSearchTraps() {
+    if (!ownCharacterId || perceptionState.busy) return;
+    setPerceptionState({ busy: true, message: '' });
+    const response = await searchTraps(ownCharacterId);
+    if (response?.error) {
+      setPerceptionState({ busy: false, message: response.error });
+      return;
+    }
+    const names = response?.found?.map((trap) => trap.name) ?? [];
+    setPerceptionState({
+      busy: false,
+      message: names.length
+        ? `Descubres: ${names.join(', ')}.`
+        : 'No descubres ninguna trampa.',
+    });
+  }
 
   // Escape: primero cancela la vista previa, después deselecciona
   useEffect(() => {
@@ -249,11 +299,13 @@ export default function TacticalMap({
   // objetivo de ataque, y un marcador de trampa/objeto abre el popup de
   // interactuar (Fase 8.7); cualquier otro caso simplemente selecciona el token.
   function handleSelectToken(tokenId) {
+    setFallTarget(null);
     // Re-pulsar el token ya seleccionado lo deselecciona (toggle)
     if (tokenId === selectedTokenId) {
       setSelectedTokenId(null);
       setMovePreview(null);
       setCombatTarget(null);
+      setFallTarget(null);
       setInteractTarget(null);
       return;
     }
@@ -285,6 +337,7 @@ export default function TacticalMap({
     }
     setSelectedTokenId(tokenId);
     setCombatTarget(null);
+    setFallTarget(null);
     setInteractTarget(null);
     setInventoryOpen(false);
   }
@@ -370,6 +423,7 @@ export default function TacticalMap({
           reachableCells={reachableCells}
           terrainCells={terrainCells}
           pathCells={movePreview?.path ?? []}
+          visionCells={visionCells}
         />
       </CanvasErrorBoundary>
 
@@ -427,6 +481,45 @@ export default function TacticalMap({
                 }${canMoveToken({ token: selectedToken, user, role }) ? '' : ' · solo lectura'}`
               : 'Selecciona un token y pulsa una casilla: verás el coste antes de mover. Puerta: clic para abrir. Doble clic: ping.'}
         </p>
+        {canMakeSelectedFall && (
+          <button
+            type="button"
+            onClick={() => {
+              // Congela también la altura sugerida: si el golpe elimina el
+              // token, la recarga del mapa no debe borrar el resultado.
+              setFallTarget({ token: selectedToken, suggestedFeet: suggestedFallFeet });
+              setCombatTarget(null);
+              setInteractTarget(null);
+              setMovePreview(null);
+            }}
+            className="mt-2 rounded-sm border border-blood/60 bg-blood/10 px-2.5 py-1 text-xs text-blood hover:bg-blood/20"
+          >
+            Hacer caer…
+          </button>
+        )}
+        {canShowSelectedVision && (
+          <button
+            type="button"
+            onClick={() => setShowSelectedVision((visible) => !visible)}
+            aria-pressed={showSelectedVision}
+            className="mt-2 ml-2 rounded-sm border border-sky-400/50 bg-sky-400/10 px-2.5 py-1 text-xs text-sky-200 hover:bg-sky-400/20"
+          >
+            {showSelectedVision ? 'Ocultar visión' : `Mostrar visión (${selectedToken.visionRadius})`}
+          </button>
+        )}
+        {!isDm && ownCharacterId && (
+          <button
+            type="button"
+            disabled={perceptionState.busy}
+            onClick={handleSearchTraps}
+            className="mt-2 rounded-sm border border-violet-300/50 bg-violet-400/10 px-2.5 py-1 text-xs text-violet-100 hover:bg-violet-400/20 disabled:opacity-50"
+          >
+            {perceptionState.busy ? 'Buscando…' : 'Buscar trampas'}
+          </button>
+        )}
+        {perceptionState.message && !isDm && (
+          <p className="mt-1.5 text-xs text-violet-100/80">{perceptionState.message}</p>
+        )}
         {saveError && <p className="mt-2 text-xs text-blood">{saveError}</p>}
         {doorError && <p className="mt-2 text-xs text-blood">{doorError}</p>}
       </div>
@@ -539,6 +632,14 @@ export default function TacticalMap({
         </div>
       )}
 
+      {fallTarget && (
+        <FallPanel
+          target={fallTarget.token}
+          suggestedFeet={fallTarget.suggestedFeet}
+          onClose={() => setFallTarget(null)}
+        />
+      )}
+
       {combatTarget && selectedToken?.characterId && (
         <AttackPanel
           attacker={selectedToken}
@@ -627,6 +728,7 @@ export default function TacticalMap({
           onClearSelection={() => {
             setSelectedTokenId(null);
             setCombatTarget(null);
+            setFallTarget(null);
             setInteractTarget(null);
           }}
           onNudgeToken={nudgeSelectedToken}

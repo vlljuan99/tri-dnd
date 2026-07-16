@@ -9,8 +9,24 @@ import { formatModifier } from '../lib/dnd.js';
 const TABS = [
   { key: 'compendio', label: 'Compendio' },
   { key: 'favoritos', label: 'Favoritos' },
-  { key: 'jefes', label: 'Mis jefes' },
+  { key: 'jefes', label: 'Mis criaturas' },
 ];
+
+const DM_CATEGORY_LABELS = {
+  enemigo: 'Enemigo',
+  jefe: 'Jefe',
+  pnj: 'PNJ',
+};
+
+const DM_CATEGORY_STYLES = {
+  enemigo: 'border-blood/50 bg-blood/10 text-blood',
+  jefe: 'border-gold/40 bg-gold/10 text-gold',
+  pnj: 'border-moss bg-moss/10 text-bone/80',
+};
+
+function dmCategory(character) {
+  return DM_CATEGORY_LABELS[character.dm_category] ? character.dm_category : 'jefe';
+}
 
 const ABILITY_LABELS = [
   ['str', 'FUE'],
@@ -32,14 +48,15 @@ function formatCr(cr) {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-// Copia editable de un monstruo del SRD como jefe (personaje kind='boss'):
+// Copia editable de un monstruo del SRD como enemigo del DM (internamente
+// sigue siendo un personaje kind='boss' para reutilizar la ficha completa):
 // stats numéricos mapeados a la ficha y rasgos/acciones como texto libre,
 // el mismo espíritu que los rasgos de clase de un PJ.
-async function createBossFromMonster(entry) {
+async function createBossFromMonster(entry, category = 'enemigo') {
   const data = entry.data;
   const { character } = await api('/characters', {
     method: 'POST',
-    body: { name: entry.name, kind: 'boss' },
+    body: { name: entry.name, kind: 'boss', dm_category: category },
   });
   const ability = (value) => clamp(Number.isInteger(value) ? value : 10, 1, 30);
   const hp = clamp(Number.isInteger(data.hit_points) ? data.hit_points : 10, 0, 999);
@@ -98,11 +115,16 @@ function StarButton({ active, busy, onToggle }) {
 /**
  * Bestiario del DM: buscador del compendio SRD de monstruos con ficha
  * completa, favoritos, imagen personalizada por monstruo (subida o IA) y
- * acceso a los jefes propios (crearlos en blanco o como copia editable de un
+ * acceso a las criaturas propias (crearlas en blanco o como copia editable de un
  * monstruo). `onPick` recibe { type: 'monster', index, name } o
  * { type: 'boss', id, name } según lo elegido para colocar en el mapa.
  */
-export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
+export default function BestiaryBrowser({
+  onPick,
+  onClose,
+  onBossesChanged,
+  creationCategory = 'enemigo',
+}) {
   const [tab, setTab] = useState('compendio');
   const [q, setQ] = useState('');
   const [monsters, setMonsters] = useState([]);
@@ -116,6 +138,8 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
   const [imgError, setImgError] = useState('');
   const [bossBusy, setBossBusy] = useState(false);
   const [actionError, setActionError] = useState('');
+  const creatingPnj = creationCategory === 'pnj';
+  const creationNoun = creatingPnj ? 'PNJ' : 'enemigo';
 
   // Compendio: búsqueda con el mismo debounce que SrdPicker
   useEffect(() => {
@@ -147,11 +171,11 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
       setBosses(list);
       onBossesChanged?.(list);
     } catch {
-      // la pestaña de jefes mostrará la lista vacía
+      // la pestaña de criaturas mostrará la lista vacía
     }
   }
 
-  // Al entrar en "Mis jefes" se recarga: un jefe recién editado en otra
+  // Al entrar en "Mis criaturas" se recarga: una ficha recién editada en otra
   // pestaña del navegador aparece al volver aquí
   useEffect(() => {
     if (tab === 'jefes') refreshBosses();
@@ -240,8 +264,13 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
     setActionError('');
     try {
       const character = fromMonster
-        ? await createBossFromMonster(detail)
-        : (await api('/characters', { method: 'POST', body: { kind: 'boss' } })).character;
+        ? await createBossFromMonster(detail, creationCategory)
+        : (
+            await api('/characters', {
+              method: 'POST',
+              body: { kind: 'boss', dm_category: creationCategory },
+            })
+          ).character;
       await refreshBosses();
       window.open(`/personajes/${character.id}`, '_blank', 'noopener');
       if (fromMonster) setSelected({ type: 'boss', id: character.id });
@@ -317,7 +346,7 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                     onClick={() => handleCreateBoss(false)}
                     className="rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
                   >
-                    + Nuevo jefe
+                    + Nuevo {creationNoun}
                   </button>
                   <a
                     href="/personajes"
@@ -325,7 +354,7 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                     rel="noopener"
                     className="text-[0.65rem] uppercase tracking-widest text-bone/50 hover:text-gold"
                   >
-                    Sección de jefes ↗
+                    Ver todas las criaturas ↗
                   </a>
                 </div>
               )}
@@ -339,7 +368,7 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                   {tab === 'favoritos'
                     ? 'Sin favoritos todavía: márcalos con la estrella desde el compendio.'
                     : tab === 'jefes'
-                      ? 'Sin jefes todavía: crea el primero arriba.'
+                      ? `Sin criaturas todavía: crea el primer ${creationNoun} arriba.`
                       : 'Sin resultados'}
                 </p>
               ) : (
@@ -357,8 +386,17 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                               <img src={entry.avatar_path} alt="" className="h-full w-full object-cover" />
                             )}
                           </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm">{entry.name}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5">
+                              <span className="min-w-0 flex-1 truncate text-sm">{entry.name}</span>
+                              <span
+                                className={`shrink-0 rounded-sm border px-1 py-px text-[0.55rem] uppercase tracking-wider ${
+                                  DM_CATEGORY_STYLES[dmCategory(entry)]
+                                }`}
+                              >
+                                {DM_CATEGORY_LABELS[dmCategory(entry)]}
+                              </span>
+                            </span>
                             <span className="block font-mono text-[0.65rem] text-bone/50">
                               PG {entry.hp_max} · CA {entry.ac}
                             </span>
@@ -417,7 +455,16 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                       )}
                     </span>
                     <div>
-                      <h3 className="font-display text-lg text-gold">{selectedBoss.name}</h3>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-display text-lg text-gold">{selectedBoss.name}</h3>
+                        <span
+                          className={`rounded-sm border px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wider ${
+                            DM_CATEGORY_STYLES[dmCategory(selectedBoss)]
+                          }`}
+                        >
+                          {DM_CATEGORY_LABELS[dmCategory(selectedBoss)]}
+                        </span>
+                      </div>
                       <p className="font-mono text-xs text-bone/60">
                         PG {selectedBoss.hp_max} · CA {selectedBoss.ac} · Vel. {selectedBoss.speed}
                       </p>
@@ -523,10 +570,10 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
                       type="button"
                       disabled={bossBusy}
                       onClick={() => handleCreateBoss(true)}
-                      title="Copia la ficha a un jefe tuyo para cambiarle stats, foto y rasgos"
+                      title={`Copia la ficha a un ${creationNoun} tuyo para cambiarle estadísticas, foto y rasgos`}
                       className="rounded-sm border border-gold/30 px-4 py-1.5 font-display text-sm text-gold hover:bg-gold/10 disabled:opacity-40"
                     >
-                      {bossBusy ? 'Creando…' : 'Crear jefe editable'}
+                      {bossBusy ? 'Creando…' : `Crear ${creationNoun} editable`}
                     </button>
                   </div>
                   {actionError && <p className="mt-2 text-xs text-blood">{actionError}</p>}
@@ -535,7 +582,7 @@ export default function BestiaryBrowser({ onPick, onClose, onBossesChanged }) {
             ) : (
               <div className="flex h-full items-center justify-center px-6 text-center text-sm text-bone/50">
                 <p>
-                  Elige un monstruo del compendio o uno de tus jefes para ver su ficha completa,
+                  Elige un monstruo del compendio o una de tus criaturas para ver su ficha completa,
                   guardarlo en favoritos, ponerle imagen o colocarlo en el mapa.
                 </p>
               </div>

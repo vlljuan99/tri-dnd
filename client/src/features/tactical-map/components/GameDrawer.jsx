@@ -3,6 +3,7 @@ import RollCard from '../../../components/RollCard.jsx';
 import InitiativeTracker from '../../../components/InitiativeTracker.jsx';
 import CombatantTooltip from '../../../components/CombatantTooltip.jsx';
 import { useRoom } from '../../../store/socket.js';
+import { rollChatCommand } from '../../../lib/chatCommands.js';
 
 const ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g;
 
@@ -73,6 +74,7 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
   const room = useRoom();
   const [tab, setTab] = useState('registro');
   const [text, setText] = useState('');
+  const [commandError, setCommandError] = useState('');
   const logRef = useRef(null);
 
   useEffect(() => {
@@ -83,7 +85,14 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
     e.preventDefault();
     const clean = text.trim();
     if (!clean) return;
-    room.sendChat(clean);
+    const command = rollChatCommand(clean);
+    if (command?.error) {
+      setCommandError(command.error);
+      return;
+    }
+    if (command?.roll) room.sendRoll(command.roll);
+    else room.sendChat(clean);
+    setCommandError('');
     setText('');
   }
 
@@ -120,11 +129,13 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               <Message key={m.id} message={m} selfId={userId} />
             ))}
           </div>
-          <form onSubmit={send} className="flex gap-2 border-t border-gold/15 p-3">
+          <form onSubmit={send} className="border-t border-gold/15 p-3">
+            {commandError && <p className="mb-2 text-xs text-blood">{commandError}</p>}
+            <div className="flex gap-2">
             <input
               value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Escribe en la mesa…"
+              onChange={(e) => { setText(e.target.value); setCommandError(''); }}
+              placeholder="Escribe o tira: /r 1d20+4"
               className="min-w-0 flex-1 rounded-sm border border-bone/20 bg-night-950 px-3 py-2 text-sm text-bone placeholder:text-bone/40 focus:border-gold focus:outline-none"
             />
             <button
@@ -133,6 +144,7 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
             >
               Enviar
             </button>
+            </div>
           </form>
         </>
       )}

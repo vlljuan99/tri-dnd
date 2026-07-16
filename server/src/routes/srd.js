@@ -212,6 +212,40 @@ srdRouter.delete('/monsters/:idx/imagen', (req, res) => {
   res.json({ imageUrl: null });
 });
 
+// Buscador transversal del compendio (Fase 11). Se registra antes de
+// '/:category' para que "buscar" no se interprete como una categoria.
+srdRouter.get('/buscar', (req, res) => {
+  const searchable = ['spells', 'monsters', 'equipment', 'conditions'];
+  const requested = typeof req.query.categorias === 'string'
+    ? req.query.categorias.split(',').filter((category) => searchable.includes(category))
+    : searchable;
+  const categories = requested.length ? [...new Set(requested)] : searchable;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const placeholders = categories.map(() => '?').join(', ');
+  const where = [`category IN (${placeholders})`];
+  const params = [...categories];
+  if (q) {
+    where.push('(name_es LIKE ? OR name_en LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`);
+  }
+
+  let results = db
+    .prepare(
+      `SELECT * FROM srd_entries WHERE ${where.join(' AND ')}
+       ORDER BY COALESCE(name_es, name_en) LIMIT 120`
+    )
+    .all(...params)
+    .map((row) => toEntry(row));
+
+  for (const category of categories.filter(customCategorySupported)) {
+    results.push(...listCustomRows(req.user.id, category, { q }).map((row) => serializeCustomEntry(row, category)));
+  }
+  results = attachMonsterUserData(results, req.user.id)
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+    .slice(0, 120);
+  res.json({ results });
+});
+
 // Listado con filtros opcionales:
 //   ?q=texto      — busca en nombre español e inglés
 //   ?cat=weapon   — solo equipment: categoría de equipo (weapon, armor, adventuring-gear…)

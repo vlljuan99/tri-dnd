@@ -85,6 +85,7 @@ export default function TacticalMapCanvas({
   reachableCells = [],
   terrainCells = [],
   pathCells = [],
+  visionCells = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -122,6 +123,7 @@ export default function TacticalMapCanvas({
       {/* Terreno difícil (ocre, permanente), área de alcance (verde) y
           camino de la vista previa de movimiento (dorado, por encima) */}
       <MovementRange cells={terrainCells} gridSize={map.gridSize} color="#9c6f2e" opacity={0.3} y={0.012} />
+      <MovementRange cells={visionCells} gridSize={map.gridSize} color="#6cb7d9" opacity={0.24} y={0.018} />
       <MovementRange cells={reachableCells} gridSize={map.gridSize} />
       <MovementRange cells={pathCells} gridSize={map.gridSize} color="#e8c368" opacity={0.4} y={0.024} />
       {(map.doors ?? []).map((door, index) => (

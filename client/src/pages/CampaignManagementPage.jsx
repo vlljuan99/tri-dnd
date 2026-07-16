@@ -42,11 +42,14 @@ export default function CampaignManagementPage() {
     }
   }
 
-  async function createNpc() {
+  async function createDmCharacter(dmCategory) {
     setBusy(true);
     setError('');
     try {
-      const { character } = await api('/characters', { method: 'POST', body: { kind: 'boss' } });
+      const { character } = await api('/characters', {
+        method: 'POST',
+        body: { kind: 'boss', dm_category: dmCategory },
+      });
       await api(`/characters/${character.id}`, { method: 'PUT', body: { campaign_id: Number(id) } });
       navigate(`/personajes/${character.id}`);
     } catch (e) {
@@ -95,23 +98,30 @@ export default function CampaignManagementPage() {
           <p className="text-bone/50">Cargando…</p>
         ) : (
           <div className="space-y-8">
-            {/* PNJ y jefes */}
+            {/* PNJ, enemigos y jefes */}
             <section>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-display text-lg tracking-wide text-gold">PNJ y jefes</h2>
-                <div className="flex gap-2">
+                <h2 className="font-display text-lg tracking-wide text-gold">PNJ, enemigos y jefes</h2>
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={createNpc}
+                    onClick={() => createDmCharacter('pnj')}
                     disabled={busy}
                     className="rounded-sm bg-gold px-3 py-1.5 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90 disabled:opacity-40"
                   >
                     + Crear PNJ
                   </button>
+                  <button
+                    onClick={() => createDmCharacter('enemigo')}
+                    disabled={busy}
+                    className="rounded-sm border border-blood/50 px-3 py-1.5 font-display text-sm tracking-wide text-blood hover:bg-blood/10 disabled:opacity-40"
+                  >
+                    + Crear enemigo
+                  </button>
                 </div>
               </div>
               <p className="mb-3 text-xs text-bone/50">
-                Los personajes del DM sirven como jefes (marcador enemigo) o como PNJ aliados (marcador aliado)
-                en el editor. Asignar uno a esta campaña lo agrupa aquí para tenerlo a mano.
+                Las fichas del DM se organizan como PNJ, enemigos o jefes y después pueden colocarse como
+                marcadores aliados u hostiles. Asignarlas a esta campaña las agrupa aquí para tenerlas a mano.
               </p>
               {data.characters.length === 0 ? (
                 <p className="italic text-bone/50">Aún no tienes personajes de DM. Crea el primero arriba.</p>
@@ -126,7 +136,12 @@ export default function CampaignManagementPage() {
                         {c.avatarUrl && <img src={c.avatarUrl} alt="" className="h-full w-full object-cover" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-display text-bone">{c.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate font-display text-bone">{c.name}</p>
+                          <span className="rounded-sm border border-gold/25 px-1.5 py-0.5 text-[0.6rem] uppercase tracking-wider text-gold/70">
+                            {c.dmCategory === 'enemigo' ? 'Enemigo' : c.dmCategory === 'pnj' ? 'PNJ' : 'Jefe'}
+                          </span>
+                        </div>
                         <p className="font-mono text-xs text-bone/50">PG {c.hpMax} · CA {c.ac}</p>
                       </div>
                       {c.otherCampaign && !c.assigned && (

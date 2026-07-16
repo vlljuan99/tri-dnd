@@ -68,6 +68,15 @@ export function useWorldMap(campaignId) {
       ),
     // Guardar no toca el mundo: no necesita recarga
     saveCityTemplate: (mapId) => api(`${base}/mapas/${mapId}/guardar-plantilla`, { method: 'POST', body: {} }),
+    // Restaura imagen y pins sobre la capa indicada conservando su id (sirve
+    // tanto para el mapa raíz como para un submapa de ciudad).
+    applyCityTemplate: (mapId, templateId) =>
+      mutate(() =>
+        api(`${base}/mapas/${mapId}/aplicar-plantilla`, {
+          method: 'POST',
+          body: { templateId },
+        })
+      ),
     renameMap: (mapId, name) =>
       mutate(() => api(`${base}/mapas/${mapId}`, { method: 'PATCH', body: { name } })),
     deleteMap: (mapId) => mutate(() => api(`${base}/mapas/${mapId}`, { method: 'DELETE' })),

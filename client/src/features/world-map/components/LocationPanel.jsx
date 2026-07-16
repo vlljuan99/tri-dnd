@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { LOCATION_KINDS } from '../kinds.js';
 
 const inputClass =
@@ -10,6 +11,7 @@ const labelClass = 'block text-[0.65rem] uppercase tracking-widest text-bone/50'
 // jugable de la biblioteca (dungeon/campamento/evento) o un submapa de mundo
 // (ciudad). Los eventos de camino se cuelgan del pin desde Gestión.
 export default function LocationPanel({
+  campaignId,
   location,
   maps,
   worldMaps,
@@ -160,6 +162,16 @@ export default function LocationPanel({
             </p>
           )}
         </div>
+      )}
+
+      {location.mapId && (
+        <Link
+          to={`/campanas/${campaignId}/editor?mapa=${location.mapId}`}
+          className="block w-full rounded-sm border border-sage/50 px-2 py-1.5 text-center text-xs text-sage hover:bg-sage/10"
+          title="Abre directamente este tablero en el editor de mapas"
+        >
+          Editar tablero →
+        </Link>
       )}
 
       <div>

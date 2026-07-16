@@ -25,6 +25,17 @@ export function buildBoardWalls(map) {
   const sidesById = new Map();
   for (const d of map.doors ?? []) {
     if (d.kind !== 'puerta') continue;
+    // Las puertas sobre arista se componen como un único marcador con una
+    // dirección, no como dos extremos. Resolverlas aquí mantiene movimiento
+    // y previsualización de visión alineados con el servidor.
+    if (d.edge && (d.dirX || d.dirY)) {
+      const edge = d.dirX
+        ? `v:${d.col + (d.dirX > 0 ? 1 : 0)},${d.row}`
+        : `h:${d.col},${d.row + (d.dirY > 0 ? 1 : 0)}`;
+      if (d.isOpen) walls.delete(edge);
+      else walls.add(edge);
+      continue;
+    }
     if (!sidesById.has(d.id)) sidesById.set(d.id, []);
     sidesById.get(d.id).push(d);
   }

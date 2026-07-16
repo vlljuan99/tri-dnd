@@ -33,6 +33,8 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
   // Variante por instancia (miniboss) y botín: estado local editable
   const [overrides, setOverrides] = useState(token.overrides ?? {});
   const [loot, setLoot] = useState(token.loot ?? []);
+  const [successConsequence, setSuccessConsequence] = useState(token.successConsequence ?? '');
+  const [failureConsequence, setFailureConsequence] = useState(token.failureConsequence ?? '');
   const [lootPicker, setLootPicker] = useState(false);
   const [lootText, setLootText] = useState('');
 
@@ -40,6 +42,8 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
     setName(token.name);
     setOverrides(token.overrides ?? {});
     setLoot(token.loot ?? []);
+    setSuccessConsequence(token.successConsequence ?? '');
+    setFailureConsequence(token.failureConsequence ?? '');
   }, [token]);
 
   const isEnemy = token.kind === 'enemigo';
@@ -195,6 +199,57 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
         </div>
       )}
 
+      {(token.kind === 'enemigo' || token.kind === 'aliado') && (
+        <div className="rounded-sm border border-sky-400/15 bg-night-950/40 p-2">
+          <label className={labelClass} htmlFor="token-vision-radius">Alcance de visión / detección</label>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            El DM puede mostrar este alcance sobre el tablero. Las paredes, puertas cerradas y obstáculos
+            cortan la línea de visión.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              id="token-vision-radius"
+              type="number"
+              min={1}
+              max={30}
+              disabled={busy}
+              value={token.visionRadius ?? 6}
+              onChange={(e) =>
+                onPatch(token.id, {
+                  visionRadius: Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 1)),
+                })
+              }
+              className="w-20 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-center font-mono text-xs text-bone"
+            />
+            <span className="text-xs text-bone/55">casillas</span>
+          </div>
+        </div>
+      )}
+
+      {token.kind === 'trampa' && (
+        <div className="rounded-sm border border-violet-400/15 bg-night-950/40 p-2">
+          <label className={labelClass} htmlFor="trap-perception-dc">CD para descubrirla</label>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            Una búsqueda de Percepción solo la revela si está dentro de la visión del personaje y la
+            tirada alcanza esta dificultad. La CD nunca se envía al jugador.
+          </p>
+          <input
+            id="trap-perception-dc"
+            type="number"
+            min={1}
+            max={30}
+            disabled={busy}
+            value={token.perceptionDc ?? 10}
+            onChange={(e) =>
+              onPatch(token.id, {
+                perceptionDc: Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 1)),
+              })
+            }
+            className="mt-2 w-20 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-center font-mono text-xs text-bone"
+          />
+        </div>
+      )}
+
       {/* Botín (Fase 20): solo enemigos */}
       {isEnemy && (
         <div className="rounded-sm border border-gold/15 bg-night-950/40 p-2">
@@ -312,6 +367,56 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
                 aria-label="Dificultad"
               />
             )}
+          </div>
+          <div className="mt-3 space-y-2">
+            <label className="block">
+              <span className={labelClass}>Consecuencia si lo supera</span>
+              <textarea
+                rows={3}
+                maxLength={2000}
+                disabled={busy}
+                value={successConsequence}
+                onChange={(e) => setSuccessConsequence(e.target.value)}
+                placeholder="Ej.: Esquiva el derrumbe y encuentra un paso seguro."
+                className={`${inputClass} mt-1 resize-y text-xs`}
+              />
+            </label>
+            <label className="block">
+              <span className={labelClass}>Consecuencia si falla</span>
+              <textarea
+                rows={3}
+                maxLength={2000}
+                disabled={busy || !token.skill}
+                value={failureConsequence}
+                onChange={(e) => setFailureConsequence(e.target.value)}
+                placeholder={
+                  token.skill
+                    ? 'Ej.: El techo cae; recibe 2d6 de daño y queda atrapado.'
+                    : 'Añade una tirada para poder definir una rama de fallo.'
+                }
+                className={`${inputClass} mt-1 resize-y text-xs disabled:opacity-50`}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={
+                busy ||
+                (successConsequence === (token.successConsequence ?? '') &&
+                  failureConsequence === (token.failureConsequence ?? ''))
+              }
+              onClick={() =>
+                onPatch(token.id, {
+                  successConsequence,
+                  failureConsequence,
+                })
+              }
+              className="w-full rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+            >
+              Guardar consecuencias
+            </button>
+            <p className="text-[0.65rem] text-bone/40">
+              Solo es informativo: la app muestra el resultado, pero no aplica daño ni estados automáticamente.
+            </p>
           </div>
         </div>
       )}

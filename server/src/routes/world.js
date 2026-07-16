@@ -12,6 +12,7 @@ import { fireTravelEvents } from '../services/events.js';
 import {
   snapshotWorldMap,
   instantiateWorldMap,
+  replaceWorldMapFromTemplate,
   saveTemplate,
   getTemplateData,
   serializeTemplate,
@@ -229,6 +230,36 @@ worldRouter.post('/mapas/:mapId/guardar-plantilla', requireDm, (req, res) => {
   const data = snapshotWorldMap(req.params.campaignId, worldMap.id);
   const template = saveTemplate(req.user.id, 'ciudad', req.body?.name ?? worldMap.name, data);
   res.status(201).json({ template: serializeTemplate(template) });
+});
+
+// Aplica una plantilla sobre una capa existente (también el mapa raíz) sin
+// cambiar su id. Solo sustituye imagen y ubicaciones de esta capa; los mapas
+// tácticos y submapas anteriores se conservan para no destruir trabajo del DM.
+worldRouter.post('/mapas/:mapId/aplicar-plantilla', requireDm, (req, res) => {
+  const campaign = getCampaign(req.params.campaignId);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
+  const worldMap = getWorldMap(campaign.id, req.params.mapId);
+  if (!worldMap) return res.status(404).json({ error: 'Mapa no encontrado' });
+
+  const template = getTemplateData(req.user.id, req.body?.templateId, 'ciudad');
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+
+  db.transaction(() => {
+    // Si el grupo estaba en uno de los pins que van a desaparecer, se queda en
+    // esta misma capa pero sin destino ni tablero activo.
+    db.prepare(
+      `UPDATE game_tables
+         SET current_location_id = NULL, current_world_map_id = ?, active_map_id = NULL,
+             updated_at = datetime('now')
+       WHERE campaign_id = ? AND current_location_id IN
+         (SELECT id FROM world_locations WHERE world_map_id = ?)`
+    ).run(worldMap.id, campaign.id, worldMap.id);
+    replaceWorldMapFromTemplate(campaign.id, req.user.id, worldMap.id, template.data);
+  })();
+
+  notifyCampaignMap(campaign.id);
+  notifyCampaignWorld(campaign.id);
+  respondWorld(req, res);
 });
 
 worldRouter.patch('/mapas/:mapId', requireDm, (req, res) => {

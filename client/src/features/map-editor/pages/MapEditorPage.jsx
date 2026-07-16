@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import BestiaryBrowser from '../../../components/BestiaryBrowser.jsx';
 import { useMapEditor } from '../hooks/useMapEditor.js';
@@ -35,11 +35,13 @@ const toolButton = (active) =>
 
 export default function MapEditorPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const campaignId = Number(id);
   const [campaign, setCampaign] = useState(null);
   const [campaignError, setCampaignError] = useState('');
 
-  const editor = useMapEditor(campaignId);
+  const requestedMapId = Number(searchParams.get('mapa')) || null;
+  const editor = useMapEditor(campaignId, { initialMapId: requestedMapId });
   const { map, maps, busy, error } = editor;
 
   const [activeFloorId, setActiveFloorId] = useState(null);
@@ -177,7 +179,7 @@ export default function MapEditorPage() {
     const name =
       tokenName.trim() ||
       boss?.name ||
-      (tokenKind === 'enemigo' && tokenMonster?.name) ||
+      (CHARACTER_LINKABLE.has(tokenKind) && tokenMonster?.name) ||
       TOKEN_KINDS.find((k) => k.key === tokenKind)?.label ||
       'Marcador';
     const { token } = await editor.addToken(target.roomId, {
@@ -185,7 +187,7 @@ export default function MapEditorPage() {
       name,
       x: target.x,
       y: target.y,
-      monsterIndex: tokenKind === 'enemigo' && !boss ? tokenMonster?.index : undefined,
+      monsterIndex: CHARACTER_LINKABLE.has(tokenKind) && !boss ? tokenMonster?.index : undefined,
       characterId: boss?.id,
     });
     setSelection({ type: 'token', id: token.id });
@@ -804,13 +806,13 @@ export default function MapEditorPage() {
                       placeholder="Nombre (Esqueleto, Cofre…)"
                       className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
                     />
-                    {tokenKind === 'enemigo' && !tokenTemplateId && (
+                    {CHARACTER_LINKABLE.has(tokenKind) && !tokenTemplateId && (
                       <button
                         type="button"
                         onClick={() => setShowMonsterPicker(true)}
                         className="rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10"
                       >
-                        {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Bestiario…'}
+                        {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Bestiario o personaje…'}
                       </button>
                     )}
                     {tokenKind === 'enemigo' && enemyTemplates.length > 0 && !tokenMonster && !tokenBossId && (
@@ -826,7 +828,7 @@ export default function MapEditorPage() {
                         ))}
                       </select>
                     )}
-                    {tokenMonster && tokenKind === 'enemigo' && (
+                    {tokenMonster && CHARACTER_LINKABLE.has(tokenKind) && (
                       <button
                         type="button"
                         onClick={() => setTokenMonster(null)}
@@ -843,7 +845,7 @@ export default function MapEditorPage() {
                         className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                       >
                         <option value="">
-                          {tokenKind === 'aliado' ? '— enlazar un PNJ —' : '— o un jefe tuyo —'}
+                          {tokenKind === 'aliado' ? '— o enlazar una ficha tuya —' : '— o una criatura creada —'}
                         </option>
                         {bosses.map((b) => (
                           <option key={b.id} value={b.id}>{b.name}</option>
@@ -1021,6 +1023,7 @@ export default function MapEditorPage() {
 
       {showMonsterPicker && (
         <BestiaryBrowser
+          creationCategory={tokenKind === 'aliado' ? 'pnj' : 'enemigo'}
           onBossesChanged={setBosses}
           onPick={(pick) => {
             if (pick.type === 'boss') {

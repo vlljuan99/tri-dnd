@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import { useWorldMap } from '../hooks/useWorldMap.js';
 import LocationPanel from '../components/LocationPanel.jsx';
@@ -31,6 +31,7 @@ function breadcrumbFor(world, mapId) {
 // Colocación por click y recolocación por arrastre, en % sobre la imagen.
 export default function WorldMapEditorPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const campaignId = Number(id);
   const [campaign, setCampaign] = useState(null);
   const [campaignError, setCampaignError] = useState('');
@@ -74,6 +75,26 @@ export default function WorldMapEditorPage() {
     setTimeout(() => setNotice(''), 4000);
   }
 
+  async function applyCityTemplate(templateId) {
+    const template = cityTemplates.find((item) => item.id === templateId);
+    if (!template || !editingMap) return;
+    const layerLabel = editingMap.isRoot ? 'la región raíz' : 'esta ciudad';
+    const confirmed = window.confirm(
+      `¿Aplicar «${template.name}» sobre ${layerLabel} «${editingMap.name}»?\n\n` +
+        'Se sustituirán la imagen y todas las ubicaciones de esta capa. Los tableros tácticos y ' +
+        'submapas anteriores no se borrarán, pero dejarán de estar enlazados desde aquí.'
+    );
+    if (!confirmed) return;
+
+    try {
+      await editor.applyCityTemplate(editingMap.id, template.id);
+      setNotice(`«${template.name}» aplicada sobre ${layerLabel}.`);
+    } catch (e) {
+      setNotice(e.message || 'No se pudo aplicar la plantilla');
+    }
+    setTimeout(() => setNotice(''), 5000);
+  }
+
   // Mapa en edición: empieza en el raíz; si el mapa editado desaparece
   // (submapa borrado), vuelta al raíz
   const editingMap =
@@ -88,9 +109,14 @@ export default function WorldMapEditorPage() {
   // El estilo de IA sugerido sigue a la capa: raíz = región, submapa = ciudad
   useEffect(() => {
     setEstilo(editingMap && !editingMap.isRoot ? 'ciudad' : 'region');
-    setMapName(editingMap?.name ?? '');
     setSelectedId(null);
   }, [editingMap?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Aplicar una plantilla conserva el id de la capa pero puede cambiar su
+  // nombre, por eso este campo también se sincroniza cuando cambia el nombre.
+  useEffect(() => {
+    setMapName(editingMap?.name ?? '');
+  }, [editingMap?.id, editingMap?.name]);
 
   const locations = editingMap?.locations ?? [];
   const selected = locations.find((l) => l.id === selectedId) ?? null;
@@ -240,7 +266,10 @@ export default function WorldMapEditorPage() {
                   id={`pin-${loc.id}`}
                   type="button"
                   onPointerDown={(e) => onPinPointerDown(e, loc)}
-                  onDoubleClick={() => loc.targetMapId && setEditingMapId(loc.targetMapId)}
+                  onDoubleClick={() => {
+                    if (loc.targetMapId) setEditingMapId(loc.targetMapId);
+                    else if (loc.mapId) navigate(`/campanas/${campaignId}/editor?mapa=${loc.mapId}`);
+                  }}
                   style={{ left: `${loc.x}%`, top: `${loc.y}%` }}
                   className={`absolute -translate-x-1/2 -translate-y-full cursor-grab active:cursor-grabbing ${
                     loc.hidden ? 'opacity-50' : ''
@@ -278,7 +307,7 @@ export default function WorldMapEditorPage() {
           {editingMap.imageUrl && (
             <p className="mt-3 text-xs text-bone/40">
               Haz clic en el mapa para colocar una ubicación. Arrastra un pin para recolocarlo. Doble clic en un pin de
-              ciudad para entrar en su submapa.
+              ciudad para entrar en su submapa, o en otra ubicación para abrir su tablero.
             </p>
           )}
         </div>
@@ -324,8 +353,31 @@ export default function WorldMapEditorPage() {
               className="w-full rounded-sm border border-gold/30 px-2 py-1.5 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
               title="Guarda esta capa (imagen, pins, tableros enlazados y submapas anidados) como plantilla de ciudad reutilizable en cualquier campaña"
             >
-              Guardar en biblioteca (plantilla de ciudad)
+              Guardar en biblioteca (región / ciudad)
             </button>
+            <label className={labelClass} htmlFor="apply-city-template">
+              Restaurar esta capa desde plantilla
+            </label>
+            <select
+              id="apply-city-template"
+              value=""
+              disabled={busy || cityTemplates.length === 0}
+              onChange={(e) => {
+                const templateId = Number(e.target.value);
+                if (templateId) applyCityTemplate(templateId);
+              }}
+              className={inputClass}
+              title="Sustituye la imagen y los pins de esta capa conservando su id"
+            >
+              <option value="">
+                {cityTemplates.length ? 'Aplicar / restaurar plantilla…' : 'No hay plantillas guardadas'}
+              </option>
+              {cityTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} ({template.meta?.pins ?? 0} pins)
+                </option>
+              ))}
+            </select>
             {notice && <p className="text-[0.7rem] text-sage">{notice}</p>}
           </div>
 
@@ -406,6 +458,7 @@ export default function WorldMapEditorPage() {
             {selected ? (
               <LocationPanel
                 key={selected.id}
+                campaignId={campaignId}
                 location={selected}
                 maps={maps}
                 worldMaps={world.maps}

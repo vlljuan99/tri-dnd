@@ -4,7 +4,7 @@ import { api } from '../../../api.js';
 import { useAuth } from '../../../store/auth.js';
 import { useRoom } from '../../../store/socket.js';
 import TacticalMap from '../components/TacticalMap.jsx';
-import CampaignLobby from '../components/CampaignLobby.jsx';
+import CampScene from '../../camp/components/CampScene.jsx';
 import { useTacticalMap } from '../hooks/useTacticalMap.js';
 import { useWorldState } from '../../world-map/hooks/useWorldState.js';
 import WorldMapView from '../../world-map/components/WorldMapView.jsx';
@@ -115,35 +115,60 @@ export default function CampaignGamePage() {
   // Un pin de ciudad salta a un submapa: al continuar tras su lore se vuelve
   // al mapa de mundo (la capa nueva) en vez de al tablero
   const currentJumpsToSubmap = Boolean(currentLocation?.targetMapId);
-  const [screen, setScreen] = useState(null); // 'lore' | 'world' | 'locationLore' | 'board'
+  const currentHasBoard = Boolean(currentLocation?.mapId);
+  // El campamento (Fase 9) es la pantalla-hogar de toda campaña, con o sin
+  // mundo: desde él, el camino lleva al flujo de siempre (lore → mundo →
+  // tablero, o el tablero directo en una escaramuza).
+  const [screen, setScreen] = useState('camp'); // 'camp' | 'lore' | 'world' | 'locationLore' | 'board'
   const [travelError, setTravelError] = useState('');
   const loreSeenRef = useRef(false);
   const seenLocationRef = useRef(undefined);
 
-  // Decisión inicial de pantalla en cuanto carga el mundo
-  useEffect(() => {
-    if (!hasWorldMap || !world || screen !== null) return;
-    seenLocationRef.current = currentLocationId;
-    if (!loreSeenRef.current && campaign?.lore) {
-      setScreen('lore');
-    } else {
-      loreSeenRef.current = true;
-      setScreen(currentLocationId && !currentJumpsToSubmap ? 'board' : 'world');
-    }
-  }, [hasWorldMap, world, screen, currentLocationId, currentJumpsToSubmap, campaign]);
+  function screenForCurrentLocation() {
+    if (!currentLocationId) return 'world';
+    if (currentJumpsToSubmap) return 'world';
+    if (currentLocation?.kind === 'campamento') return 'camp';
+    return currentHasBoard ? 'board' : 'world';
+  }
 
   // El DM viaja (o el jugador lo recibe por socket): al cambiar la ubicación
-  // actual, mostrar la pantalla de lore de destino antes del tablero.
+  // actual, mostrar la pantalla de lore de destino antes del tablero. La
+  // primera carga del mundo solo registra dónde está el grupo, sin viajar;
+  // y el jugador sin sesión abierta se queda en el campamento.
   useEffect(() => {
-    if (!hasWorldMap || screen === null) return;
+    if (!hasWorldMap || !world) return;
+    const isFirstLoad = seenLocationRef.current === undefined;
     if (currentLocationId === seenLocationRef.current) return;
     seenLocationRef.current = currentLocationId;
+    if (isFirstLoad) return;
+    if (!isDm && !isLive) return;
     setScreen(currentLocationId ? 'locationLore' : 'world');
-  }, [hasWorldMap, currentLocationId, screen]);
+  }, [hasWorldMap, world, currentLocationId, isDm, isLive]);
+
+  // Al cerrarse la sesión, el jugador vuelve al campamento a esperar
+  useEffect(() => {
+    if (!isDm && !isLive) setScreen('camp');
+  }, [isDm, isLive]);
+
+  // Tomar el camino del campamento: el lore de campaña se muestra la primera
+  // vez, después la decisión de siempre (tablero si hay ubicación con mapa,
+  // mapa de mundo si no; tablero directo sin mundo)
+  function takePath() {
+    if (!hasWorldMap) {
+      setScreen('board');
+      return;
+    }
+    if (!loreSeenRef.current && campaign?.lore) {
+      setScreen('lore');
+      return;
+    }
+    loreSeenRef.current = true;
+    setScreen(screenForCurrentLocation());
+  }
 
   async function travel(loc) {
     if (loc.id === currentLocationId) {
-      setScreen(currentJumpsToSubmap ? 'world' : 'board');
+      setScreen(screenForCurrentLocation());
       return;
     }
     setTravelError('');
@@ -195,13 +220,6 @@ export default function CampaignGamePage() {
     return <Navigate to={`/campanas/${campaignId}/asistente`} replace />;
   }
 
-  // Mientras el DM no ha abierto la sesión, el jugador ve el lore/objetivos
-  // en vez del tablero (que sigue esperando a que empiece la partida); el DM
-  // conserva su acceso directo al tablero para preparar la escena antes.
-  if (!isDm && !isLive) {
-    return <CampaignLobby campaign={campaign} playerCount={playerCount} />;
-  }
-
   return (
     <div className="flex h-full flex-col bg-night-950 text-bone">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gold/20 bg-night-900 px-4 py-2">
@@ -248,6 +266,14 @@ export default function CampaignGamePage() {
               )}
             </span>
           )}
+          {screen !== 'camp' && (
+            <button
+              onClick={() => setScreen('camp')}
+              className="rounded-sm border border-gold/40 px-3 py-1 font-display text-sm tracking-wide text-gold hover:bg-gold/10"
+            >
+              ⛺ Campamento
+            </button>
+          )}
           {hasWorldMap && screen === 'board' && (
             <button
               onClick={() => setScreen('world')}
@@ -277,9 +303,26 @@ export default function CampaignGamePage() {
     </div>
   );
 
-  // Cuerpo de la mesa: con mundo, la máquina de pantallas; sin mundo, el
-  // tablero directo de siempre.
+  // Cuerpo de la mesa: el campamento como pantalla-hogar; desde él, con
+  // mundo, la máquina de pantallas; sin mundo, el tablero directo de siempre.
   function renderBody() {
+    // El jugador sin sesión abierta espera siempre en el campamento (antes,
+    // pantalla de lobby aparte); el DM también arranca aquí pero puede salir.
+    if (screen === 'camp' || (!isDm && !isLive)) {
+      return (
+        <CampScene
+          campaign={campaign}
+          members={campaignMembers}
+          characters={campaignCharacters}
+          user={user}
+          isDm={isDm}
+          isLive={isLive}
+          playerCount={playerCount}
+          campaignId={campaignId}
+          onTakePath={takePath}
+        />
+      );
+    }
     if (hasWorldMap) {
       if (!world && worldLoading) {
         return (
@@ -297,7 +340,7 @@ export default function CampaignGamePage() {
             continueLabel={currentLocationId ? 'Continuar' : 'Ver el mapa de mundo'}
             onContinue={() => {
               loreSeenRef.current = true;
-              setScreen(currentLocationId ? 'board' : 'world');
+              setScreen(screenForCurrentLocation());
             }}
           />
         );
@@ -321,8 +364,20 @@ export default function CampaignGamePage() {
             eyebrow="Viajáis a…"
             title={currentLocation?.name || 'Ubicación'}
             lore={currentLocation?.lore}
-            continueLabel={currentJumpsToSubmap ? 'Entrar al mapa' : 'Entrar al tablero'}
-            onContinue={() => setScreen(currentJumpsToSubmap ? 'world' : 'board')}
+            continueLabel={
+              currentJumpsToSubmap
+                ? 'Entrar al mapa'
+                : currentLocation?.kind === 'campamento'
+                  ? 'Acampar'
+                  : currentHasBoard
+                    ? 'Entrar al tablero'
+                    : 'Volver al mapa de mundo'
+            }
+            onContinue={() =>
+              setScreen(
+                screenForCurrentLocation()
+              )
+            }
           >
             <div className="rounded-sm border border-gold/20 bg-night-900/60 p-4 text-left text-sm text-bone/80">
               {currentJumpsToSubmap ? (

@@ -20,6 +20,10 @@ function snapshotTokenFields(row) {
     hidden: Boolean(row.hidden),
     dc: row.dc ?? null,
     skill: row.skill ?? null,
+    successConsequence: row.success_consequence ?? '',
+    failureConsequence: row.failure_consequence ?? '',
+    perceptionDc: row.perception_dc ?? null,
+    visionRadius: row.vision_radius ?? 6,
     overrides: JSON.parse(row.overrides || '{}'),
     loot: JSON.parse(row.loot || '[]'),
   };
@@ -149,8 +153,9 @@ function validCharacterId(userId, characterId) {
 export function instantiateToken(userId, roomId, x, y, data) {
   const info = db
     .prepare(
-      `INSERT INTO map_tokens (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill, overrides, loot)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO map_tokens (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
+         success_consequence, failure_consequence, perception_dc, vision_radius, overrides, loot)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       roomId,
@@ -163,6 +168,10 @@ export function instantiateToken(userId, roomId, x, y, data) {
       data.hidden ? 1 : 0,
       data.dc ?? null,
       data.skill ?? null,
+      String(data.successConsequence ?? '').slice(0, 2000),
+      String(data.failureConsequence ?? '').slice(0, 2000),
+      data.perceptionDc ?? null,
+      data.visionRadius ?? 6,
       JSON.stringify(data.overrides ?? {}),
       JSON.stringify(data.loot ?? [])
     );
@@ -259,14 +268,10 @@ export function instantiateMap(campaignId, userId, data, nameOverride) {
   return mapId;
 }
 
-// Ciudad completa: crea el world_map con sus pins y, por pin, el tablero
-// enlazado (mapa nuevo en la biblioteca) o el submapa anidado (recursión).
-export function instantiateWorldMap(campaignId, userId, data) {
-  const info = db
-    .prepare('INSERT INTO world_maps (campaign_id, name, image_url) VALUES (?, ?, ?)')
-    .run(campaignId, String(data.name ?? 'Submapa de plantilla').slice(0, 120), data.imageUrl ?? null);
-  const worldMapId = info.lastInsertRowid;
-
+// Rellena una capa ya creada con los pins de la plantilla. Cada tablero y
+// submapa enlazado se instancia como una copia nueva; así la plantilla nunca
+// queda acoplada a la campaña de la que salió.
+function instantiateWorldMapLocations(campaignId, userId, worldMapId, data) {
   let position =
     (db.prepare('SELECT MAX(position) AS p FROM world_locations WHERE campaign_id = ?').get(campaignId).p ?? -1) + 1;
   const insertLocation = db.prepare(
@@ -291,6 +296,41 @@ export function instantiateWorldMap(campaignId, userId, data) {
     );
     position += 1;
   }
+}
+
+// Ciudad completa: crea el world_map con sus pins y, por pin, el tablero
+// enlazado (mapa nuevo en la biblioteca) o el submapa anidado (recursión).
+export function instantiateWorldMap(campaignId, userId, data) {
+  const info = db
+    .prepare('INSERT INTO world_maps (campaign_id, name, image_url) VALUES (?, ?, ?)')
+    .run(campaignId, String(data.name ?? 'Submapa de plantilla').slice(0, 120), data.imageUrl ?? null);
+  const worldMapId = info.lastInsertRowid;
+  instantiateWorldMapLocations(campaignId, userId, worldMapId, data);
+  return worldMapId;
+}
+
+// Restaura una plantilla sobre una capa existente, incluido el mapa raíz.
+// Se conserva el id de world_maps para no romper el breadcrumb ni los enlaces
+// externos. Solo desaparecen los pins de esta capa; sus antiguos tableros y
+// submapas se dejan intactos (aunque ya no queden enlazados) para evitar una
+// pérdida de trabajo accidental.
+export function replaceWorldMapFromTemplate(campaignId, userId, worldMapId, data) {
+  db.prepare('UPDATE world_maps SET name = ?, image_url = ? WHERE id = ? AND campaign_id = ?').run(
+    String(data.name ?? 'Mapa de plantilla').slice(0, 120),
+    data.imageUrl ?? null,
+    worldMapId,
+    campaignId
+  );
+
+  // event_links no tiene FK hacia world_locations: se limpia antes de borrar
+  // los pins para que no queden disparadores apuntando a ids inexistentes.
+  db.prepare(
+    `DELETE FROM event_links WHERE campaign_id = ? AND target_type = 'ubicacion'
+       AND target_id IN (SELECT id FROM world_locations WHERE world_map_id = ?)`
+  ).run(campaignId, worldMapId);
+  db.prepare('DELETE FROM world_locations WHERE world_map_id = ?').run(worldMapId);
+
+  instantiateWorldMapLocations(campaignId, userId, worldMapId, data);
   return worldMapId;
 }
 
