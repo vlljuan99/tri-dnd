@@ -28,7 +28,7 @@ function OverrideNumber({ label, value, onChange, placeholder }) {
 }
 
 // Panel lateral del marcador seleccionado (enemigo, aliado, objeto o trampa)
-export default function TokenPanel({ token, roomName, busy, onPatch, onDelete }) {
+export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, onSaveTemplate }) {
   const [name, setName] = useState(token.name);
   // Variante por instancia (miniboss) y botín: estado local editable
   const [overrides, setOverrides] = useState(token.overrides ?? {});
@@ -329,7 +329,18 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete })
         {token.hidden ? 'Oculto (solo DM) — hacer visible' : 'Visible ✓ — ocultar a los jugadores'}
       </button>
 
-      <div className="border-t border-gold/15 pt-3">
+      <div className="space-y-2 border-t border-gold/15 pt-3">
+        {onSaveTemplate && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSaveTemplate(token.id)}
+            className="w-full rounded-sm border border-gold/30 px-3 py-1.5 font-display text-sm text-gold hover:bg-gold/10 disabled:opacity-40"
+            title="Guarda este marcador configurado (variante y botín incluidos) en tu biblioteca"
+          >
+            Guardar en biblioteca
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}

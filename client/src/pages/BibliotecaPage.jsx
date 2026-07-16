@@ -278,6 +278,131 @@ function entrySummary(tipo, entry) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Pestaña de PLANTILLAS (salas, dungeons, ciudades y enemigos configurados)
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_KIND_LABELS = {
+  sala: 'Sala',
+  mapa: 'Dungeon / mapa',
+  ciudad: 'Ciudad',
+  enemigo: 'Enemigo',
+};
+
+function templateSummary(t) {
+  const m = t.meta ?? {};
+  if (t.kind === 'sala') {
+    return `${m.width}×${m.height}${m.tokens ? ` · ${m.tokens} marcador${m.tokens === 1 ? '' : 'es'}` : ''}`;
+  }
+  if (t.kind === 'mapa') {
+    return `${m.floors} planta${m.floors === 1 ? '' : 's'} · ${m.rooms} sala${m.rooms === 1 ? '' : 's'}${
+      m.tokens ? ` · ${m.tokens} marcadores` : ''
+    }`;
+  }
+  if (t.kind === 'ciudad') {
+    const parts = [`${m.pins} pin${m.pins === 1 ? '' : 's'}`];
+    if (m.boards) parts.push(`${m.boards} tablero${m.boards === 1 ? '' : 's'}`);
+    if (m.submaps) parts.push(`${m.submaps} submapa${m.submaps === 1 ? '' : 's'}`);
+    return parts.join(' · ');
+  }
+  const parts = [m.monsterIndex ? `base: ${m.monsterIndex}` : 'sin monstruo base'];
+  if (m.hasOverrides) parts.push('variante');
+  if (m.lootEntries) parts.push(`botín (${m.lootEntries})`);
+  return parts.join(' · ');
+}
+
+// Las plantillas se guardan desde los editores (mapas y mundo); aquí solo se
+// consultan, renombran y borran.
+function TemplatesSection({ q }) {
+  const [templates, setTemplates] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const reload = () => {
+    api('/plantillas').then(({ templates: rows }) => setTemplates(rows)).catch((e) => setError(e.message));
+  };
+  useEffect(reload, []);
+
+  async function run(action) {
+    setBusy(true);
+    setError('');
+    try {
+      await action();
+      reload();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const rename = (t) => {
+    const name = window.prompt('Nuevo nombre de la plantilla', t.name);
+    if (!name?.trim() || name.trim() === t.name) return;
+    run(() => api(`/plantillas/${t.id}`, { method: 'PATCH', body: { name: name.trim() } }));
+  };
+  const remove = (t) => {
+    if (!window.confirm(`¿Borrar la plantilla "${t.name}"?`)) return;
+    run(() => api(`/plantillas/${t.id}`, { method: 'DELETE' }));
+  };
+
+  const visible = (templates ?? []).filter(
+    (t) => !q.trim() || t.name.toLowerCase().includes(q.trim().toLowerCase())
+  );
+
+  return (
+    <>
+      {error && <p className="mb-3 text-sm text-ember">{error}</p>}
+      <p className="mb-4 text-sm text-ink/60">
+        Salas, dungeons, ciudades y enemigos guardados desde los editores de mapas y de mundo. Se instancian
+        desde allí en cualquier campaña; aquí puedes renombrarlas o borrarlas.
+      </p>
+      {templates === null ? (
+        <p className="text-ink/60">Cargando…</p>
+      ) : visible.length === 0 ? (
+        <p className="italic text-ink/60">
+          {templates.length === 0
+            ? 'Nada todavía. Guarda una sala, un mapa, una ciudad o un enemigo desde los editores («Guardar en biblioteca»).'
+            : 'Ninguna plantilla coincide con la búsqueda.'}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {visible.map((t) => (
+            <li key={t.id} className="flex items-center gap-3 rounded-md border border-ink/15 bg-parchment-100/70 p-3 shadow-sm">
+              {t.previewUrl && (
+                <img src={t.previewUrl} alt="" className="h-12 w-16 shrink-0 rounded-sm border border-ink/15 object-cover" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-display text-lg text-ink">{t.name}</p>
+                <p className="text-xs text-ink/60">
+                  <span className="mr-1 rounded-sm border border-ink/20 px-1 py-px text-[0.65rem] uppercase tracking-wider">
+                    {TEMPLATE_KIND_LABELS[t.kind] ?? t.kind}
+                  </span>
+                  {templateSummary(t)}
+                </p>
+              </div>
+              <button
+                onClick={() => rename(t)}
+                disabled={busy}
+                className="rounded-sm border border-ink/25 px-3 py-1 text-sm text-ink/70 hover:bg-ink/5 disabled:opacity-40"
+              >
+                Renombrar
+              </button>
+              <button
+                onClick={() => remove(t)}
+                disabled={busy}
+                className="rounded-sm border border-ember/40 px-3 py-1 text-sm text-ember hover:bg-ember/10 disabled:opacity-40"
+              >
+                Borrar
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 export default function BibliotecaPage() {
   const [tipo, setTipo] = useState('objetos');
   const [entries, setEntries] = useState(null);
@@ -303,6 +428,7 @@ export default function BibliotecaPage() {
 
   useEffect(() => {
     setEditing(null);
+    if (tipo === 'plantillas') return undefined; // su pestaña carga lo suyo
     const timer = setTimeout(() => {
       listLibrary(tipo, q).then(setEntries).catch((e) => setError(e.message));
     }, 200);
@@ -342,6 +468,7 @@ export default function BibliotecaPage() {
     () => [
       { key: 'objetos', label: 'Objetos' },
       { key: 'hechizos', label: 'Hechizos' },
+      { key: 'plantillas', label: 'Plantillas' },
     ],
     []
   );
@@ -376,15 +503,19 @@ export default function BibliotecaPage() {
           placeholder="Buscar…"
           className="ml-auto w-40 rounded-sm border border-ink/25 bg-parchment-100 px-3 py-1.5 text-sm text-ink focus:border-ember focus:outline-none"
         />
-        <button
-          onClick={() => setEditing('new')}
-          className="rounded-sm bg-ember px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ember/90"
-        >
-          + Crear
-        </button>
+        {tipo !== 'plantillas' && (
+          <button
+            onClick={() => setEditing('new')}
+            className="rounded-sm bg-ember px-3 py-1.5 font-display text-sm tracking-wide text-parchment-100 hover:bg-ember/90"
+          >
+            + Crear
+          </button>
+        )}
       </div>
 
-      {error && <p className="mb-3 text-sm text-ember">{error}</p>}
+      {tipo === 'plantillas' && <TemplatesSection q={q} />}
+
+      {tipo !== 'plantillas' && error && <p className="mb-3 text-sm text-ember">{error}</p>}
 
       {editing && (
         <div className="mb-5 rounded-md border border-ember/40 bg-parchment-100/70 p-4 shadow-sm">
@@ -413,7 +544,7 @@ export default function BibliotecaPage() {
         </div>
       )}
 
-      {entries === null ? (
+      {tipo === 'plantillas' ? null : entries === null ? (
         <p className="text-ink/60">Cargando…</p>
       ) : entries.length === 0 ? (
         <p className="italic text-ink/60">

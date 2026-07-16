@@ -11,6 +11,7 @@ export default function RoomPanel({
   busy,
   onPatch,
   onDelete,
+  onSaveTemplate,
   onUploadImage,
   onGenerateImage,
   onRemoveImage,
@@ -195,7 +196,18 @@ export default function RoomPanel({
         </form>
       </div>
 
-      <div className="border-t border-gold/15 pt-3">
+      <div className="space-y-2 border-t border-gold/15 pt-3">
+        {onSaveTemplate && (
+          <button
+            type="button"
+            onClick={() => onSaveTemplate(room.id)}
+            disabled={busy}
+            className="w-full rounded-sm border border-gold/30 px-3 py-1.5 font-display text-sm text-gold hover:bg-gold/10 disabled:opacity-40"
+            title="Guarda la sala (capas, suelo y marcadores) en tu biblioteca, reutilizable en cualquier campaña"
+          >
+            Guardar sala en biblioteca
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {

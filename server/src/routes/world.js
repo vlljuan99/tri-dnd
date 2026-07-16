@@ -9,6 +9,13 @@ import { generateWorldMapImage } from '../services/mapImageGeneration.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { notifyCampaignMap, notifyCampaignWorld } from '../services/liveMap.js';
 import { fireTravelEvents } from '../services/events.js';
+import {
+  snapshotWorldMap,
+  instantiateWorldMap,
+  saveTemplate,
+  getTemplateData,
+  serializeTemplate,
+} from '../services/templates.js';
 
 // Mapa de campaña por capas (v34): cada campaña tiene un mapa de mundo raíz
 // (world_maps) y, opcionalmente, submapas (ciudades) a los que se salta desde
@@ -181,6 +188,47 @@ worldRouter.post('/mapas', requireDm, (req, res) => {
     worldMapId: info.lastInsertRowid,
     world: serializeWorld(getCampaign(campaign.id), req.membership.role),
   });
+});
+
+// Ciudad completa desde plantilla (v35): recrea el submapa con su imagen,
+// pins, tableros enlazados y submapas anidados. Si viene locationId, el pin
+// pasa a tipo ciudad y salta al submapa nuevo (como «Crear submapa»).
+worldRouter.post('/mapas/desde-plantilla', requireDm, (req, res) => {
+  const campaign = getCampaign(req.params.campaignId);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
+  ensureRootWorldMap(campaign);
+
+  const { templateId, locationId } = req.body ?? {};
+  const template = getTemplateData(req.user.id, templateId, 'ciudad');
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+
+  const location = locationId != null ? getLocation(campaign.id, locationId) : null;
+  if (locationId != null && !location) return res.status(404).json({ error: 'Ubicación no encontrada' });
+
+  const worldMapId = db.transaction(() => {
+    const created = instantiateWorldMap(campaign.id, req.user.id, template.data);
+    if (location) {
+      db.prepare(
+        "UPDATE world_locations SET kind = 'ciudad', map_id = NULL, target_world_map_id = ? WHERE id = ?"
+      ).run(created, location.id);
+    }
+    return created;
+  })();
+  notifyCampaignWorld(campaign.id);
+  res.status(201).json({
+    worldMapId,
+    world: serializeWorld(getCampaign(campaign.id), req.membership.role),
+  });
+});
+
+// Guardar esta capa del mundo (raíz o submapa) como plantilla de ciudad:
+// paquete completo con tableros enlazados y submapas anidados
+worldRouter.post('/mapas/:mapId/guardar-plantilla', requireDm, (req, res) => {
+  const worldMap = getWorldMap(req.params.campaignId, req.params.mapId);
+  if (!worldMap) return res.status(404).json({ error: 'Mapa no encontrado' });
+  const data = snapshotWorldMap(req.params.campaignId, worldMap.id);
+  const template = saveTemplate(req.user.id, 'ciudad', req.body?.name ?? worldMap.name, data);
+  res.status(201).json({ template: serializeTemplate(template) });
 });
 
 worldRouter.patch('/mapas/:mapId', requireDm, (req, res) => {

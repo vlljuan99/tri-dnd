@@ -44,6 +44,8 @@ export default function WorldMapEditorPage() {
   const [provider, setProvider] = useState('openai');
   const [estilo, setEstilo] = useState('region');
   const [mapName, setMapName] = useState('');
+  const [cityTemplates, setCityTemplates] = useState([]); // biblioteca de plantillas (v35)
+  const [notice, setNotice] = useState('');
   const fileRef = useRef(null);
   const imageRef = useRef(null);
   const dragRef = useRef(null); // { locId } mientras se arrastra un pin
@@ -53,6 +55,24 @@ export default function WorldMapEditorPage() {
       .then(({ campaign: loaded }) => setCampaign(loaded))
       .catch((e) => setCampaignError(e.message));
   }, [campaignId]);
+
+  const reloadTemplates = () => {
+    api('/plantillas?tipo=ciudad')
+      .then(({ templates }) => setCityTemplates(templates))
+      .catch(() => {});
+  };
+  useEffect(reloadTemplates, []);
+
+  async function saveCityTemplate() {
+    try {
+      const { template: saved } = await editor.saveCityTemplate(editingMap.id);
+      setNotice(`«${saved.name}» guardada en tu biblioteca como plantilla de ciudad.`);
+      reloadTemplates();
+    } catch (e) {
+      setNotice(e.message || 'No se pudo guardar la plantilla');
+    }
+    setTimeout(() => setNotice(''), 4000);
+  }
 
   // Mapa en edición: empieza en el raíz; si el mapa editado desaparece
   // (submapa borrado), vuelta al raíz
@@ -296,6 +316,19 @@ export default function WorldMapEditorPage() {
             </div>
           )}
 
+          <div className="space-y-2 border-b border-gold/15 p-3">
+            <button
+              type="button"
+              onClick={saveCityTemplate}
+              disabled={busy}
+              className="w-full rounded-sm border border-gold/30 px-2 py-1.5 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+              title="Guarda esta capa (imagen, pins, tableros enlazados y submapas anidados) como plantilla de ciudad reutilizable en cualquier campaña"
+            >
+              Guardar en biblioteca (plantilla de ciudad)
+            </button>
+            {notice && <p className="text-[0.7rem] text-sage">{notice}</p>}
+          </div>
+
           <div className="space-y-3 border-b border-gold/15 p-3">
             <p className={labelClass}>Imagen de {editingMap.isRoot ? 'mundo' : 'este submapa'}</p>
             <div className="flex gap-2">
@@ -376,6 +409,7 @@ export default function WorldMapEditorPage() {
                 location={selected}
                 maps={maps}
                 worldMaps={world.maps}
+                cityTemplates={cityTemplates}
                 busy={busy}
                 onSave={(fields) => editor.updateLocation(selected.id, fields)}
                 onDelete={() => {
@@ -385,6 +419,9 @@ export default function WorldMapEditorPage() {
                   }
                 }}
                 onCreateSubmap={(submapName) => editor.createSubmap(submapName)}
+                onCreateSubmapFromTemplate={(templateId) =>
+                  editor.createSubmapFromTemplate(templateId, selected.id).catch(() => {})
+                }
                 onOpenSubmap={(mapId) => setEditingMapId(mapId)}
               />
             ) : (

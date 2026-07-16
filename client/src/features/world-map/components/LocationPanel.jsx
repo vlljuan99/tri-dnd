@@ -13,10 +13,12 @@ export default function LocationPanel({
   location,
   maps,
   worldMaps,
+  cityTemplates,
   busy,
   onSave,
   onDelete,
   onCreateSubmap,
+  onCreateSubmapFromTemplate,
   onOpenSubmap,
 }) {
   const [name, setName] = useState(location.name);
@@ -118,6 +120,25 @@ export default function LocationPanel({
               </button>
             )}
           </div>
+          {!location.targetMapId && (cityTemplates?.length ?? 0) > 0 && (
+            <select
+              value=""
+              disabled={busy}
+              onChange={(e) => {
+                if (e.target.value) onCreateSubmapFromTemplate(Number(e.target.value));
+                e.target.value = '';
+              }}
+              className={`${inputClass} mt-1.5 text-xs`}
+              title="Crea el submapa desde una ciudad de tu biblioteca: imagen, pins y tableros ya conectados"
+            >
+              <option value="">Desde plantilla…</option>
+              {cityTemplates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.meta?.pins ?? 0} pins{t.meta?.boards ? ` · ${t.meta.boards} tableros` : ''})
+                </option>
+              ))}
+            </select>
+          )}
           <p className="mt-1 text-[0.7rem] text-bone/40">
             Al viajar aquí, el grupo entra en el submapa (con sus propios bares, tiendas y dungeons).
           </p>

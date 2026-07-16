@@ -25,6 +25,17 @@ import { trySpendEnemyMovement } from '../services/turnEconomy.js';
 import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/pathfinding.js';
 import { buildWallSet, isValidWallEdges } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
+import {
+  snapshotMap,
+  snapshotRoom,
+  snapshotToken,
+  instantiateMap,
+  instantiateRoom,
+  instantiateToken,
+  saveTemplate,
+  getTemplateData,
+  serializeTemplate,
+} from '../services/templates.js';
 
 // Marca el mapa como modificado y, si es el que está en la mesa, avisa a los
 // sockets de la campaña para que recarguen su vista (ya filtrada por rol)
@@ -142,10 +153,31 @@ mapsRouter.post('/', (req, res) => {
   res.status(201).json({ map: serializeFullMap(map, req.params.campaignId) });
 });
 
+// Mapa nuevo instanciado desde una plantilla de la biblioteca del DM (v35):
+// se recrean plantas, salas (sin revelar), puertas y marcadores
+mapsRouter.post('/desde-plantilla', (req, res) => {
+  const template = getTemplateData(req.user.id, req.body?.templateId, 'mapa');
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+
+  const mapId = db.transaction(() =>
+    instantiateMap(req.params.campaignId, req.user.id, template.data, req.body?.name)
+  )();
+  const map = getMap(req.params.campaignId, mapId);
+  res.status(201).json({ map: serializeFullMap(map, req.params.campaignId) });
+});
+
 mapsRouter.get('/:mapId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
   res.json({ map: serializeFullMap(map, req.params.campaignId) });
+});
+
+// Guardar el mapa entero en la biblioteca de plantillas del DM
+mapsRouter.post('/:mapId/guardar-plantilla', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
+  const template = saveTemplate(req.user.id, 'mapa', req.body?.name ?? map.name, snapshotMap(map));
+  res.status(201).json({ template: serializeTemplate(template) });
 });
 
 mapsRouter.patch('/:mapId', (req, res) => {
@@ -302,6 +334,34 @@ mapsRouter.post('/:mapId/plantas/:floorId/salas', (req, res) => {
   res.status(201).json({ room: serializeRoom(room) });
 });
 
+// Estampar una sala de plantilla en (x, y) de esta planta, con sus marcadores
+mapsRouter.post('/:mapId/plantas/:floorId/salas/desde-plantilla', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const floor = map && getFloor(map.id, req.params.floorId);
+  if (!floor) return res.status(404).json({ error: 'Planta no encontrada' });
+
+  const { templateId, x = 0, y = 0 } = req.body ?? {};
+  if (!isValidCoord(x) || !isValidCoord(y)) {
+    return res.status(400).json({ error: 'Posición de la sala no válida' });
+  }
+  const template = getTemplateData(req.user.id, templateId, 'sala');
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+
+  const roomId = db.transaction(() => instantiateRoom(req.user.id, floor.id, x, y, template.data))();
+  touchAndNotify(map);
+  const room = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(roomId);
+  res.status(201).json({ room: serializeRoom(room) });
+});
+
+// Guardar una sala (con sus marcadores) en la biblioteca de plantillas
+mapsRouter.post('/:mapId/salas/:roomId/guardar-plantilla', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const room = map && getRoom(map.id, req.params.roomId);
+  if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+  const template = saveTemplate(req.user.id, 'sala', req.body?.name ?? room.name, snapshotRoom(room));
+  res.status(201).json({ template: serializeTemplate(template) });
+});
+
 mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   const room = map && getRoom(map.id, req.params.roomId);
@@ -381,27 +441,48 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const nextWalls = (wallEdges ?? JSON.parse(room.wall_edges || '[]')).filter(insideRoom);
   const nextElevation = (elevationCells ?? JSON.parse(room.elevation_cells || '[]')).filter(insideRoom);
   const nextLights = (lightCells ?? JSON.parse(room.light_cells || '[]')).filter(insideRoom);
+  const nextX = x ?? room.x;
+  const nextY = y ?? room.y;
+  const deltaX = nextX - room.x;
+  const deltaY = nextY - room.y;
 
-  db.prepare(
-    `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-       disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, wall_edges = ?, elevation_cells = ?, light_cells = ?, notes = ?, revealed = ? WHERE id = ?`
-  ).run(
-    name !== undefined ? name.trim().slice(0, 80) : room.name,
-    x ?? room.x,
-    y ?? room.y,
-    nextWidth,
-    nextHeight,
-    JSON.stringify(nextDisabled),
-    JSON.stringify(nextObstacles),
-    JSON.stringify(nextSpawns),
-    JSON.stringify(nextTerrain),
-    JSON.stringify(nextWalls),
-    JSON.stringify(nextElevation),
-    JSON.stringify(nextLights),
-    notes ?? room.notes,
-    revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
-    room.id
-  );
+  // Los marcadores, fichas de personaje y extremos de puertas usan
+  // coordenadas absolutas del lienzo. Al arrastrar una sala deben conservar
+  // su posición relativa dentro de ella, así que todo el conjunto se desplaza
+  // en la misma transacción que la sala.
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
+         disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, wall_edges = ?, elevation_cells = ?, light_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+    ).run(
+      name !== undefined ? name.trim().slice(0, 80) : room.name,
+      nextX,
+      nextY,
+      nextWidth,
+      nextHeight,
+      JSON.stringify(nextDisabled),
+      JSON.stringify(nextObstacles),
+      JSON.stringify(nextSpawns),
+      JSON.stringify(nextTerrain),
+      JSON.stringify(nextWalls),
+      JSON.stringify(nextElevation),
+      JSON.stringify(nextLights),
+      notes ?? room.notes,
+      revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
+      room.id
+    );
+
+    if (deltaX !== 0 || deltaY !== 0) {
+      db.prepare('UPDATE map_tokens SET x = x + ?, y = y + ? WHERE room_id = ?')
+        .run(deltaX, deltaY, room.id);
+      db.prepare('UPDATE map_character_tokens SET x = x + ?, y = y + ? WHERE room_id = ?')
+        .run(deltaX, deltaY, room.id);
+      db.prepare('UPDATE map_doors SET from_x = from_x + ?, from_y = from_y + ? WHERE from_room_id = ?')
+        .run(deltaX, deltaY, room.id);
+      db.prepare('UPDATE map_doors SET to_x = to_x + ?, to_y = to_y + ? WHERE to_room_id = ?')
+        .run(deltaX, deltaY, room.id);
+    }
+  })();
   touchAndNotify(map);
 
   // Al revelarse por primera vez en la mesa, sus enemigos entran al tracker
@@ -574,6 +655,35 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
 
   const token = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ token: serializeToken(token) });
+});
+
+// Colocar un marcador desde una plantilla de enemigo configurado (variante,
+// botín, dificultad…) en una casilla activa de la sala
+mapsRouter.post('/:mapId/salas/:roomId/fichas/desde-plantilla', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const room = map && getRoom(map.id, req.params.roomId);
+  if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
+
+  const { templateId, x, y } = req.body ?? {};
+  if (!isValidCoord(x) || !isValidCoord(y) || !cellInsideRoom(room, x, y)) {
+    return res.status(400).json({ error: 'El marcador debe estar en una casilla activa de la sala' });
+  }
+  const template = getTemplateData(req.user.id, templateId, 'enemigo');
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+
+  const tokenId = db.transaction(() => instantiateToken(req.user.id, room.id, x, y, template.data))();
+  touchAndNotify(map);
+  const token = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(tokenId);
+  res.status(201).json({ token: serializeToken(token) });
+});
+
+// Guardar un marcador configurado (enemigo con variante/botín) como plantilla
+mapsRouter.post('/:mapId/fichas/:tokenId/guardar-plantilla', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  const token = map && getToken(map.id, req.params.tokenId);
+  if (!token) return res.status(404).json({ error: 'Marcador no encontrado' });
+  const template = saveTemplate(req.user.id, 'enemigo', req.body?.name ?? token.name, snapshotToken(token));
+  res.status(201).json({ template: serializeTemplate(template) });
 });
 
 mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {

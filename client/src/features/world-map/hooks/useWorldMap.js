@@ -60,6 +60,14 @@ export function useWorldMap(campaignId) {
     busy,
 
     createSubmap: (name) => mutate(() => api(`${base}/mapas`, { method: 'POST', body: { name } })),
+    // Ciudad completa desde la biblioteca de plantillas (v35): recrea imagen,
+    // pins, tableros y submapas anidados; si viene locationId, enlaza el pin
+    createSubmapFromTemplate: (templateId, locationId) =>
+      mutate(() =>
+        api(`${base}/mapas/desde-plantilla`, { method: 'POST', body: { templateId, locationId } })
+      ),
+    // Guardar no toca el mundo: no necesita recarga
+    saveCityTemplate: (mapId) => api(`${base}/mapas/${mapId}/guardar-plantilla`, { method: 'POST', body: {} }),
     renameMap: (mapId, name) =>
       mutate(() => api(`${base}/mapas/${mapId}`, { method: 'PATCH', body: { name } })),
     deleteMap: (mapId) => mutate(() => api(`${base}/mapas/${mapId}`, { method: 'DELETE' })),

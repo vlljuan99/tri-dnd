@@ -2,9 +2,14 @@
 // exporta Dungeondraft y otros editores de mapas). El archivo trae la imagen
 // del mapa en base64, el tamaño exacto en casillas, y los muros como
 // polilíneas en unidades de cuadrícula: aquí se "ajustan" a nuestras paredes
-// por arista (wall_edges, v29). Las luces del archivo se ignoran por ahora
-// (fase 12) y los portales cerrados se importan como pared (el DM puede
-// quitarla con el pincel).
+// por arista (wall_edges, v29). Las luces dinámicas del archivo (data.lights)
+// se importan como fuentes de luz de la app (lightCells), encajadas a la
+// casilla — el modelo UVTT trae color/rango/intensidad que nuestro tablero no
+// usa todavía, así que ese detalle se descarta. OJO: muchos mapas (p. ej. los
+// exports de Dungeondraft del repo mbround18/vtt-maps) traen la luz "horneada"
+// en la imagen con lights: [] y baked_lighting: true — ahí no hay nada
+// dinámico que importar. Los portales cerrados se importan como pared (el DM
+// puede quitarla con el pincel).
 
 // Tolerancia para considerar que un tramo discurre SOBRE una línea de la
 // cuadrícula (el caso normal en muros de mazmorra de Dungeondraft)
@@ -93,6 +98,29 @@ export function wallEntriesFromEdges(edgeKeys, cols, rows) {
   return entries.slice(0, 4000);
 }
 
+// Convierte las luces dinámicas del UVTT (data.lights) a casillas de luz
+// [col, fila] de una sala de cols×rows con origen en (0,0). Cada luz trae su
+// posición en unidades de cuadrícula (relativa a map_origin); se encaja a la
+// casilla que la contiene, se descartan las que caen fuera y se deduplican
+// (varias luces en la misma casilla → una sola brasa). Color, rango e
+// intensidad del UVTT se ignoran: nuestro tablero solo conoce la posición.
+export function lightCellsFromLights(lights, origin, cols, rows) {
+  const seen = new Set();
+  const cells = [];
+  for (const light of lights ?? []) {
+    const pos = light?.position;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+    const col = Math.floor(pos.x - origin.x);
+    const row = Math.floor(pos.y - origin.y);
+    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    const key = `${col},${row}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cells.push([col, row]);
+  }
+  return cells.slice(0, 4000);
+}
+
 // Parsea el JSON de un archivo UVTT. Devuelve dimensiones en casillas,
 // densidad de píxeles, la imagen en base64 y las paredes ya ajustadas.
 export function parseUvtt(text) {
@@ -139,6 +167,7 @@ export function parseUvtt(text) {
     pixelsPerGrid: Number(res.pixels_per_grid) || 70,
     imageBase64: data.image,
     wallEdges: wallEntriesFromEdges(edges, cols, rows),
+    lightCells: lightCellsFromLights(data.lights, origin, cols, rows),
     portals: (data.portals ?? []).length,
     closedPortals,
     lights: (data.lights ?? []).length,

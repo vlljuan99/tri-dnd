@@ -61,6 +61,9 @@ export default function MapEditorPage() {
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
   const [bosses, setBosses] = useState([]); // personajes kind='boss' del DM
   const [tokenBossId, setTokenBossId] = useState('');
+  const [tokenTemplateId, setTokenTemplateId] = useState(''); // plantilla de enemigo configurado
+  const [templates, setTemplates] = useState([]); // biblioteca de plantillas del DM (v35)
+  const [notice, setNotice] = useState('');
   const uvttInputRef = useRef(null);
 
   useEffect(() => {
@@ -68,6 +71,31 @@ export default function MapEditorPage() {
       .then(({ characters }) => setBosses(characters.filter((c) => c.kind === 'boss')))
       .catch(() => {});
   }, []);
+
+  const reloadTemplates = () => {
+    api('/plantillas').then(({ templates: rows }) => setTemplates(rows)).catch(() => {});
+  };
+  useEffect(reloadTemplates, []);
+
+  const mapTemplates = templates.filter((t) => t.kind === 'mapa');
+  const roomTemplates = templates.filter((t) => t.kind === 'sala');
+  const enemyTemplates = templates.filter((t) => t.kind === 'enemigo');
+
+  // Aviso efímero («Guardado en la biblioteca») tras guardar una plantilla
+  function flash(text) {
+    setNotice(text);
+    setTimeout(() => setNotice(''), 4000);
+  }
+
+  async function saveTemplateOf(kind, saver) {
+    try {
+      const { template: saved } = await saver();
+      flash(`«${saved.name}» guardado en tu biblioteca (${kind}).`);
+      reloadTemplates();
+    } catch (e) {
+      flash(e.message || 'No se pudo guardar la plantilla');
+    }
+  }
 
   useEffect(() => {
     api(`/campaigns/${campaignId}`)
@@ -108,8 +136,21 @@ export default function MapEditorPage() {
   }
 
   async function placeRoom(cellPos) {
+    if (!activeFloor) return;
+    // Sala de la biblioteca de plantillas: se estampa entera (capas, suelo y
+    // marcadores) con su esquina en la casilla clicada
+    if (template.templateId) {
+      const { room } = await editor.addRoomFromTemplate(activeFloor.id, {
+        templateId: template.templateId,
+        x: cellPos.x,
+        y: cellPos.y,
+      });
+      setSelection({ type: 'room', id: room.id });
+      setMode('select');
+      return;
+    }
     const { width, height } = templateSize();
-    if (!activeFloor || !Number.isInteger(width) || !Number.isInteger(height)) return;
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return;
     const { room } = await editor.addRoom(activeFloor.id, {
       x: cellPos.x,
       y: cellPos.y,
@@ -122,6 +163,16 @@ export default function MapEditorPage() {
   }
 
   async function placeToken(target) {
+    // Plantilla de enemigo configurado: se coloca con su variante y botín
+    if (tokenKind === 'enemigo' && tokenTemplateId) {
+      const { token } = await editor.addTokenFromTemplate(target.roomId, {
+        templateId: Number(tokenTemplateId),
+        x: target.x,
+        y: target.y,
+      });
+      setSelection({ type: 'token', id: token.id });
+      return;
+    }
     const boss = CHARACTER_LINKABLE.has(tokenKind) ? bosses.find((b) => b.id === Number(tokenBossId)) : null;
     const name =
       tokenName.trim() ||
@@ -394,6 +445,26 @@ export default function MapEditorPage() {
                 e.target.value = '';
               }}
             />
+            {mapTemplates.length > 0 && (
+              <select
+                value=""
+                disabled={busy}
+                onChange={(e) => {
+                  if (e.target.value) editor.createMapFromTemplate(Number(e.target.value)).catch(() => {});
+                  e.target.value = '';
+                }}
+                className="mt-1 w-full rounded-sm border border-gold/25 bg-night-950 px-2 py-1 text-xs text-gold/90 focus:border-gold focus:outline-none disabled:opacity-40"
+                title="Crea un mapa nuevo a partir de una plantilla de tu biblioteca"
+              >
+                <option value="">+ Desde plantilla…</option>
+                {mapTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.meta?.floors ?? '?'}p · {t.meta?.rooms ?? '?'}s)
+                  </option>
+                ))}
+              </select>
+            )}
+            {notice && <p className="mt-1 text-[0.65rem] text-sage">{notice}</p>}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             {maps === null ? (
@@ -423,7 +494,7 @@ export default function MapEditorPage() {
                     {m.floorCount} planta{m.floorCount === 1 ? '' : 's'} · {m.roomCount} sala
                     {m.roomCount === 1 ? '' : 's'}
                   </p>
-                  <div className="mt-1 flex items-center gap-2">
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
                     {m.isActive ? (
                       <span className="text-[0.65rem] font-medium uppercase tracking-widest text-sage">
                         ● En la mesa
@@ -438,6 +509,15 @@ export default function MapEditorPage() {
                         Llevar a la mesa
                       </button>
                     )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => saveTemplateOf('mapa', () => editor.saveMapTemplate(m.id))}
+                      className="text-[0.65rem] uppercase tracking-widest text-gold/70 hover:text-gold disabled:opacity-40"
+                      title="Guarda este mapa entero en tu biblioteca de plantillas, reutilizable en cualquier campaña"
+                    >
+                      Guardar plantilla
+                    </button>
                     <button
                       type="button"
                       disabled={busy}
@@ -542,12 +622,31 @@ export default function MapEditorPage() {
                   <>
                     <select
                       value={template.key}
-                      onChange={(e) => setTemplate(ROOM_TEMPLATES.find((t) => t.key === e.target.value))}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value.startsWith('tpl:')) {
+                          const saved = roomTemplates.find((t) => `tpl:${t.id}` === value);
+                          if (saved) {
+                            setTemplate({ key: value, templateId: saved.id, label: saved.name });
+                          }
+                        } else {
+                          setTemplate(ROOM_TEMPLATES.find((t) => t.key === value));
+                        }
+                      }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
                       {ROOM_TEMPLATES.map((t) => (
                         <option key={t.key} value={t.key}>{t.label}</option>
                       ))}
+                      {roomTemplates.length > 0 && (
+                        <optgroup label="De tu biblioteca">
+                          {roomTemplates.map((t) => (
+                            <option key={t.id} value={`tpl:${t.id}`}>
+                              {t.name} ({t.meta?.width}×{t.meta?.height})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                     {template.key === 'libre' && (
                       <span className="flex items-center gap-1 text-xs text-bone/60">
@@ -691,6 +790,7 @@ export default function MapEditorPage() {
                         setTokenKind(e.target.value);
                         setTokenMonster(null);
                         setTokenBossId('');
+                        setTokenTemplateId('');
                       }}
                       className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
                     >
@@ -704,7 +804,7 @@ export default function MapEditorPage() {
                       placeholder="Nombre (Esqueleto, Cofre…)"
                       className="w-44 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone placeholder:text-bone/35 focus:border-gold focus:outline-none"
                     />
-                    {tokenKind === 'enemigo' && (
+                    {tokenKind === 'enemigo' && !tokenTemplateId && (
                       <button
                         type="button"
                         onClick={() => setShowMonsterPicker(true)}
@@ -712,6 +812,19 @@ export default function MapEditorPage() {
                       >
                         {tokenMonster ? `SRD: ${tokenMonster.name}` : 'Bestiario…'}
                       </button>
+                    )}
+                    {tokenKind === 'enemigo' && enemyTemplates.length > 0 && !tokenMonster && !tokenBossId && (
+                      <select
+                        value={tokenTemplateId}
+                        onChange={(e) => setTokenTemplateId(e.target.value)}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                        title="Enemigo configurado de tu biblioteca (variante y botín incluidos)"
+                      >
+                        <option value="">— o una plantilla tuya —</option>
+                        {enemyTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
                     )}
                     {tokenMonster && tokenKind === 'enemigo' && (
                       <button
@@ -789,6 +902,7 @@ export default function MapEditorPage() {
                 setSelection(null);
                 editor.deleteRoom(roomId).catch(() => {});
               }}
+              onSaveTemplate={(roomId) => saveTemplateOf('sala', () => editor.saveRoomTemplate(roomId))}
               onUploadImage={(roomId, file) => editor.uploadRoomImage(roomId, file).catch(() => {})}
               onGenerateImage={(roomId, opts) => editor.generateRoomImage(roomId, opts).catch(() => {})}
               onRemoveImage={(roomId) => editor.removeRoomImage(roomId).catch(() => {})}
@@ -810,6 +924,7 @@ export default function MapEditorPage() {
               roomName={allRooms.find((r) => r.id === selectedToken.roomId)?.name || 'Sala'}
               busy={busy}
               onPatch={(tokenId, fields) => editor.patchToken(tokenId, fields).catch(() => {})}
+              onSaveTemplate={(tokenId) => saveTemplateOf('enemigo', () => editor.saveTokenTemplate(tokenId))}
               onDelete={(tokenId) => {
                 setSelection(null);
                 editor.deleteToken(tokenId).catch(() => {});

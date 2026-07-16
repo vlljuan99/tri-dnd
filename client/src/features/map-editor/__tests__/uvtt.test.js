@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { segmentEdges, wallEntriesFromEdges, parseUvtt } from '../lib/uvtt.js';
+import { segmentEdges, wallEntriesFromEdges, parseUvtt, lightCellsFromLights } from '../lib/uvtt.js';
 
 test('un muro vertical sobre una línea de cuadrícula marca sus aristas', () => {
   const edges = segmentEdges({ x: 3, y: 1 }, { x: 3, y: 4 });
@@ -59,7 +59,7 @@ test('parseUvtt extrae tamaño, muros y portales cerrados', () => {
         freestanding: false,
       },
     ],
-    lights: [{ position: { x: 1, y: 1 }, range: 3 }],
+    lights: [{ position: { x: 1.7, y: 1.2 }, range: 3, color: 'ffaa00' }],
     image: 'aGVsbG8=',
   };
   const parsed = parseUvtt(JSON.stringify(uvtt));
@@ -67,6 +67,8 @@ test('parseUvtt extrae tamaño, muros y portales cerrados', () => {
   assert.equal(parsed.rows, 4);
   assert.equal(parsed.pixelsPerGrid, 70);
   assert.equal(parsed.lights, 1);
+  // La luz en (1.7, 1.2) se encaja a la casilla [1, 1]
+  assert.deepEqual(parsed.lightCells, [[1, 1]]);
   assert.equal(parsed.closedPortals, 1);
   const keys = new Set(parsed.wallEdges.map(([c, r, s]) => `${c},${r},${s}`));
   // Muro vertical en x=2, filas 0-1 y fila 3, y el portal cerrado tapa la fila 2
@@ -76,6 +78,35 @@ test('parseUvtt extrae tamaño, muros y portales cerrados', () => {
   assert.ok(keys.has('2,3,o'));
   // El muro de objetos va de (0,1) a (1,1): arista norte de la casilla (0,1)
   assert.ok(keys.has('0,1,n'), 'muro horizontal de objetos');
+});
+
+test('lightCellsFromLights encaja a casilla, recorta origen y deduplica', () => {
+  const origin = { x: 0, y: 0 };
+  const cells = lightCellsFromLights(
+    [
+      { position: { x: 0.5, y: 0.5 } }, // → [0, 0]
+      { position: { x: 0.9, y: 0.1 } }, // misma casilla [0, 0], se ignora
+      { position: { x: 3.4, y: 2.8 } }, // → [3, 2]
+      { position: { x: 9, y: 1 } }, // fuera (col ≥ cols), se descarta
+      { position: { x: 1, y: -1 } }, // fuera (fila < 0), se descarta
+      { range: 3 }, // sin position, se descarta
+    ],
+    origin,
+    4,
+    3
+  );
+  assert.deepEqual(cells, [[0, 0], [3, 2]]);
+});
+
+test('lightCellsFromLights resta el origen del mapa', () => {
+  const cells = lightCellsFromLights([{ position: { x: 6, y: 5 } }], { x: 4, y: 4 }, 4, 3);
+  // (6-4, 5-4) = casilla [2, 1]
+  assert.deepEqual(cells, [[2, 1]]);
+});
+
+test('lightCellsFromLights con lista vacía o ausente devuelve []', () => {
+  assert.deepEqual(lightCellsFromLights([], { x: 0, y: 0 }, 4, 3), []);
+  assert.deepEqual(lightCellsFromLights(undefined, { x: 0, y: 0 }, 4, 3), []);
 });
 
 test('parseUvtt rechaza archivos sin tamaño o sin imagen', () => {

@@ -344,9 +344,29 @@ export default function EditorCanvas({
 
   function tokenScreenCenter(token) {
     const isDragging = drag?.type === 'token' && drag.id === token.id;
-    const tx = isDragging ? token.x + drag.dx : token.x;
-    const ty = isDragging ? token.y + drag.dy : token.y;
+    const roomIsDragging = drag?.type === 'room' && drag.id === token.roomId;
+    const dx = isDragging || roomIsDragging ? drag.dx : 0;
+    const dy = isDragging || roomIsDragging ? drag.dy : 0;
+    const tx = token.x + dx;
+    const ty = token.y + dy;
     return { cx: toPx.x(tx) + cell / 2, cy: toPx.y(ty) + cell / 2 };
+  }
+
+  // Las puertas también guardan coordenadas absolutas. Esta copia solo se
+  // usa para pintar la vista previa mientras se arrastra una de sus salas;
+  // el servidor persiste el mismo desplazamiento al soltarla.
+  function doorForScreen(door) {
+    if (drag?.type !== 'room') return door;
+    const moveFrom = drag.id === door.fromRoomId;
+    const moveTo = drag.id === door.toRoomId;
+    if (!moveFrom && !moveTo) return door;
+    return {
+      ...door,
+      fromX: door.fromX + (moveFrom ? drag.dx : 0),
+      fromY: door.fromY + (moveFrom ? drag.dy : 0),
+      toX: door.toX + (moveTo ? drag.dx : 0),
+      toY: door.toY + (moveTo ? drag.dy : 0),
+    };
   }
 
   const gridLines = [];
@@ -555,17 +575,18 @@ export default function EditorCanvas({
         {/* Línea entre los dos extremos de una escalera/portal (las puertas en
             muro se dibujan sobre su arista, sin línea) */}
         {doors.map((door) => {
-          if (isEdgeDoor(door)) return null;
-          const from = roomById.get(door.fromRoomId);
-          const to = roomById.get(door.toRoomId);
+          const displayDoor = doorForScreen(door);
+          if (isEdgeDoor(displayDoor)) return null;
+          const from = roomById.get(displayDoor.fromRoomId);
+          const to = roomById.get(displayDoor.toRoomId);
           if (!from || !to) return null;
           return (
             <line
               key={`link-${door.id}`}
-              x1={toPx.x(door.fromX) + cell / 2}
-              y1={toPx.y(door.fromY) + cell / 2}
-              x2={toPx.x(door.toX) + cell / 2}
-              y2={toPx.y(door.toY) + cell / 2}
+              x1={toPx.x(displayDoor.fromX) + cell / 2}
+              y1={toPx.y(displayDoor.fromY) + cell / 2}
+              x2={toPx.x(displayDoor.toX) + cell / 2}
+              y2={toPx.y(displayDoor.toY) + cell / 2}
               stroke="#c9a86a"
               strokeOpacity={0.35}
               strokeDasharray="4 4"
@@ -573,13 +594,14 @@ export default function EditorCanvas({
           );
         })}
         {doors.map((door) => {
+          const displayDoor = doorForScreen(door);
           // Puerta en muro: un único marcador sobre la arista compartida
-          if (isEdgeDoor(door)) {
-            if (!roomById.has(door.fromRoomId) && !roomById.has(door.toRoomId)) return null;
+          if (isEdgeDoor(displayDoor)) {
+            if (!roomById.has(displayDoor.fromRoomId) && !roomById.has(displayDoor.toRoomId)) return null;
             return (
               <EdgeDoorMarker
                 key={`edge-${door.id}`}
-                door={door}
+                door={displayDoor}
                 cell={cell}
                 toPx={toPx}
                 selected={selection?.type === 'door' && selection.id === door.id}
@@ -588,13 +610,13 @@ export default function EditorCanvas({
             );
           }
           const markers = [];
-          if (roomById.has(door.fromRoomId)) {
+          if (roomById.has(displayDoor.fromRoomId)) {
             markers.push(
               <DoorMarker
                 key={`from-${door.id}`}
-                door={door}
-                x={door.fromX}
-                y={door.fromY}
+                door={displayDoor}
+                x={displayDoor.fromX}
+                y={displayDoor.fromY}
                 cell={cell}
                 toPx={toPx}
                 selected={selection?.type === 'door' && selection.id === door.id}
@@ -602,13 +624,13 @@ export default function EditorCanvas({
               />
             );
           }
-          if (roomById.has(door.toRoomId)) {
+          if (roomById.has(displayDoor.toRoomId)) {
             markers.push(
               <DoorMarker
                 key={`to-${door.id}`}
-                door={door}
-                x={door.toX}
-                y={door.toY}
+                door={displayDoor}
+                x={displayDoor.toX}
+                y={displayDoor.toY}
                 cell={cell}
                 toPx={toPx}
                 selected={selection?.type === 'door' && selection.id === door.id}
@@ -657,8 +679,8 @@ export default function EditorCanvas({
         {/* Primer extremo de una puerta a medio crear */}
         {doorDraft && roomById.has(doorDraft.roomId) && (
           <circle
-            cx={toPx.x(doorDraft.x) + cell / 2}
-            cy={toPx.y(doorDraft.y) + cell / 2}
+            cx={toPx.x(doorDraft.x + (drag?.type === 'room' && drag.id === doorDraft.roomId ? drag.dx : 0)) + cell / 2}
+            cy={toPx.y(doorDraft.y + (drag?.type === 'room' && drag.id === doorDraft.roomId ? drag.dy : 0)) + cell / 2}
             r={cell * 0.35}
             fill="none"
             stroke="#e8c368"

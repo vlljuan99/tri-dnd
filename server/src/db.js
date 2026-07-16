@@ -680,6 +680,28 @@ const migrations = [
   ALTER TABLE event_links_new RENAME TO event_links;
   CREATE INDEX idx_event_links_campaign ON event_links(campaign_id);
   `,
+
+  // v35 — Biblioteca de plantillas del DM (salas, dungeons enteros, ciudades
+  // del mundo y enemigos configurados). Por usuario, como custom_items o
+  // dm_events: se guardan desde una campaña y se instancian en cualquiera.
+  // data: snapshot JSON (services/templates.js); las imágenes se referencian
+  //   por URL de /uploads/maps (borrar mapas nunca borra archivos).
+  // kind: 'sala' | 'mapa' | 'ciudad' | 'enemigo', validado en ruta (sin
+  //   CHECK, para añadir tipos sin reconstruir, mismo criterio que v34).
+  // meta: resumen precalculado para listados (plantas/salas/tamaño/pins).
+  `
+  CREATE TABLE dm_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL,
+    preview_url TEXT,
+    meta TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_dm_templates_user ON dm_templates(user_id);
+  `,
 ];
 
 export function runMigrations() {

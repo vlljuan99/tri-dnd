@@ -100,7 +100,7 @@ export function useMapEditor(campaignId) {
     // Importa un archivo Universal VTT (.dd2vtt/.uvtt): crea un mapa nuevo
     // con una sala del tamaño exacto del archivo, sube su imagen (la
     // cuadrícula viene definida, no hace falta calibrar) y aplica los muros
-    // como paredes por arista.
+    // como paredes por arista y las luces dinámicas como fuentes de luz.
     importUvtt: (file) =>
       mutate(async () => {
         const parsed = parseUvtt(await file.text());
@@ -134,10 +134,13 @@ export function useMapEditor(campaignId) {
           throw new Error(data.error || 'No se pudo subir la imagen del UVTT');
         }
 
-        if (parsed.wallEdges.length) {
+        const roomPatch = {};
+        if (parsed.wallEdges.length) roomPatch.wallEdges = parsed.wallEdges;
+        if (parsed.lightCells.length) roomPatch.lightCells = parsed.lightCells;
+        if (Object.keys(roomPatch).length) {
           await api(`${base}/${created.id}/salas/${room.id}`, {
             method: 'PATCH',
-            body: { wallEdges: parsed.wallEdges },
+            body: roomPatch,
           });
         }
         setSelectedMapId(created.id);
@@ -181,6 +184,38 @@ export function useMapEditor(campaignId) {
       mutate(() => api(`${base}/${selectedMapId}/puertas/${doorId}`, { method: 'PATCH', body: fields })),
     deleteDoor: (doorId) =>
       mutate(() => api(`${base}/${selectedMapId}/puertas/${doorId}`, { method: 'DELETE' })),
+
+    // Biblioteca de plantillas del DM (v35): guardar mapa/sala/enemigo desde
+    // esta campaña e instanciar los guardados. Guardar no toca el mapa, así
+    // que no pasa por mutate (no hace falta recargar).
+    createMapFromTemplate: (templateId) =>
+      mutate(async () => {
+        const { map: created } = await api(`${base}/desde-plantilla`, {
+          method: 'POST',
+          body: { templateId },
+        });
+        setSelectedMapId(created.id);
+        return created;
+      }),
+    addRoomFromTemplate: (floorId, { templateId, x, y }) =>
+      mutate(() =>
+        api(`${base}/${selectedMapId}/plantas/${floorId}/salas/desde-plantilla`, {
+          method: 'POST',
+          body: { templateId, x, y },
+        })
+      ),
+    addTokenFromTemplate: (roomId, { templateId, x, y }) =>
+      mutate(() =>
+        api(`${base}/${selectedMapId}/salas/${roomId}/fichas/desde-plantilla`, {
+          method: 'POST',
+          body: { templateId, x, y },
+        })
+      ),
+    saveMapTemplate: (mapId) => api(`${base}/${mapId}/guardar-plantilla`, { method: 'POST', body: {} }),
+    saveRoomTemplate: (roomId) =>
+      api(`${base}/${selectedMapId}/salas/${roomId}/guardar-plantilla`, { method: 'POST', body: {} }),
+    saveTokenTemplate: (tokenId) =>
+      api(`${base}/${selectedMapId}/fichas/${tokenId}/guardar-plantilla`, { method: 'POST', body: {} }),
 
     uploadRoomImage: (roomId, file) =>
       mutate(async () => {
