@@ -18,12 +18,17 @@ export const AVATAR_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
 // /uploads, que es una ruta estática pública. Solo las entrega la API tras
 // comprobar que quien las pide es el DM de la campaña.
 export const NARRATIVE_MEDIA_DIR = path.join(DATA_DIR, 'narrative-media');
+// Cada cambio del archivo narrativo deja una instantánea JSON recuperable.
+// Se mantiene fuera de /uploads: además de ser un respaldo local, puede
+// contener notas privadas del DM que nunca deben servirse como estáticas.
+export const NARRATIVE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'narrativa');
 export const PORT = Number(process.env.PORT) || 4000;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(MAP_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(AVATAR_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(NARRATIVE_MEDIA_DIR, { recursive: true });
+fs.mkdirSync(NARRATIVE_BACKUP_DIR, { recursive: true });
 
 // Secreto JWT: variable de entorno o uno generado y persistido en local
 const secretFile = path.join(DATA_DIR, 'jwt-secret.txt');
