@@ -15,12 +15,11 @@ const labelClass = 'block text-[0.65rem] uppercase tracking-widest text-bone/50 
 const TRIGGER_LABELS = {
   manual: 'Manual (a la vista del DM)',
   rondas: 'Cada N rondas',
-  revelar: 'Al revelarse la sala / llegar a la ubicación',
 };
 
 const emptyForm = () => ({ name: '', effect: '', description: '', triggerKind: 'manual', triggerEvery: 3, hidden: false });
 
-function EventForm({ initial, busy, onSave, onCancel }) {
+function EventForm({ initial, busy, allowWorldLocations, onSave, onCancel }) {
   const [form, setForm] = useState(() => (initial ? { ...initial } : emptyForm()));
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -42,7 +41,12 @@ function EventForm({ initial, busy, onSave, onCancel }) {
         <label className="block">
           <span className={labelClass}>Disparador</span>
           <select className={inputClass} value={form.triggerKind} onChange={(e) => set('triggerKind', e.target.value)}>
-            {Object.entries(TRIGGER_LABELS).map(([k, l]) => (
+            {Object.entries({
+              ...TRIGGER_LABELS,
+              revelar: allowWorldLocations
+                ? 'Al revelarse una sala / llegar a una ubicación'
+                : 'Al revelarse una sala',
+            }).map(([k, l]) => (
               <option key={k} value={k}>{l}</option>
             ))}
           </select>
@@ -85,10 +89,17 @@ function EventForm({ initial, busy, onSave, onCancel }) {
   );
 }
 
-export default function CampaignEventsPanel({ campaignId }) {
+export default function CampaignEventsPanel({
+  campaignId,
+  campaignData = null,
+  refreshCampaignData = null,
+  allowWorldLocations = true,
+}) {
   const [events, setEvents] = useState([]);
-  const [links, setLinks] = useState([]);
-  const [targets, setTargets] = useState({ rooms: [], tokens: [], locations: [] });
+  const [links, setLinks] = useState(() => campaignData?.links ?? []);
+  const [targets, setTargets] = useState(
+    () => campaignData?.targets ?? { rooms: [], tokens: [], locations: [] }
+  );
   const [editing, setEditing] = useState(null); // null | 'new' | event
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -97,27 +108,48 @@ export default function CampaignEventsPanel({ campaignId }) {
   const [linkTargetType, setLinkTargetType] = useState('campana');
   const [linkTargetId, setLinkTargetId] = useState('');
 
-  function reload() {
-    api('/eventos').then(({ events }) => setEvents(events)).catch((e) => setError(e.message));
-    api(`/campaigns/${campaignId}/eventos`)
-      .then((data) => {
-        setLinks(data.links);
-        setTargets(data.targets);
-      })
-      .catch((e) => setError(e.message));
+  function applyCampaignData(data) {
+    if (!data) return;
+    setLinks(data.links ?? []);
+    setTargets(data.targets ?? { rooms: [], tokens: [], locations: [] });
+  }
+
+  async function reload() {
+    const campaignRequest = refreshCampaignData
+      ? refreshCampaignData()
+      : api(`/campaigns/${campaignId}/eventos`);
+    const [{ events: loadedEvents }, loadedCampaignData] = await Promise.all([
+      api('/eventos'),
+      campaignRequest,
+    ]);
+    setEvents(loadedEvents);
+    applyCampaignData(loadedCampaignData);
   }
 
   useEffect(() => {
-    reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setError('');
+    api('/eventos')
+      .then(({ events: loadedEvents }) => setEvents(loadedEvents))
+      .catch((loadError) => setError(loadError.message));
+    // Normalmente TallerLayout ya trajo estos enlaces para calcular el
+    // progreso. Solo reintentamos el endpoint si aquella carga falló.
+    if (!campaignData) {
+      api(`/campaigns/${campaignId}/eventos`)
+        .then(applyCampaignData)
+        .catch((loadError) => setError(loadError.message));
+    }
   }, [campaignId]);
+
+  useEffect(() => {
+    applyCampaignData(campaignData);
+  }, [campaignData]);
 
   async function run(action) {
     setBusy(true);
     setError('');
     try {
       await action();
-      reload();
+      await reload();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -168,9 +200,9 @@ export default function CampaignEventsPanel({ campaignId }) {
         </button>
       </div>
       <p className="mb-3 text-xs text-bone/50">
-        Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la
-        campaña, una sala, un enemigo o una ubicación del mapa de mundo (evento de camino); los de rondas,
-        revelado y viaje saltan solos como mensaje en el chat.
+        {allowWorldLocations
+          ? 'Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la campaña, una sala, un enemigo o una ubicación del mapa de mundo; los de rondas, revelado y viaje saltan solos como mensaje en el chat.'
+          : 'Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la escaramuza, una sala o un enemigo; los de rondas y revelado saltan solos como mensaje en el chat.'}
       </p>
 
       {error && <p className="mb-3 text-sm text-blood">{error}</p>}
@@ -179,6 +211,7 @@ export default function CampaignEventsPanel({ campaignId }) {
           <EventForm
             initial={editing === 'new' ? null : editing}
             busy={busy}
+            allowWorldLocations={allowWorldLocations}
             onSave={saveEvent}
             onCancel={() => setEditing(null)}
           />
@@ -238,7 +271,7 @@ export default function CampaignEventsPanel({ campaignId }) {
               <option value="campana">Toda la campaña</option>
               <option value="sala">Una sala</option>
               <option value="marcador">Un marcador</option>
-              <option value="ubicacion">Una ubicación del mundo</option>
+              {allowWorldLocations && <option value="ubicacion">Una ubicación del mundo</option>}
             </select>
           </label>
           {linkTargetType !== 'campana' && (

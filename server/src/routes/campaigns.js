@@ -11,7 +11,13 @@ import {
   spawnRoomEnemies,
   touchMap,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap, notifyCombat, notifyCombatStarted } from '../services/liveMap.js';
+import {
+  notifyCampaignMap,
+  notifyCombat,
+  notifyCombatStarted,
+  postSystemMessage,
+  evictCampaignMember,
+} from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
 import { lootMarkerInto } from '../services/loot.js';
@@ -42,6 +48,22 @@ export function getMembership(campaignId, userId) {
   return db
     .prepare('SELECT role FROM campaign_members WHERE campaign_id = ? AND user_id = ?')
     .get(campaignId, userId);
+}
+
+// Publica una consecuencia únicamente después de resolver la interacción.
+// Las de alcance personal usan el mismo filtrado backend que una tirada
+// oculta: solo actor y DM. Las de grupo aparecen para toda la mesa.
+function publishMarkerConsequence(campaignId, actorUserId, token, consequence) {
+  const clean = typeof consequence === 'string' ? consequence.trim() : '';
+  const scope = token.consequence_scope === 'party' ? 'party' : 'player';
+  if (clean) {
+    postSystemMessage(
+      campaignId,
+      `Consecuencia de «${token.name}»: ${clean}`,
+      { hidden: scope === 'player', userId: actorUserId }
+    );
+  }
+  return scope;
 }
 
 function serializeCampaign(row, role) {
@@ -294,6 +316,100 @@ campaignsRouter.patch('/:id', (req, res) => {
   }
   const updated = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(row.id);
   res.json({ campaign: serializeCampaign(updated, 'dm') });
+});
+
+// Invalida el código anterior al instante. No hace falta guardar un historial:
+// solo el valor único actual permite que una cuenta nueva se una.
+campaignsRouter.post('/:id/invitacion/regenerar', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM puede regenerar la invitación' });
+  }
+
+  const inviteCode = generateInviteCode();
+  db.prepare('UPDATE campaigns SET invite_code = ? WHERE id = ?').run(inviteCode, row.id);
+  res.json({ inviteCode });
+});
+
+// Saca a un jugador de una campaña, venga la orden del DM (expulsar) o de él
+// mismo (abandonar): la limpieza es exactamente la misma, solo cambia quién
+// tiene derecho a pedirla. Conserva la ficha del jugador, pero la desvincula
+// de la campaña y retira sus piezas persistentes del tablero. Después se le
+// saca de la sala Socket para que deje de recibir datos inmediatamente.
+function removePlayerFromCampaign(row, userId) {
+  const membership = db
+    .prepare('SELECT role FROM campaign_members WHERE campaign_id = ? AND user_id = ?')
+    .get(row.id, userId);
+  if (!membership || membership.role !== 'jugador') {
+    return { error: 'Ese jugador no pertenece a la campaña', status: 404 };
+  }
+
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE game_tables SET combat_turn_id = NULL
+       WHERE campaign_id = ? AND combat_turn_id IN (
+         SELECT id FROM combatants WHERE campaign_id = ? AND character_id IN (
+           SELECT id FROM characters WHERE campaign_id = ? AND user_id = ?
+         )
+       )`
+    ).run(row.id, row.id, row.id, userId);
+    db.prepare(
+      `DELETE FROM map_character_tokens WHERE character_id IN (
+         SELECT id FROM characters WHERE campaign_id = ? AND user_id = ?
+       )`
+    ).run(row.id, userId);
+    db.prepare(
+      `DELETE FROM combatants WHERE campaign_id = ? AND character_id IN (
+         SELECT id FROM characters WHERE campaign_id = ? AND user_id = ?
+       )`
+    ).run(row.id, row.id, userId);
+    db.prepare(
+      "UPDATE characters SET campaign_id = NULL, updated_at = datetime('now') WHERE campaign_id = ? AND user_id = ?"
+    ).run(row.id, userId);
+    db.prepare(
+      "DELETE FROM campaign_members WHERE campaign_id = ? AND user_id = ? AND role = 'jugador'"
+    ).run(row.id, userId);
+  })();
+
+  evictCampaignMember(row.id, userId);
+  notifyCombat(row.id);
+  notifyCampaignMap(row.id);
+  return { ok: true, playerCount: countPlayers(row.id) };
+}
+
+campaignsRouter.delete('/:id/jugadores/:userId', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM puede expulsar jugadores' });
+  }
+
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId < 1) {
+    return res.status(400).json({ error: 'Jugador no válido' });
+  }
+
+  const result = removePlayerFromCampaign(row, userId);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+// Abandonar por decisión propia. El DM no puede usarlo: la campaña se quedaría
+// sin nadie que la lleve, y traspasar el rol es otra conversación (fase
+// pendiente de co-DM/transferencia). Para él, la salida sigue siendo borrarla.
+campaignsRouter.delete('/:id/abandonar', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id === req.user.id) {
+    return res.status(400).json({
+      error: 'Eres el DM de esta campaña: no puedes abandonarla, solo borrarla.',
+    });
+  }
+
+  const result = removePlayerFromCampaign(row, req.user.id);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
 });
 
 // Borrar una campaña entera (solo su DM). Las fichas de personaje no se
@@ -865,9 +981,16 @@ campaignsRouter.post('/:id/marcadores/:tokenId/saquear', (req, res) => {
   if (!adjacent) return res.status(400).json({ error: 'Tienes que estar al lado del botín' });
 
   const looted = lootMarkerInto(token, character);
+  const consequence = token.success_consequence || '';
+  const consequenceScope = publishMarkerConsequence(
+    req.params.id,
+    req.user.id,
+    token,
+    consequence
+  );
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
-  res.json({ ok: true, looted });
+  res.json({ ok: true, looted, consequence, consequenceScope });
 });
 
 // Interactuar con un marcador de trampa/objeto del mapa activo: cuesta la
@@ -903,6 +1026,7 @@ campaignsRouter.post('/:id/marcadores/:tokenId/interactuar', (req, res) => {
       ok: true,
       success: true,
       consequence: token.success_consequence || '',
+      consequenceScope: token.consequence_scope ?? 'player',
     });
   }
 
@@ -933,24 +1057,30 @@ campaignsRouter.post('/:id/marcadores/:tokenId/interactuar', (req, res) => {
       return res.status(400).json({ error: 'Falta la tirada de habilidad' });
     }
     if (roll.total < token.dc) {
+      const consequence = token.failure_consequence || '';
       return res.json({
         ok: true,
         success: false,
         dc: token.dc,
-        consequence: token.failure_consequence || '',
+        consequence,
+        consequenceScope: publishMarkerConsequence(req.params.id, req.user.id, token, consequence),
       });
     }
+    const consequence = token.success_consequence || '';
     return res.json({
       ok: true,
       success: true,
       dc: token.dc,
-      consequence: token.success_consequence || '',
+      consequence,
+      consequenceScope: publishMarkerConsequence(req.params.id, req.user.id, token, consequence),
     });
   }
+  const consequence = token.success_consequence || '';
   res.json({
     ok: true,
     success: true,
-    consequence: token.success_consequence || '',
+    consequence,
+    consequenceScope: publishMarkerConsequence(req.params.id, req.user.id, token, consequence),
   });
 });
 

@@ -27,6 +27,7 @@ import { saveStat, skillStat } from '../lib/statGlossary.js';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 import CustomSections from '../components/CustomSections.jsx';
+import { resolveCharacterReturn } from '../lib/characterReturn.js';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -77,6 +78,7 @@ export default function CharacterSheetPage() {
   const joinRoom = useRoom((s) => s.joinRoom);
   const submitRoll = useDice((s) => s.submitRoll);
   const [searchParams, setSearchParams] = useSearchParams();
+  const returnTarget = resolveCharacterReturn(searchParams);
   const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
@@ -90,7 +92,9 @@ export default function CharacterSheetPage() {
   useEffect(() => {
     if (searchParams.get('tutorial') === '1') {
       if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) setTutorialOpen(true);
-      setSearchParams({}, { replace: true });
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('tutorial');
+      setSearchParams(nextParams, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -137,7 +141,9 @@ export default function CharacterSheetPage() {
     return (
       <div className="min-h-full bg-night-950 p-6 text-bone">
         <p className="text-blood">{error}</p>
-        <Link to="/personajes" className="text-gold underline">Volver a personajes</Link>
+        <Link to={returnTarget?.to ?? '/personajes'} className="text-gold underline">
+          {returnTarget?.label ?? 'Volver a personajes'}
+        </Link>
       </div>
     );
   }
@@ -243,8 +249,8 @@ export default function CharacterSheetPage() {
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 text-bone">
       {/* Cabecera */}
       <div className="flex items-center justify-between">
-        <Link to="/personajes" className="font-display text-sm text-gold/80 hover:text-gold">
-          ← Personajes
+        <Link to={returnTarget?.to ?? '/personajes'} className="font-display text-sm text-gold/80 hover:text-gold">
+          ← {returnTarget?.label ?? 'Personajes'}
         </Link>
         <div className="flex items-center gap-3">
           <button onClick={() => setTutorialOpen(true)} className="text-xs text-gold/70 underline decoration-dotted hover:text-gold">
@@ -263,7 +269,7 @@ export default function CharacterSheetPage() {
             guiada.
           </span>
           {editable && (
-            <Link to={`/personajes/${id}/asistente`} className="rounded-sm border border-ochre/50 px-3 py-1 text-xs text-ochre hover:bg-ochre/10">
+            <Link to={`/personajes/${id}/asistente${returnTarget?.search ?? ''}`} className="rounded-sm border border-ochre/50 px-3 py-1 text-xs text-ochre hover:bg-ochre/10">
               Continuar asistente
             </Link>
           )}

@@ -19,6 +19,7 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null); // { success, dc, opened, consequence }
   const [looted, setLooted] = useState(null); // [{name, qty}] tras saquear
+  const [lootConsequence, setLootConsequence] = useState(null);
 
   // Un marcador de botín se saquea (pasa al inventario), no se "interactúa"
   const isLoot = isLootInteraction(type, target);
@@ -33,6 +34,11 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
         body: { characterId },
       });
       setLooted(resp.looted ?? []);
+      setLootConsequence(
+        resp.consequence
+          ? { text: resp.consequence, scope: resp.consequenceScope ?? 'player' }
+          : null
+      );
     } catch (e) {
       setError(e.message || 'No se pudo saquear.');
     } finally {
@@ -80,6 +86,7 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
         dc: resp.dc,
         opened: resp.opened,
         consequence: resp.consequence ?? '',
+        consequenceScope: resp.consequenceScope ?? 'player',
       });
     } catch (e) {
       setError(e.message || 'No se pudo completar la acción.');
@@ -130,6 +137,16 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
               )}
             </ul>
             <p className="mt-1 text-[0.65rem] text-bone/40">Añadido a tu inventario.</p>
+            {lootConsequence && (
+              <div className="mt-2 rounded-sm border border-blood/25 bg-blood/10 p-2">
+                <p className="text-[0.65rem] uppercase tracking-widest text-blood">
+                  Consecuencia · {lootConsequence.scope === 'party' ? 'todo el grupo' : 'solo tú y el DM'}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-bone/85">
+                  {lootConsequence.text}
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -186,9 +203,14 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
             {result.success ? '¡Conseguido!' : 'No lo consigues'}
           </p>
           {result.consequence && (
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-bone/80">
-              {result.consequence}
-            </p>
+            <>
+              <p className="mt-2 text-[0.65rem] uppercase tracking-widest text-bone/45">
+                {result.consequenceScope === 'party' ? 'Visible para todo el grupo' : 'Visible solo para ti y el DM'}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-bone/80">
+                {result.consequence}
+              </p>
+            </>
           )}
         </div>
       )}

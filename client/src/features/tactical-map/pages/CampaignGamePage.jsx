@@ -9,6 +9,7 @@ import { useTacticalMap } from '../hooks/useTacticalMap.js';
 import { useWorldState } from '../../world-map/hooks/useWorldState.js';
 import WorldMapView from '../../world-map/components/WorldMapView.jsx';
 import LoreScreen from '../../world-map/components/LoreScreen.jsx';
+import { initialCampaignScreen } from '../../../lib/gameContext.js';
 
 export default function CampaignGamePage() {
   const { id } = useParams();
@@ -21,6 +22,7 @@ export default function CampaignGamePage() {
   const sendPing = useRoom((s) => s.sendPing);
   const isLive = useRoom((s) => s.isLive);
   const setLive = useRoom((s) => s.setLive);
+  const removedCampaignId = useRoom((s) => s.removedCampaignId);
 
   // Unirse a la sala de la campaña para recibir 'mapa:actualizado' aunque
   // se llegue al tablero directamente, sin pasar por la mesa
@@ -116,10 +118,10 @@ export default function CampaignGamePage() {
   // al mapa de mundo (la capa nueva) en vez de al tablero
   const currentJumpsToSubmap = Boolean(currentLocation?.targetMapId);
   const currentHasBoard = Boolean(currentLocation?.mapId);
-  // El campamento (Fase 9) es la pantalla-hogar de toda campaña, con o sin
-  // mundo: desde él, el camino lleva al flujo de siempre (lore → mundo →
-  // tablero, o el tablero directo en una escaramuza).
-  const [screen, setScreen] = useState('camp'); // 'camp' | 'lore' | 'world' | 'locationLore' | 'board'
+  // Entrar a /campanas/:id significa entrar a jugar: el tablero es el destino
+  // inicial. El campamento sigue disponible desde la cabecera, pero ya no es
+  // una antesala obligatoria.
+  const [screen, setScreen] = useState('board'); // 'camp' | 'lore' | 'world' | 'locationLore' | 'board'
   const [travelError, setTravelError] = useState('');
   const loreSeenRef = useRef(false);
   const seenLocationRef = useRef(undefined);
@@ -132,23 +134,21 @@ export default function CampaignGamePage() {
   }
 
   // El DM viaja (o el jugador lo recibe por socket): al cambiar la ubicación
-  // actual, mostrar la pantalla de lore de destino antes del tablero. La
-  // primera carga del mundo solo registra dónde está el grupo, sin viajar;
-  // y el jugador sin sesión abierta se queda en el campamento.
+  // actual, mostrar la pantalla de lore de destino antes del tablero. En la
+  // primera carga vamos directamente al contenido jugable apropiado para la
+  // ubicación actual, sin pasar primero por el campamento.
   useEffect(() => {
     if (!hasWorldMap || !world) return;
     const isFirstLoad = seenLocationRef.current === undefined;
     if (currentLocationId === seenLocationRef.current) return;
     seenLocationRef.current = currentLocationId;
-    if (isFirstLoad) return;
+    if (isFirstLoad) {
+      setScreen(initialCampaignScreen({ hasWorldMap, currentLocationId, currentLocation }));
+      return;
+    }
     if (!isDm && !isLive) return;
     setScreen(currentLocationId ? 'locationLore' : 'world');
   }, [hasWorldMap, world, currentLocationId, isDm, isLive]);
-
-  // Al cerrarse la sesión, el jugador vuelve al campamento a esperar
-  useEffect(() => {
-    if (!isDm && !isLive) setScreen('camp');
-  }, [isDm, isLive]);
 
   // Tomar el camino del campamento: el lore de campaña se muestra la primera
   // vez, después la decisión de siempre (tablero si hay ubicación con mapa,
@@ -202,6 +202,10 @@ export default function CampaignGamePage() {
     );
   }
 
+  if (removedCampaignId === campaignId) {
+    return <Navigate to="/" replace />;
+  }
+
   if (campaignError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-night-950 px-4 text-center text-bone">
@@ -213,11 +217,10 @@ export default function CampaignGamePage() {
     );
   }
 
-  // Campaña sin terminar el asistente guiado: solo el DM puede llegar aquí
-  // (es el único miembro de un borrador) y vuelve a él en vez de ver una
-  // mesa a medio montar.
+  // Campaña todavía en borrador: solo el DM puede llegar aquí (es el único
+  // miembro) y vuelve a su taller en vez de ver una mesa a medio montar.
   if (campaign?.status === 'draft') {
-    return <Navigate to={`/campanas/${campaignId}/asistente`} replace />;
+    return <Navigate to={`/campanas/${campaignId}/taller`} replace />;
   }
 
   return (
@@ -303,12 +306,10 @@ export default function CampaignGamePage() {
     </div>
   );
 
-  // Cuerpo de la mesa: el campamento como pantalla-hogar; desde él, con
-  // mundo, la máquina de pantallas; sin mundo, el tablero directo de siempre.
+  // Cuerpo de la mesa. El campamento es ahora un destino voluntario; el flujo
+  // principal abre el tablero o el mapa de mundo correspondiente.
   function renderBody() {
-    // El jugador sin sesión abierta espera siempre en el campamento (antes,
-    // pantalla de lobby aparte); el DM también arranca aquí pero puede salir.
-    if (screen === 'camp' || (!isDm && !isLive)) {
+    if (screen === 'camp') {
       return (
         <CampScene
           campaign={campaign}
@@ -418,27 +419,62 @@ export default function CampaignGamePage() {
       );
     }
     if (loadError || !map) {
+      const emptyMessage =
+        campaign?.role === 'dm'
+          ? 'La mesa todavía no tiene un tablero preparado.'
+          : 'El DM todavía no ha preparado un tablero para esta mesa.';
       return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <p className="font-display text-xl text-gold/90">{loadError || 'Mapa no disponible.'}</p>
-          {hasWorldMap && (
-            <button onClick={() => setScreen('world')} className="text-gold underline">
-              Volver al mapa de mundo
-            </button>
-          )}
-          {campaign?.role === 'dm' && (
-            <Link to={`/campanas/${campaignId}/editor`} className="text-gold underline">
-              Abrir el editor de campaña
+        <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
+          <section className="w-full max-w-xl rounded-md border border-gold/20 bg-night-900/70 p-6 shadow-xl">
+            <p className="font-mono text-[0.65rem] uppercase tracking-[0.22em] text-gold/55">
+              Mesa sin tablero
+            </p>
+            <h2 className="mt-2 font-display text-2xl text-gold/90">{emptyMessage}</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-bone/60">
+              {campaign?.role === 'dm'
+                ? 'Crea el primero o elige cuál quieres llevar a la mesa desde el paso Mapas del Taller.'
+                : 'Puedes visitar el campamento mientras el DM termina de prepararlo.'}
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+              {hasWorldMap && (
+                <button
+                  onClick={() => setScreen('world')}
+                  className="rounded-sm border border-gold/35 px-4 py-2 font-display text-sm text-gold hover:bg-gold/10"
+                >
+                  Volver al mapa de mundo
+                </button>
+              )}
+              {campaign?.role === 'dm' && (
+                <Link
+                  to={`/campanas/${campaignId}/taller/mapas`}
+                  className="rounded-sm bg-gold px-4 py-2 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"
+                >
+                  Crear o elegir tablero →
+                </Link>
+              )}
+              {campaign?.role === 'dm' && (
+                <Link
+                  to={`/campanas/${campaignId}/editor`}
+                  className="rounded-sm border border-gold/35 px-4 py-2 font-display text-sm text-gold hover:bg-gold/10"
+                >
+                  Abrir editor avanzado
+                </Link>
+              )}
+              {campaign?.role !== 'dm' && (
+                <button
+                  type="button"
+                  onClick={() => setScreen('camp')}
+                  className="rounded-sm border border-gold/35 px-4 py-2 font-display text-sm text-gold hover:bg-gold/10"
+                >
+                  Ir al campamento
+                </button>
+              )}
+            </div>
+            {loadError && <p className="mt-4 text-xs text-bone/35">{loadError}</p>}
+            <Link to="/" className="mt-5 inline-block text-xs text-bone/50 underline hover:text-bone">
+              Volver al hub
             </Link>
-          )}
-          {campaign?.role === 'dm' && (
-            <Link to={`/campanas/${campaignId}/gestion`} className="text-gold underline">
-              Gestión de la campaña
-            </Link>
-          )}
-          <Link to="/" className="text-bone/70 underline">
-            Volver al hub
-          </Link>
+          </section>
         </div>
       );
     }

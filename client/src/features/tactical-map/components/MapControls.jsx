@@ -191,19 +191,23 @@ export default function MapControls({
               <Link to={editorHref} className={BTN_IDLE}>
                 Editor
               </Link>
-              {showArchive && (
-                <Link
-                  to={editorHref.replace(/\/editor$/, '/archivo')}
-                  className={BTN_IDLE}
-                  title="Lore, narrativa, personajes, lugares y recursos de la campaña"
-                >
-                  Archivo
-                </Link>
-              )}
-              <Link to={editorHref.replace(/\/editor$/, '/gestion')} className={BTN_IDLE} title="PNJ, jefes y biblioteca de la campaña">
-                Gestión
+              <Link
+                to={editorHref.replace(/\/editor$/, '/taller/reparto')}
+                className={BTN_IDLE}
+                title="PNJ, enemigos y equipo del reparto"
+              >
+                Reparto
               </Link>
             </>
+          )}
+          {showArchive && editorHref && (
+            <Link
+              to={editorHref.replace(/\/editor$/, isDm ? '/taller/lore' : '/archivo')}
+              className={BTN_IDLE}
+              title={isDm ? 'Preparación y artículos de la campaña' : 'Artículos publicados por el DM'}
+            >
+              {isDm ? 'Lore y trama' : 'Artículos'}
+            </Link>
           )}
           {isDm && (
             <button

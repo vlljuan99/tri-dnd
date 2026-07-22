@@ -198,7 +198,7 @@ export default function CampScene({
   onTakePath,
   campaignId,
 }) {
-  const [panel, setPanel] = useState(null); // 'hoguera' | 'diario' | 'cofre' | 'camino'
+  const [panel, setPanel] = useState(null); // 'hoguera' | 'diario' | 'cofre'
   const scrollerRef = useRef(null);
 
   // En pantallas estrechas (móvil) la imagen desborda con paneo horizontal:
@@ -209,12 +209,6 @@ export default function CampScene({
   }
   useEffect(centerScroll, []);
 
-  // Si el jugador estaba mirando el camino cerrado y el DM abre la sesión,
-  // el aviso se retira solo (isLive llega por socket)
-  useEffect(() => {
-    if (isLive) setPanel((p) => (p === 'camino' ? null : p));
-  }, [isLive]);
-
   // Solo los PJ acampan en las tiendas (los jefes/PNJ del DM no); el tuyo
   // primero para que siempre tenga tienda aunque haya más de cuatro.
   const campers = useMemo(() => {
@@ -224,10 +218,6 @@ export default function CampScene({
   const ownCharacter = campers.find((c) => c.user_id === user?.id) ?? null;
 
   function takePath() {
-    if (!isDm && !isLive) {
-      setPanel('camino');
-      return;
-    }
     onTakePath();
   }
 
@@ -269,7 +259,7 @@ export default function CampScene({
             <Hotspot
               {...PATH_SPOT}
               label="⚔ Partir de aventura"
-              sublabel={!isDm && !isLive ? 'el DM aún no ha abierto la sesión' : 'a la mesa de juego'}
+              sublabel="volver a la mesa de juego"
               onClick={takePath}
             />
 
@@ -369,22 +359,22 @@ export default function CampScene({
             {!campaign?.lore && !campaign?.objectives?.length && (
               <p className="text-sm italic text-bone/50">El DM aún no ha escrito nada en el diario.</p>
             )}
-            {isDm && (
+            {(campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
               <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gold/15 pt-3">
-                {(campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
-                  <Link
-                    to={`/campanas/${campaignId}/archivo`}
-                    className="rounded-sm border border-gold/35 px-3 py-1.5 font-display text-xs tracking-wide text-gold hover:bg-gold/10"
-                  >
-                    Abrir archivo del DM
-                  </Link>
-                )}
                 <Link
-                  to={`/campanas/${campaignId}/gestion`}
+                  to={isDm ? `/campanas/${campaignId}/taller/lore` : `/campanas/${campaignId}/archivo`}
+                  className="rounded-sm border border-gold/35 px-3 py-1.5 font-display text-xs tracking-wide text-gold hover:bg-gold/10"
+                >
+                  {isDm ? 'Abrir lore y trama (taller)' : 'Leer artículos publicados'}
+                </Link>
+                {isDm && (
+                <Link
+                  to={`/campanas/${campaignId}/taller`}
                   className="text-xs text-gold/70 underline hover:text-gold"
                 >
-                  Recursos y gestión
+                  Taller de campaña
                 </Link>
+                )}
               </div>
             )}
           </CampPanel>
@@ -400,14 +390,6 @@ export default function CampScene({
           </CampPanel>
         )}
 
-        {panel === 'camino' && (
-          <CampPanel key="camino" title="El camino está a oscuras" onClose={() => setPanel(null)}>
-            <p className="text-sm leading-relaxed text-bone/80">
-              El DM aún no ha abierto la sesión de juego. Descansa junto a la hoguera: en cuanto la abra,
-              el camino se iluminará solo.
-            </p>
-          </CampPanel>
-        )}
       </AnimatePresence>
     </motion.div>
   );

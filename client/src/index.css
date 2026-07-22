@@ -30,4 +30,7 @@ body,
 
 body {
   font-family: var(--font-body);
+  margin: 0;
+  background: var(--color-night-950);
+  color: var(--color-bone);
 }

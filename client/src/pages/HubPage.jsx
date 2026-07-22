@@ -1,30 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
+import ConfirmationDialog from '../components/ConfirmationDialog.jsx';
 
 function campaignTypeOf(campaign) {
   return campaign.campaignType ?? (campaign.hasWorldMap ? 'campana' : 'escaramuza');
 }
 
-function CampaignCard({ campaign, compact = false, onDelete }) {
+function CampaignCard({ campaign, compact = false, onDelete, onLeave }) {
   const isDm = campaign.role === 'dm';
   const isCampaign = campaignTypeOf(campaign) === 'campana';
   const isDraft = campaign.status === 'draft';
 
-  const primaryHref = isDraft
-    ? `/campanas/${campaign.id}/asistente`
-    : isDm && isCampaign
-      ? `/campanas/${campaign.id}/archivo`
-      : isDm
-        ? `/campanas/${campaign.id}/editor`
-        : `/campanas/${campaign.id}`;
-  const primaryLabel = isDraft
-    ? 'Continuar preparación'
-    : isDm && isCampaign
-      ? 'Abrir archivo del DM'
-      : isDm
-        ? 'Preparar tablero'
-        : 'Ir a la mesa de juego';
+  // Una sola puerta para el DM: el Taller. Dentro está todo (identidad,
+  // lore, mundo, reparto, mapas, eventos y jugadores).
+  const primaryHref = isDm ? `/campanas/${campaign.id}/taller` : `/campanas/${campaign.id}`;
+  const primaryLabel = isDm
+    ? isDraft
+      ? 'Continuar preparación'
+      : 'Abrir el taller'
+    : 'Ir a la mesa de juego';
 
   return (
     <li
@@ -61,7 +56,7 @@ function CampaignCard({ campaign, compact = false, onDelete }) {
 
       {!compact && isDm && !isDraft && (
         <p className="mt-2 text-xs leading-relaxed text-ink/55">
-          Tu archivo reúne el lore, la narrativa, el reparto y los recursos con los que preparas la campaña.
+          Tu taller reúne en un solo sitio el lore, el mundo, el reparto, los mapas y los eventos de la campaña.
         </p>
       )}
 
@@ -85,14 +80,32 @@ function CampaignCard({ campaign, compact = false, onDelete }) {
               Ir a la mesa
             </Link>
           )}
+          {!isDm && isCampaign && !isDraft && (
+            <Link
+              to={`/campanas/${campaign.id}/archivo`}
+              className="rounded-sm border border-ochre/40 px-3 py-1.5 font-display text-sm text-ochre hover:bg-ochre/10"
+            >
+              Artículos de campaña
+            </Link>
+          )}
         </div>
-        {isDm && (
+        {isDm ? (
           <button
             type="button"
             onClick={() => onDelete(campaign)}
             className="rounded-sm border border-ember/40 px-2 py-1.5 text-xs text-ember hover:bg-ember/10"
           >
             Borrar
+          </button>
+        ) : (
+          // Salir por decisión propia, sin tener que pedirle al DM que te
+          // expulse: la limpieza en el servidor es exactamente la misma.
+          <button
+            type="button"
+            onClick={() => onLeave(campaign)}
+            className="rounded-sm border border-ink/25 px-2 py-1.5 text-xs text-ink/60 hover:border-ember/40 hover:text-ember"
+          >
+            Abandonar
           </button>
         )}
       </div>
@@ -106,6 +119,10 @@ export default function HubPage() {
   const [skirmishName, setSkirmishName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
+  const [campaignToDelete, setCampaignToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [campaignToLeave, setCampaignToLeave] = useState(null);
+  const [leaving, setLeaving] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -119,10 +136,11 @@ export default function HubPage() {
       const body = { campaignType };
       if (name.trim()) body.name = name.trim();
       const { campaign } = await api('/campaigns', { method: 'POST', body });
+      // La escaramuza va directa al tablero; la campaña aterriza en su taller.
       navigate(
         campaignType === 'escaramuza'
           ? `/campanas/${campaign.id}/editor`
-          : `/campanas/${campaign.id}/asistente`
+          : `/campanas/${campaign.id}/taller`
       );
     } catch (err) {
       setError(err.message);
@@ -131,18 +149,41 @@ export default function HubPage() {
   }
 
   async function deleteCampaign(campaign) {
-    const typeLabel = campaignTypeOf(campaign) === 'campana' ? 'campaña' : 'escaramuza';
-    const sure = window.confirm(
-      `¿Borrar la ${typeLabel} "${campaign.name}"? Se perderán su chat, mesa y mapas. Las fichas de personaje se conservan.`
-    );
-    if (!sure) return;
+    setDeleting(true);
     setError('');
     try {
       await api(`/campaigns/${campaign.id}`, { method: 'DELETE' });
       setCampaigns((rows) => rows.filter((c) => c.id !== campaign.id));
+      setCampaignToDelete(null);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setDeleting(false);
     }
+  }
+
+  function requestCampaignDeletion(campaign) {
+    setError('');
+    setCampaignToDelete(campaign);
+  }
+
+  async function leaveCampaign(campaign) {
+    setLeaving(true);
+    setError('');
+    try {
+      await api(`/campaigns/${campaign.id}/abandonar`, { method: 'DELETE' });
+      setCampaigns((rows) => rows.filter((c) => c.id !== campaign.id));
+      setCampaignToLeave(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLeaving(false);
+    }
+  }
+
+  function requestLeaving(campaign) {
+    setError('');
+    setCampaignToLeave(campaign);
   }
 
   async function joinCampaign(e) {
@@ -171,11 +212,11 @@ export default function HubPage() {
       <section className="mt-6 overflow-hidden rounded-lg border border-ochre/40 bg-parchment-100/75 shadow-md">
         <div className="grid gap-5 p-5 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
-            <p className="font-mono text-[0.65rem] uppercase tracking-[0.22em] text-ochre">El centro del DM</p>
+            <p className="font-mono text-[0.65rem] uppercase tracking-[0.22em] text-ochre">El taller del DM</p>
             <h3 className="mt-1 font-display text-2xl font-semibold text-ink">Crear una campaña</h3>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-ink/70">
-              Construye un archivo vivo para tu lore, personajes, lugares y tramas, con imágenes, vídeos,
-              enlaces y música. Será tu estudio de preparación antes de abrir la mesa a los jugadores.
+              Un taller con todos tus materiales en orden: identidad, lore, mundo, reparto, mapas y
+              eventos, paso a paso y retomable cuando quieras, antes de abrir la mesa a los jugadores.
             </p>
           </div>
           <button
@@ -267,7 +308,12 @@ export default function HubPage() {
               </div>
               <ul className="grid gap-3 sm:grid-cols-2">
                 {adventures.map((campaign) => (
-                  <CampaignCard key={campaign.id} campaign={campaign} onDelete={deleteCampaign} />
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    onDelete={requestCampaignDeletion}
+                    onLeave={requestLeaving}
+                  />
                 ))}
               </ul>
             </section>
@@ -285,7 +331,8 @@ export default function HubPage() {
                     key={campaign.id}
                     campaign={campaign}
                     compact
-                    onDelete={deleteCampaign}
+                    onDelete={requestCampaignDeletion}
+                    onLeave={requestLeaving}
                   />
                 ))}
               </ul>
@@ -293,6 +340,36 @@ export default function HubPage() {
           )}
         </div>
       )}
+
+      <ConfirmationDialog
+        open={Boolean(campaignToDelete)}
+        title={`Borrar «${campaignToDelete?.name ?? ''}»`}
+        description={
+          campaignToDelete
+            ? `Vas a borrar esta ${campaignTypeOf(campaignToDelete) === 'campana' ? 'campaña' : 'escaramuza'} con su chat, mesa, mapas y contenido de preparación. Las fichas de personaje se conservarán.`
+            : ''
+        }
+        detail={error || 'No existe papelera: esta acción no se puede deshacer.'}
+        requiredText={campaignToDelete?.name}
+        confirmLabel="Borrar definitivamente"
+        busy={deleting}
+        onCancel={() => setCampaignToDelete(null)}
+        onConfirm={() => deleteCampaign(campaignToDelete)}
+      />
+
+      {/* Abandonar no pide escribir el nombre: se puede volver con el código
+          de invitación, y la ficha no se pierde. No es irreversible. */}
+      <ConfirmationDialog
+        open={Boolean(campaignToLeave)}
+        title={`Abandonar «${campaignToLeave?.name ?? ''}»`}
+        description="Saldrás de la mesa y tu personaje se retirará del tablero y del tracker de iniciativa. Tu ficha se conserva en tu cuenta con todo su progreso."
+        detail={error || 'Podrás volver a unirte si el DM te pasa el código de invitación.'}
+        confirmLabel="Abandonar la mesa"
+        tone="warning"
+        busy={leaving}
+        onCancel={() => setCampaignToLeave(null)}
+        onConfirm={() => leaveCampaign(campaignToLeave)}
+      />
     </div>
   );
 }
