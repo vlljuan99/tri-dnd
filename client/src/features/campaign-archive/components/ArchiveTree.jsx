@@ -1,4 +1,15 @@
 import { useMemo } from 'react';
+import ArchiveIcon from './ArchiveIcon.jsx';
+import ArchiveIconPicker from './ArchiveIconPicker.jsx';
+import { inferArchiveIcon } from '../lib/archiveIcons.js';
+
+function UnfiledIcon({ selected }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`h-4 w-4 shrink-0 ${selected ? 'text-gold' : 'text-gold/55'}`}>
+      <path d="M4 4h16v16H4z" /><path d="M4 9h16M9 4v5" />
+    </svg>
+  );
+}
 
 function descendantsOf(sectionId, sections) {
   const found = new Set();
@@ -13,28 +24,31 @@ function descendantsOf(sectionId, sections) {
   return found;
 }
 
-function TreeBranch({ parentId, depth, sections, selectedId, entryCounts, busy, onSelect, onMove }) {
+function TreeBranch({ parentId, depth, sections, selectedId, entryCounts, busy, onSelect, onMove, canEdit }) {
   const children = sections
     .filter((section) => section.parentId === parentId)
     .sort((a, b) => a.position - b.position || a.id - b.id);
 
   return children.map((section, index) => (
     <div key={section.id}>
-      <div className="group flex items-center gap-1" style={{ paddingLeft: `${depth * 12}px` }}>
+      <div className="group flex min-w-0 items-center gap-1" style={{ paddingLeft: `${depth * 12}px` }}>
         <button
           type="button"
           onClick={() => onSelect(section.id)}
-          className={`min-w-0 flex-1 rounded-sm px-2 py-1.5 text-left text-sm transition-colors ${
+          className={`flex min-w-0 flex-1 items-start gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm transition-colors ${
             selectedId === section.id
               ? 'bg-gold/15 font-medium text-gold'
               : 'text-bone/70 hover:bg-bone/5 hover:text-bone'
           }`}
         >
-          <span aria-hidden="true" className="mr-1.5 text-gold/55">▸</span>
-          <span className="break-words">{section.title}</span>
-          <span className="ml-1 text-[0.65rem] text-bone/35">{entryCounts.get(section.id) ?? 0}</span>
+          <ArchiveIcon
+            node={section}
+            className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === section.id ? 'text-gold' : 'text-gold/55'}`}
+          />
+          <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{section.title}</span>
+          <span className="ml-1 shrink-0 text-[0.65rem] text-bone/35">{entryCounts.get(section.id) ?? 0}</span>
         </button>
-        <div className="flex shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        {canEdit && <div className="flex shrink-0 opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
             type="button"
             onClick={() => onMove(section.id, 'up')}
@@ -55,7 +69,7 @@ function TreeBranch({ parentId, depth, sections, selectedId, entryCounts, busy, 
           >
             ↓
           </button>
-        </div>
+        </div>}
       </div>
       <TreeBranch
         parentId={section.id}
@@ -66,6 +80,7 @@ function TreeBranch({ parentId, depth, sections, selectedId, entryCounts, busy, 
         busy={busy}
         onSelect={onSelect}
         onMove={onMove}
+        canEdit={canEdit}
       />
     </div>
   ));
@@ -82,6 +97,8 @@ export default function ArchiveTree({
   onDelete,
   onMove,
   onChangeParent,
+  onChangeIcon,
+  canEdit = true,
 }) {
   const selected = sections.find((section) => section.id === selectedId) ?? null;
   const entryCounts = useMemo(() => {
@@ -95,38 +112,38 @@ export default function ArchiveTree({
   );
 
   return (
-    <section className="flex min-h-0 flex-col border-b border-gold/15 bg-night-900/70 lg:border-b-0 lg:border-r">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-b border-gold/15 bg-night-900/70 lg:border-b-0 lg:border-r">
       <div className="flex items-center justify-between border-b border-gold/15 px-3 py-3">
         <div>
           <p className="font-display text-sm uppercase tracking-[0.16em] text-gold">Secciones</p>
-          <p className="text-[0.65rem] text-bone/40">Organiza el lore por temas</p>
+          <p className="text-[0.65rem] text-bone/40">{canEdit ? 'Organiza el lore por temas' : 'Explora el lore compartido'}</p>
         </div>
-        <button
+        {canEdit && <button
           type="button"
           onClick={() => onCreate(null)}
           disabled={busy}
           className="rounded-sm border border-gold/35 px-2 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
         >
           + Raíz
-        </button>
+        </button>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         <button
           type="button"
           onClick={() => onSelect(null)}
-          className={`mb-1 w-full rounded-sm px-2 py-1.5 text-left text-sm ${
+          className={`mb-1 flex w-full min-w-0 items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm ${
             selectedId == null ? 'bg-gold/15 text-gold' : 'text-bone/70 hover:bg-bone/5 hover:text-bone'
           }`}
         >
-          <span aria-hidden="true" className="mr-1.5 text-gold/60">◆</span>
-          Entradas sin sección
-          <span className="ml-1 text-[0.65rem] text-bone/35">{entryCounts.get(null) ?? 0}</span>
+          <UnfiledIcon selected={selectedId == null} />
+          <span className="min-w-0 flex-1">Entradas sin sección</span>
+          <span className="ml-1 shrink-0 text-[0.65rem] text-bone/35">{entryCounts.get(null) ?? 0}</span>
         </button>
 
         {sections.length === 0 ? (
           <div className="m-2 rounded-sm border border-dashed border-bone/15 p-3 text-center text-xs text-bone/40">
-            Crea una sección para comenzar a estructurar la campaña.
+            {canEdit ? 'Crea una sección para comenzar a estructurar la campaña.' : 'Todavía no hay secciones publicadas.'}
           </div>
         ) : (
           <TreeBranch
@@ -138,11 +155,12 @@ export default function ArchiveTree({
             busy={busy}
             onSelect={onSelect}
             onMove={onMove}
+            canEdit={canEdit}
           />
         )}
       </div>
 
-      {selected && (
+      {selected && canEdit && (
         <div className="space-y-2 border-t border-gold/15 p-3">
           <p className="truncate text-xs text-bone/50" title={selected.title}>
             Editar «{selected.title}»
@@ -164,6 +182,16 @@ export default function ArchiveTree({
             >
               Renombrar
             </button>
+          </div>
+          <div>
+            <span className="mb-1 block text-[0.6rem] uppercase tracking-widest text-bone/40">Icono de la sección</span>
+            <ArchiveIconPicker
+              value={selected.iconAutomatic ? '' : selected.icon}
+              automaticIcon={inferArchiveIcon('seccion', selected.title)}
+              disabled={busy}
+              label={`Icono de ${selected.title}`}
+              onChange={(icon) => onChangeIcon(selected, icon)}
+            />
           </div>
           <label className="block">
             <span className="mb-1 block text-[0.6rem] uppercase tracking-widest text-bone/40">Mover dentro de</span>

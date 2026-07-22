@@ -15,3 +15,6 @@ server/data/uploads/
 
 # Imágenes privadas del archivo narrativo del DM
 server/data/narrative-media/
+
+# Historial local de copias del archivo narrativo
+server/data/backups/

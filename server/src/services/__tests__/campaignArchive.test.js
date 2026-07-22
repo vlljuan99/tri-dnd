@@ -2,10 +2,43 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   isSafeExternalUrl,
+  inferNarrativeIcon,
+  NARRATIVE_ICONS,
   normalizeExternalUrl,
+  serializeNarrativeNode,
   validateRasterImage,
   wouldCreateNarrativeCycle,
 } from '../campaignArchive.js';
+
+test('los iconos del archivo tienen defaults contextuales y catálogo cerrado', () => {
+  assert.equal(inferNarrativeIcon('seccion', 'Lore general'), 'book');
+  assert.equal(inferNarrativeIcon('seccion', 'Facciones'), 'flag');
+  assert.equal(inferNarrativeIcon('entrada', 'Notas'), 'document');
+  assert.equal(NARRATIVE_ICONS.has('crown'), true);
+  assert.equal(NARRATIVE_ICONS.has('<svg>'), false);
+});
+
+test('la serialización expone el icono efectivo y si sigue en automático', () => {
+  const base = {
+    id: 7,
+    parent_id: null,
+    kind: 'seccion',
+    title: 'Lugares',
+    summary: '',
+    visibility: 'private',
+    position: 0,
+    created_at: 'ahora',
+    updated_at: 'ahora',
+  };
+  assert.deepEqual(
+    { icon: serializeNarrativeNode({ ...base, icon: null }).icon, automatic: serializeNarrativeNode({ ...base, icon: null }).iconAutomatic },
+    { icon: 'pin', automatic: true }
+  );
+  assert.deepEqual(
+    { icon: serializeNarrativeNode({ ...base, icon: 'castle' }).icon, automatic: serializeNarrativeNode({ ...base, icon: 'castle' }).iconAutomatic },
+    { icon: 'castle', automatic: false }
+  );
+});
 
 test('el archivo solo acepta enlaces web externos seguros', () => {
   assert.equal(isSafeExternalUrl('https://example.com/video?id=7'), true);

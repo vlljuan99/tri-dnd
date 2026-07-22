@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import MediaPreview from './MediaPreview.jsx';
+import MarkdownEditor from './MarkdownEditor.jsx';
 import {
   blockDraftAfterPrivateUpload,
   blockDraftFrom,
@@ -28,6 +29,9 @@ export default function ArchiveBlockCard({
   onDelete,
   onMove,
   onUpload,
+  referenceEntries = [],
+  currentEntryId,
+  onNavigateReference,
 }) {
   const [draft, setDraft] = useState(() => blockDraftFrom(block));
   const [saving, setSaving] = useState(false);
@@ -72,13 +76,13 @@ export default function ArchiveBlockCard({
   const previewBlock = { ...block, ...draft };
 
   return (
-    <article className="rounded-md border border-gold/15 bg-night-900/80 p-3 shadow-sm">
-      <div className="mb-3 flex items-center gap-2 border-b border-bone/10 pb-2">
+    <article className="min-w-0 overflow-hidden rounded-md border border-gold/15 bg-night-900/80 p-3 shadow-sm">
+      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2 border-b border-bone/10 pb-2">
         <span className="rounded-sm border border-gold/25 bg-gold/5 px-2 py-0.5 font-display text-xs uppercase tracking-widest text-gold/80">
           {TYPE_LABELS[block.type] ?? block.type}
         </span>
         <span className="text-xs text-bone/35">Bloque {index + 1}</span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={() => onMove('up')}
@@ -112,17 +116,17 @@ export default function ArchiveBlockCard({
 
       <div className="space-y-3">
         {block.type === 'texto' && (
-          <label className="block space-y-1">
-            <span className={labelClass}>Contenido</span>
-            <textarea
-              rows={7}
-              maxLength={50000}
+          <div className="min-w-0 space-y-1">
+            <span className={labelClass}>Contenido enriquecido</span>
+            <MarkdownEditor
+              rows={9}
               value={draft.content ?? ''}
-              onChange={(event) => set('content', event.target.value)}
-              placeholder="Escribe aquí el fragmento de lore…"
-              className={`${inputClass} resize-y leading-relaxed`}
+              onChange={(value) => set('content', value)}
+              entries={referenceEntries}
+              currentEntryId={currentEntryId}
+              onNavigateReference={onNavigateReference}
             />
-          </label>
+          </div>
         )}
 
         {block.type === 'imagen' && (
@@ -240,7 +244,7 @@ export default function ArchiveBlockCard({
           </div>
         )}
 
-        <MediaPreview block={previewBlock} privateImageUrl={privateImageUrl} />
+        {block.type !== 'texto' && <MediaPreview block={previewBlock} privateImageUrl={privateImageUrl} />}
 
         <div className="flex items-center justify-end gap-2 border-t border-bone/10 pt-2">
           {changed && <span className="mr-auto text-xs text-ochre">Cambios sin guardar</span>}

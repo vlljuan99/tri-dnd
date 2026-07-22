@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import { Router, raw as expressRaw } from 'express';
 import { requireAuth } from '../auth.js';
 import { db } from '../db.js';
-import { NARRATIVE_MEDIA_DIR } from '../config.js';
 import {
   NARRATIVE_BLOCK_TYPES,
   NARRATIVE_NODE_KINDS,
+  NARRATIVE_VISIBILITIES,
+  NARRATIVE_ICONS,
   narrativeImagePath,
   normalizeExternalUrl,
   removeNarrativeImage,
@@ -14,26 +15,36 @@ import {
   serializeNarrativeNode,
   validateRasterImage,
   wouldCreateNarrativeCycle,
+  writeNarrativeBackup,
 } from '../services/campaignArchive.js';
 
-// Archivo narrativo privado del DM. No se mezcla con campaigns.lore: aquel
-// texto es una introducción pública para los jugadores, mientras que ningún
-// dato de este router puede salir sin comprobar al propietario de la campaña.
+// Archivo narrativo de campaña. El DM administra el árbol completo; los
+// jugadores solo reciben artículos publicados y sus secciones ancestras. El
+// filtrado ocurre siempre aquí, incluido búsqueda e imágenes privadas.
 export const campaignArchiveRouter = Router({ mergeParams: true });
 campaignArchiveRouter.use(requireAuth);
 
 campaignArchiveRouter.use((req, res, next) => {
   const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.campaignId);
   if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
-  if (campaign.dm_user_id !== req.user.id) {
-    return res.status(403).json({ error: 'Solo el DM puede consultar el archivo de campaña' });
-  }
+  const membership = db
+    .prepare('SELECT role FROM campaign_members WHERE campaign_id = ? AND user_id = ?')
+    .get(campaign.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
   if (campaign.campaign_type !== 'campana') {
     return res.status(404).json({ error: 'Las escaramuzas no tienen archivo narrativo' });
   }
   req.campaign = campaign;
+  req.membership = membership;
   next();
 });
+
+function requireArchiveDm(req, res, next) {
+  if (req.membership.role !== 'dm') {
+    return res.status(403).json({ error: 'Solo el DM puede modificar el archivo de campaña' });
+  }
+  next();
+}
 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object ?? {}, key);
 
@@ -55,7 +66,8 @@ function getNode(campaignId, nodeId) {
 function getBlock(campaignId, blockId) {
   return db
     .prepare(
-      `SELECT b.* FROM campaign_narrative_blocks b
+      `SELECT b.*, n.visibility AS node_visibility, n.kind AS node_kind
+       FROM campaign_narrative_blocks b
        JOIN campaign_narrative_nodes n ON n.id = b.node_id
        WHERE b.id = ? AND n.campaign_id = ?`
     )
@@ -72,13 +84,37 @@ function blocksForCampaign(campaignId) {
     .all(campaignId);
 }
 
-function serializeArchive(campaignId, rows = null) {
-  const nodes = rows ?? db
+function playerVisibleNodes(campaignId) {
+  return db
     .prepare(
-      `SELECT * FROM campaign_narrative_nodes
-       WHERE campaign_id = ? ORDER BY parent_id, position, id`
+      `WITH RECURSIVE visible(id) AS (
+         SELECT id FROM campaign_narrative_nodes
+          WHERE campaign_id = ? AND kind = 'entrada' AND visibility = 'players'
+         UNION
+         SELECT parent.parent_id
+           FROM campaign_narrative_nodes parent
+           JOIN visible child ON child.id = parent.id
+          WHERE parent.parent_id IS NOT NULL
+       )
+       SELECT * FROM campaign_narrative_nodes
+        WHERE campaign_id = ? AND id IN (SELECT id FROM visible)
+        ORDER BY parent_id, position, id`
     )
-    .all(campaignId);
+    .all(campaignId, campaignId);
+}
+
+function serializeArchive(campaignId, rows = null, { forPlayer = false } = {}) {
+  let nodes = rows ?? (forPlayer
+    ? playerVisibleNodes(campaignId)
+    : db
+        .prepare(
+          `SELECT * FROM campaign_narrative_nodes
+           WHERE campaign_id = ? ORDER BY parent_id, position, id`
+        )
+        .all(campaignId));
+  if (forPlayer && rows) {
+    nodes = nodes.filter((node) => node.kind === 'entrada' && node.visibility === 'players');
+  }
   const grouped = new Map();
   for (const block of blocksForCampaign(campaignId)) {
     if (!grouped.has(block.node_id)) grouped.set(block.node_id, []);
@@ -185,11 +221,12 @@ function validateBlockBody(body, { partial = false } = {}) {
 }
 
 campaignArchiveRouter.get('/', (req, res) => {
-  res.json({ nodes: serializeArchive(req.campaign.id) });
+  const forPlayer = req.membership.role !== 'dm';
+  res.json({ nodes: serializeArchive(req.campaign.id, null, { forPlayer }), canEdit: !forPlayer });
 });
 
-campaignArchiveRouter.post('/nodos', (req, res) => {
-  const { parentId = null, kind = 'entrada', title, summary = '' } = req.body ?? {};
+campaignArchiveRouter.post('/nodos', requireArchiveDm, (req, res) => {
+  const { parentId = null, kind = 'entrada', title, summary = '', visibility = 'private', icon = null } = req.body ?? {};
   if (!NARRATIVE_NODE_KINDS.has(kind)) return res.status(400).json({ error: 'Tipo de nodo no válido' });
   if (typeof title !== 'string' || !title.trim() || title.length > 120) {
     return res.status(400).json({ error: 'El título es obligatorio y admite hasta 120 caracteres' });
@@ -197,14 +234,21 @@ campaignArchiveRouter.post('/nodos', (req, res) => {
   if (typeof summary !== 'string' || summary.length > 2000) {
     return res.status(400).json({ error: 'El resumen admite hasta 2.000 caracteres' });
   }
+  if (!NARRATIVE_VISIBILITIES.has(visibility)) {
+    return res.status(400).json({ error: 'Visibilidad de artículo no válida' });
+  }
+  const cleanIcon = icon == null || icon === '' ? null : icon;
+  if (cleanIcon !== null && (typeof cleanIcon !== 'string' || !NARRATIVE_ICONS.has(cleanIcon))) {
+    return res.status(400).json({ error: 'Icono de archivo no válido' });
+  }
   const checkedParent = validateParent(req.campaign.id, parentId);
   if (!checkedParent.ok) return res.status(400).json({ error: checkedParent.error });
   const cleanParentId = checkedParent.parent?.id ?? null;
   const info = db
     .prepare(
       `INSERT INTO campaign_narrative_nodes
-         (campaign_id, parent_id, kind, title, summary, position)
-       VALUES (?, ?, ?, ?, ?, ?)`
+         (campaign_id, parent_id, kind, title, summary, visibility, icon, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       req.campaign.id,
@@ -212,12 +256,15 @@ campaignArchiveRouter.post('/nodos', (req, res) => {
       kind,
       title.trim(),
       summary,
+      kind === 'entrada' ? visibility : 'private',
+      cleanIcon,
       nextNodePosition(req.campaign.id, cleanParentId)
     );
+  writeNarrativeBackup(req.campaign.id, 'crear-articulo');
   res.status(201).json({ node: serializeOneNode(req.campaign.id, Number(info.lastInsertRowid)) });
 });
 
-campaignArchiveRouter.patch('/nodos/:nodeId', (req, res) => {
+campaignArchiveRouter.patch('/nodos/:nodeId', requireArchiveDm, (req, res) => {
   const nodeId = cleanId(req.params.nodeId);
   const node = nodeId && getNode(req.campaign.id, nodeId);
   if (!node) return res.status(404).json({ error: 'Entrada no encontrada' });
@@ -241,6 +288,21 @@ campaignArchiveRouter.patch('/nodos/:nodeId', (req, res) => {
     }
     sets.push('summary = ?');
     values.push(req.body.summary);
+  }
+  if (hasOwn(req.body, 'visibility')) {
+    if (node.kind !== 'entrada' || !NARRATIVE_VISIBILITIES.has(req.body.visibility)) {
+      return res.status(400).json({ error: 'Visibilidad de artículo no válida' });
+    }
+    sets.push('visibility = ?');
+    values.push(req.body.visibility);
+  }
+  if (hasOwn(req.body, 'icon')) {
+    const icon = req.body.icon == null || req.body.icon === '' ? null : req.body.icon;
+    if (icon !== null && (typeof icon !== 'string' || !NARRATIVE_ICONS.has(icon))) {
+      return res.status(400).json({ error: 'Icono de archivo no válido' });
+    }
+    sets.push('icon = ?');
+    values.push(icon);
   }
   if (hasOwn(req.body, 'kind')) {
     if (!NARRATIVE_NODE_KINDS.has(req.body.kind)) {
@@ -279,11 +341,12 @@ campaignArchiveRouter.patch('/nodos/:nodeId', (req, res) => {
       db.prepare(`UPDATE campaign_narrative_nodes SET ${sets.join(', ')} WHERE id = ?`).run(...values, node.id);
       if (parentChanged) normalizeNodePositions(req.campaign.id, node.parent_id);
     })();
+    writeNarrativeBackup(req.campaign.id, 'actualizar-articulo');
   }
   res.json({ node: serializeOneNode(req.campaign.id, node.id) });
 });
 
-campaignArchiveRouter.post('/nodos/:nodeId/mover', (req, res) => {
+campaignArchiveRouter.post('/nodos/:nodeId/mover', requireArchiveDm, (req, res) => {
   const nodeId = cleanId(req.params.nodeId);
   const node = nodeId && getNode(req.campaign.id, nodeId);
   if (!node) return res.status(404).json({ error: 'Entrada no encontrada' });
@@ -303,10 +366,11 @@ campaignArchiveRouter.post('/nodos/:nodeId/mover', (req, res) => {
     "UPDATE campaign_narrative_nodes SET position = ?, updated_at = datetime('now') WHERE id = ?"
   );
   db.transaction(() => ordered.forEach((id, position) => update.run(position, id)))();
+  writeNarrativeBackup(req.campaign.id, 'reordenar-articulo');
   res.json({ node: serializeOneNode(req.campaign.id, node.id) });
 });
 
-campaignArchiveRouter.delete('/nodos/:nodeId', (req, res) => {
+campaignArchiveRouter.delete('/nodos/:nodeId', requireArchiveDm, (req, res) => {
   const nodeId = cleanId(req.params.nodeId);
   const node = nodeId && getNode(req.campaign.id, nodeId);
   if (!node) return res.status(404).json({ error: 'Entrada no encontrada' });
@@ -322,6 +386,7 @@ campaignArchiveRouter.delete('/nodos/:nodeId', (req, res) => {
     )
     .all(node.id, req.campaign.id)
     .map((row) => row.image_path);
+  writeNarrativeBackup(req.campaign.id, 'antes-de-borrar-articulo');
   db.transaction(() => {
     db.prepare('DELETE FROM campaign_narrative_nodes WHERE id = ? AND campaign_id = ?').run(node.id, req.campaign.id);
     normalizeNodePositions(req.campaign.id, node.parent_id);
@@ -330,7 +395,7 @@ campaignArchiveRouter.delete('/nodos/:nodeId', (req, res) => {
   res.json({ ok: true });
 });
 
-campaignArchiveRouter.post('/nodos/:nodeId/bloques', (req, res) => {
+campaignArchiveRouter.post('/nodos/:nodeId/bloques', requireArchiveDm, (req, res) => {
   const nodeId = cleanId(req.params.nodeId);
   const node = nodeId && getNode(req.campaign.id, nodeId);
   if (!node) return res.status(404).json({ error: 'Entrada no encontrada' });
@@ -353,10 +418,11 @@ campaignArchiveRouter.post('/nodos/:nodeId/bloques', (req, res) => {
       nextBlockPosition(node.id)
     );
   const block = getBlock(req.campaign.id, Number(info.lastInsertRowid));
+  writeNarrativeBackup(req.campaign.id, 'crear-bloque');
   res.status(201).json({ block: serializeNarrativeBlock(block, req.campaign.id) });
 });
 
-campaignArchiveRouter.patch('/bloques/:blockId', (req, res) => {
+campaignArchiveRouter.patch('/bloques/:blockId', requireArchiveDm, (req, res) => {
   const blockId = cleanId(req.params.blockId);
   const block = blockId && getBlock(req.campaign.id, blockId);
   if (!block) return res.status(404).json({ error: 'Bloque no encontrado' });
@@ -394,6 +460,7 @@ campaignArchiveRouter.patch('/bloques/:blockId', (req, res) => {
   }
   if (nextType !== 'imagen' && block.image_path) removeOldImage = true;
   if (removeOldImage) {
+    writeNarrativeBackup(req.campaign.id, 'antes-de-sustituir-imagen');
     sets.push('image_path = NULL', 'image_mime = NULL');
   }
 
@@ -402,10 +469,11 @@ campaignArchiveRouter.patch('/bloques/:blockId', (req, res) => {
     db.prepare(`UPDATE campaign_narrative_blocks SET ${sets.join(', ')} WHERE id = ?`).run(...values, block.id);
   }
   if (removeOldImage) removeNarrativeImage(block.image_path);
+  if (sets.length) writeNarrativeBackup(req.campaign.id, 'actualizar-bloque');
   res.json({ block: serializeNarrativeBlock(getBlock(req.campaign.id, block.id), req.campaign.id) });
 });
 
-campaignArchiveRouter.post('/bloques/:blockId/mover', (req, res) => {
+campaignArchiveRouter.post('/bloques/:blockId/mover', requireArchiveDm, (req, res) => {
   const blockId = cleanId(req.params.blockId);
   const block = blockId && getBlock(req.campaign.id, blockId);
   if (!block) return res.status(404).json({ error: 'Bloque no encontrado' });
@@ -422,13 +490,15 @@ campaignArchiveRouter.post('/bloques/:blockId/mover', (req, res) => {
     "UPDATE campaign_narrative_blocks SET position = ?, updated_at = datetime('now') WHERE id = ?"
   );
   db.transaction(() => ordered.forEach((id, position) => update.run(position, id)))();
+  writeNarrativeBackup(req.campaign.id, 'reordenar-bloque');
   res.json({ block: serializeNarrativeBlock(getBlock(req.campaign.id, block.id), req.campaign.id) });
 });
 
-campaignArchiveRouter.delete('/bloques/:blockId', (req, res) => {
+campaignArchiveRouter.delete('/bloques/:blockId', requireArchiveDm, (req, res) => {
   const blockId = cleanId(req.params.blockId);
   const block = blockId && getBlock(req.campaign.id, blockId);
   if (!block) return res.status(404).json({ error: 'Bloque no encontrado' });
+  writeNarrativeBackup(req.campaign.id, 'antes-de-borrar-bloque');
   db.transaction(() => {
     db.prepare('DELETE FROM campaign_narrative_blocks WHERE id = ?').run(block.id);
     const rows = db
@@ -443,6 +513,7 @@ campaignArchiveRouter.delete('/bloques/:blockId', (req, res) => {
 
 campaignArchiveRouter.patch(
   '/bloques/:blockId/imagen',
+  requireArchiveDm,
   expressRaw({ type: () => true, limit: '15mb' }),
   (req, res) => {
     const blockId = cleanId(req.params.blockId);
@@ -456,6 +527,7 @@ campaignArchiveRouter.patch(
 
     const storageKey = `archivo-${req.campaign.id}-${block.id}-${crypto.randomUUID()}${format.extension}`;
     const absolute = narrativeImagePath(storageKey);
+    if (block.image_path) writeNarrativeBackup(req.campaign.id, 'antes-de-sustituir-imagen');
     try {
       fs.writeFileSync(absolute, req.body, { flag: 'wx' });
       db.prepare(
@@ -467,6 +539,7 @@ campaignArchiveRouter.patch(
       throw error;
     }
     if (block.image_path) removeNarrativeImage(block.image_path);
+    writeNarrativeBackup(req.campaign.id, 'guardar-imagen');
     res.json({ block: serializeNarrativeBlock(getBlock(req.campaign.id, block.id), req.campaign.id) });
   }
 );
@@ -475,6 +548,9 @@ campaignArchiveRouter.get('/bloques/:blockId/imagen', (req, res) => {
   const blockId = cleanId(req.params.blockId);
   const block = blockId && getBlock(req.campaign.id, blockId);
   if (!block?.image_path) return res.status(404).json({ error: 'Imagen no encontrada' });
+  if (req.membership.role !== 'dm' && block.node_visibility !== 'players') {
+    return res.status(404).json({ error: 'Imagen no encontrada' });
+  }
   const absolute = narrativeImagePath(block.image_path);
   if (!absolute || !fs.existsSync(absolute)) return res.status(404).json({ error: 'Imagen no encontrada' });
   res.set({
@@ -489,11 +565,14 @@ campaignArchiveRouter.get('/bloques/:blockId/imagen', (req, res) => {
 campaignArchiveRouter.get('/buscar', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
   if (!q) return res.json({ results: [] });
+  const forPlayer = req.membership.role !== 'dm';
   const rows = db
     .prepare(
       `SELECT DISTINCT n.* FROM campaign_narrative_nodes n
        LEFT JOIN campaign_narrative_blocks b ON b.node_id = n.id
-       WHERE n.campaign_id = ? AND (
+       WHERE n.campaign_id = ?
+         AND (? = 0 OR (n.kind = 'entrada' AND n.visibility = 'players'))
+         AND (
          instr(lower(n.title), lower(?)) > 0 OR
          instr(lower(n.summary), lower(?)) > 0 OR
          instr(lower(COALESCE(b.content, '')), lower(?)) > 0 OR
@@ -502,8 +581,8 @@ campaignArchiveRouter.get('/buscar', (req, res) => {
        )
        ORDER BY n.updated_at DESC, n.id DESC LIMIT 50`
     )
-    .all(req.campaign.id, q, q, q, q, q);
-  res.json({ results: serializeArchive(req.campaign.id, rows) });
+    .all(req.campaign.id, forPlayer ? 1 : 0, q, q, q, q, q);
+  res.json({ results: serializeArchive(req.campaign.id, rows, { forPlayer }) });
 });
 
 campaignArchiveRouter.use((error, req, res, next) => {

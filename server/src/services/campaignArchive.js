@@ -1,10 +1,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { db } from '../db.js';
-import { NARRATIVE_MEDIA_DIR } from '../config.js';
+import { NARRATIVE_BACKUP_DIR, NARRATIVE_MEDIA_DIR } from '../config.js';
 
 export const NARRATIVE_NODE_KINDS = new Set(['seccion', 'entrada']);
 export const NARRATIVE_BLOCK_TYPES = new Set(['texto', 'imagen', 'video', 'enlace', 'musica']);
+export const NARRATIVE_VISIBILITIES = new Set(['private', 'players']);
+export const NARRATIVE_ICONS = new Set([
+  'folder',
+  'book',
+  'scroll',
+  'document',
+  'users',
+  'flag',
+  'pin',
+  'map',
+  'castle',
+  'crown',
+  'shield',
+  'sword',
+  'skull',
+  'gem',
+  'potion',
+  'sparkles',
+]);
 
 export const DEFAULT_NARRATIVE_SECTIONS = [
   'Lore general',
@@ -13,6 +33,26 @@ export const DEFAULT_NARRATIVE_SECTIONS = [
   'Lugares',
   'Tramas y sesiones',
 ];
+
+export function inferNarrativeIcon(kind, title) {
+  const clean = String(title ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (/lore|historia|cronica|leyenda/.test(clean)) return 'book';
+  if (/personaje|p[jn]j|reparto|npc|aliado/.test(clean)) return 'users';
+  if (/faccion|gremio|bando|organizacion|culto/.test(clean)) return 'flag';
+  if (/mapa|mundo|continente/.test(clean)) return 'map';
+  if (/lugar|region|ciudad|pueblo|aldea|ubicacion/.test(clean)) return 'pin';
+  if (/trama|sesion|aventura|mision|capitulo/.test(clean)) return 'scroll';
+  if (/reino|castillo|fortaleza|torre/.test(clean)) return 'castle';
+  if (/rey|reina|corona|noble/.test(clean)) return 'crown';
+  if (/guerra|combate|arma|espada/.test(clean)) return 'sword';
+  if (/enemigo|monstruo|muerte|peligro/.test(clean)) return 'skull';
+  if (/tesoro|objeto|reliquia|gema/.test(clean)) return 'gem';
+  if (/magia|hechizo|arcano/.test(clean)) return 'sparkles';
+  return kind === 'seccion' ? 'folder' : 'document';
+}
 
 // Se llama al crear una campaña y también al convertir una escaramuza en
 // campaña. Si el DM ya organizó su archivo (aunque lo haya dejado distinto a
@@ -122,6 +162,71 @@ export function narrativeImagesForCampaign(campaignId) {
     .map((row) => row.image_path);
 }
 
+// Instantánea completa y privada del archivo. Se escribe de forma atómica
+// para no dejar JSON a medias si el proceso se interrumpe. También copia las
+// imágenes privadas referenciadas a una carpeta hermana, de modo que una
+// versión anterior siga siendo recuperable tras sustituir o borrar medios.
+export function writeNarrativeBackup(campaignId, reason = 'guardado') {
+  const campaign = db
+    .prepare('SELECT id, name FROM campaigns WHERE id = ?')
+    .get(campaignId);
+  if (!campaign) return null;
+
+  const nodes = db
+    .prepare(
+      `SELECT id, campaign_id, parent_id, kind, title, summary, visibility, icon,
+              position, created_at, updated_at
+         FROM campaign_narrative_nodes
+        WHERE campaign_id = ?
+        ORDER BY parent_id, position, id`
+    )
+    .all(campaignId);
+  const blocks = db
+    .prepare(
+      `SELECT b.* FROM campaign_narrative_blocks b
+       JOIN campaign_narrative_nodes n ON n.id = b.node_id
+       WHERE n.campaign_id = ? ORDER BY b.node_id, b.position, b.id`
+    )
+    .all(campaignId);
+
+  const directory = path.join(NARRATIVE_BACKUP_DIR, `campana-${campaign.id}`);
+  fs.mkdirSync(directory, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const cleanReason = String(reason || 'guardado')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'guardado';
+  const filename = `${timestamp}-${cleanReason}-${crypto.randomUUID()}.json`;
+  const destination = path.join(directory, filename);
+  const temporary = `${destination}.tmp`;
+  const mediaDirectoryName = filename.replace(/\.json$/, '-media');
+  const mediaDirectory = path.join(directory, mediaDirectoryName);
+  const backupMedia = {};
+  for (const block of blocks) {
+    if (!block.image_path) continue;
+    const source = narrativeImagePath(block.image_path);
+    if (!source || !fs.existsSync(source)) continue;
+    fs.mkdirSync(mediaDirectory, { recursive: true });
+    const targetName = `${block.id}-${path.basename(block.image_path)}`;
+    fs.copyFileSync(source, path.join(mediaDirectory, targetName));
+    backupMedia[block.id] = `${mediaDirectoryName}/${targetName}`;
+  }
+  const payload = {
+    format: 'tridnd-archivo-v1',
+    savedAt: new Date().toISOString(),
+    reason,
+    campaign: { id: campaign.id, name: campaign.name },
+    nodes,
+    blocks,
+    backupMedia,
+  };
+  fs.writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, { flag: 'wx' });
+  fs.renameSync(temporary, destination);
+  return destination;
+}
+
 export function serializeNarrativeBlock(row, campaignId) {
   const hasPrivateImage = Boolean(row.image_path);
   return {
@@ -143,12 +248,16 @@ export function serializeNarrativeBlock(row, campaignId) {
 }
 
 export function serializeNarrativeNode(row, blocks = []) {
+  const customIcon = NARRATIVE_ICONS.has(row.icon) ? row.icon : null;
   return {
     id: row.id,
     parentId: row.parent_id ?? null,
     kind: row.kind,
     title: row.title,
     summary: row.summary ?? '',
+    visibility: row.visibility ?? 'private',
+    icon: customIcon ?? inferNarrativeIcon(row.kind, row.title),
+    iconAutomatic: customIcon == null,
     position: row.position,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

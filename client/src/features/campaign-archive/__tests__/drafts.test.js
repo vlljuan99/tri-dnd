@@ -22,6 +22,16 @@ test('al seleccionar otra entrada se carga su borrador remoto', () => {
   assert.deepEqual(keepDraftOnRefresh(current, 7, next, entryDraftFrom), entryDraftFrom(next));
 });
 
+test('el borrador normaliza la visibilidad de una entrada', () => {
+  assert.equal(entryDraftFrom({ visibility: 'players' }).visibility, 'players');
+  assert.equal(entryDraftFrom({}).visibility, 'private');
+});
+
+test('el borrador distingue el icono automático de uno elegido', () => {
+  assert.equal(entryDraftFrom({ icon: 'book', iconAutomatic: true }).icon, '');
+  assert.equal(entryDraftFrom({ icon: 'crown', iconAutomatic: false }).icon, 'crown');
+});
+
 test('reordenar o añadir bloques no borra el contenido local del mismo bloque', () => {
   const remote = { id: 11, content: 'Guardado', url: '', caption: '', altText: '', position: 0 };
   const draft = { ...blockDraftFrom(remote), content: 'Texto todavía sin guardar' };

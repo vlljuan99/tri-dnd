@@ -8,6 +8,8 @@ export function entryDraftFrom(entry) {
     title: entry?.title ?? '',
     summary: entry?.summary ?? '',
     parentId: entry?.parentId ?? '',
+    visibility: entry?.visibility === 'players' ? 'players' : 'private',
+    icon: entry?.iconAutomatic === false ? entry.icon ?? '' : '',
   };
 }
 
@@ -30,4 +32,3 @@ export function blockDraftAfterPrivateUpload(currentDraft) {
   // el texto alternativo ni cualquier nota que el DM aún no haya guardado.
   return { ...currentDraft, url: '' };
 }
-

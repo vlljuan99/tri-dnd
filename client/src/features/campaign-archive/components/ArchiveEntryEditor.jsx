@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import ArchiveBlockCard from './ArchiveBlockCard.jsx';
+import ArchiveIconPicker from './ArchiveIconPicker.jsx';
 import { entryDraftFrom, keepDraftOnRefresh } from '../lib/drafts.js';
+import { inferArchiveIcon } from '../lib/archiveIcons.js';
 
 const inputClass =
   'w-full rounded-sm border border-bone/20 bg-night-950 px-3 py-2 text-bone placeholder:text-bone/30 focus:border-gold focus:outline-none disabled:opacity-50';
@@ -25,15 +27,22 @@ export default function ArchiveEntryEditor({
   onDeleteBlock,
   onMoveBlock,
   onUploadImage,
+  referenceEntries = [],
+  onNavigateReference,
 }) {
   const [draft, setDraft] = useState(() => entryDraftFrom(entry));
   const [saving, setSaving] = useState(false);
   const activeEntryIdRef = useRef(entry?.id ?? null);
+  const scrollRef = useRef(null);
 
   useEffect(() => {
     setDraft((current) => keepDraftOnRefresh(current, activeEntryIdRef.current, entry, entryDraftFrom));
     activeEntryIdRef.current = entry?.id ?? null;
   }, [entry]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [entry?.id]);
 
   if (!entry) {
     return (
@@ -48,11 +57,15 @@ export default function ArchiveEntryEditor({
     );
   }
 
-  const { title, summary, parentId } = draft;
+  const { title, summary, parentId, visibility, icon } = draft;
   const set = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
   const blocks = [...(entry.blocks ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
   const detailsChanged =
-    title !== entry.title || summary !== entry.summary || (parentId === '' ? null : Number(parentId)) !== entry.parentId;
+    title !== entry.title ||
+    summary !== entry.summary ||
+    (parentId === '' ? null : Number(parentId)) !== entry.parentId ||
+    visibility !== (entry.visibility === 'players' ? 'players' : 'private') ||
+    icon !== (entry.iconAutomatic === false ? entry.icon ?? '' : '');
 
   async function saveDetails() {
     if (!title.trim()) return;
@@ -60,6 +73,8 @@ export default function ArchiveEntryEditor({
       title: title.trim(),
       summary: summary.trim(),
       parentId: parentId === '' ? null : Number(parentId),
+      visibility,
+      icon: icon || null,
     };
     setSaving(true);
     try {
@@ -85,10 +100,20 @@ export default function ArchiveEntryEditor({
   }
 
   return (
-    <section className="min-h-0 overflow-y-auto bg-night-950/20">
-      <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-5">
-        <div className="rounded-md border border-gold/15 bg-night-900/70 p-4">
+    <section ref={scrollRef} className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-night-950/20">
+      <div className="mx-auto min-w-0 max-w-3xl space-y-5 p-4 sm:p-5">
+        <div className="min-w-0 rounded-md border border-gold/15 bg-night-900/70 p-4">
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="sm:col-span-2">
+              <span className="mb-1 block text-[0.65rem] uppercase tracking-widest text-bone/45">Icono del artículo</span>
+              <ArchiveIconPicker
+                value={icon}
+                automaticIcon={inferArchiveIcon('entrada', title)}
+                disabled={busy || saving}
+                label={`Icono de ${title || 'la entrada'}`}
+                onChange={(nextIcon) => set('icon', nextIcon)}
+              />
+            </div>
             <label className="block">
               <span className="mb-1 block text-[0.65rem] uppercase tracking-widest text-bone/45">Título</span>
               <input
@@ -120,6 +145,37 @@ export default function ArchiveEntryEditor({
               className={`${inputClass} resize-y text-sm`}
             />
           </label>
+          <fieldset className="mt-3 rounded-sm border border-bone/10 bg-night-950/35 p-3">
+            <legend className="px-1 text-[0.65rem] uppercase tracking-widest text-bone/45">Visibilidad del artículo</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => set('visibility', 'private')}
+                aria-pressed={visibility === 'private'}
+                className={`rounded-sm border px-3 py-2 text-left transition-colors ${
+                  visibility === 'private'
+                    ? 'border-gold/55 bg-gold/10 text-gold'
+                    : 'border-bone/15 text-bone/55 hover:border-bone/30 hover:text-bone'
+                }`}
+              >
+                <span className="block text-sm font-medium">Privado</span>
+                <span className="mt-0.5 block text-xs opacity-70">Solo lo ve el DM.</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => set('visibility', 'players')}
+                aria-pressed={visibility === 'players'}
+                className={`rounded-sm border px-3 py-2 text-left transition-colors ${
+                  visibility === 'players'
+                    ? 'border-sage/60 bg-sage/10 text-sage'
+                    : 'border-bone/15 text-bone/55 hover:border-bone/30 hover:text-bone'
+                }`}
+              >
+                <span className="block text-sm font-medium">Publicado para jugadores</span>
+                <span className="mt-0.5 block text-xs opacity-70">El grupo podrá leer el artículo y sus recursos.</span>
+              </button>
+            </div>
+          </fieldset>
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-bone/10 pt-3">
             {detailsChanged && <span className="mr-auto text-xs text-ochre">Cabecera sin guardar</span>}
             {!detailsChanged && <span className="mr-auto text-xs text-sage/70">Cabecera guardada</span>}
@@ -189,6 +245,9 @@ export default function ArchiveEntryEditor({
                   onDelete={() => removeBlock(block)}
                   onMove={(direction) => onMoveBlock(block.id, { direction })}
                   onUpload={(file) => onUploadImage(block.id, file)}
+                  referenceEntries={referenceEntries}
+                  currentEntryId={entry.id}
+                  onNavigateReference={onNavigateReference}
                 />
               ))}
             </div>

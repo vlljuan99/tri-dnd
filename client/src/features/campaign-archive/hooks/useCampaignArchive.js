@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../../api.js';
+import { ARCHIVE_ICON_IDS, inferArchiveIcon } from '../lib/archiveIcons.js';
 
 const numberOrNull = (value) => (value == null || value === '' ? null : Number(value));
 
@@ -24,13 +25,27 @@ function normalizeBlock(raw) {
 
 function flattenNodes(rows, inheritedParentId = null, output = []) {
   for (const raw of rows ?? []) {
+    const legacyPublished = raw.isPublished ?? raw.is_published ?? raw.published;
+    const type = raw.type ?? raw.kind ?? raw.tipo ?? raw.nodeType ?? 'entrada';
+    const title = raw.title ?? raw.titulo ?? '';
+    const rawIcon = raw.icon ?? raw.icono;
+    const hasValidIcon = ARCHIVE_ICON_IDS.has(rawIcon);
+    const iconAutomatic = Boolean(
+      raw.iconAutomatic ?? raw.icon_automatic ?? raw.iconoAutomatico ?? !hasValidIcon
+    );
     const node = {
       ...raw,
       id: Number(raw.id),
       parentId: numberOrNull(raw.parentId ?? raw.parent_id ?? raw.padreId ?? raw.padre_id ?? inheritedParentId),
-      type: raw.type ?? raw.kind ?? raw.tipo ?? raw.nodeType ?? 'entrada',
-      title: raw.title ?? raw.titulo ?? '',
+      type,
+      title,
       summary: raw.summary ?? raw.resumen ?? '',
+      visibility:
+        raw.visibility === 'players' || raw.visibilidad === 'players' || legacyPublished === true || legacyPublished === 1
+          ? 'players'
+          : 'private',
+      icon: hasValidIcon ? rawIcon : inferArchiveIcon(type, title),
+      iconAutomatic,
       position: Number(raw.position ?? raw.posicion ?? 0),
       blocks: (raw.blocks ?? raw.bloques ?? []).map(normalizeBlock).sort((a, b) => a.position - b.position),
     };
@@ -48,11 +63,16 @@ function unpackNodes(data, { preserveOrder = false } = {}) {
   return preserveOrder ? nodes : nodes.sort((a, b) => a.position - b.position || a.id - b.id);
 }
 
-export function useCampaignArchive(campaignId) {
-  const [nodes, setNodes] = useState([]);
-  const [loading, setLoading] = useState(true);
+export function useCampaignArchive(campaignId, { initialData = null, onData = null } = {}) {
+  const [nodes, setNodes] = useState(() => unpackNodes(initialData ?? []));
+  const [loading, setLoading] = useState(initialData == null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const onDataRef = useRef(onData);
+
+  useEffect(() => {
+    onDataRef.current = onData;
+  }, [onData]);
 
   const base = `/campaigns/${campaignId}/archivo`;
 
@@ -62,6 +82,7 @@ export function useCampaignArchive(campaignId) {
     try {
       const data = await api(base);
       setNodes(unpackNodes(data));
+      onDataRef.current?.(data);
       return data;
     } catch (e) {
       setError(e.message);
@@ -72,8 +93,14 @@ export function useCampaignArchive(campaignId) {
   }, [base]);
 
   useEffect(() => {
+    if (initialData != null) {
+      setNodes(unpackNodes(initialData));
+      setLoading(false);
+      setError('');
+      return;
+    }
     reload().catch(() => {});
-  }, [reload]);
+  }, [initialData, reload]);
 
   const mutate = useCallback(
     async (action) => {

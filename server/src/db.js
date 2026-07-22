@@ -833,6 +833,59 @@ const migrations = [
        SELECT 1 FROM campaign_narrative_blocks block WHERE block.node_id = entry.id
      );
   `,
+
+  // v41 — Publicación selectiva del archivo narrativo. La visibilidad vive
+  // en cada entrada y se filtra en servidor junto con sus bloques/imágenes.
+  // Las secciones se incluyen al jugador solo cuando son ancestros de al
+  // menos una entrada publicada.
+  `
+  ALTER TABLE campaign_narrative_nodes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'
+    CHECK (visibility IN ('private', 'players'));
+  `,
+
+  // v42 — Audiencia de las consecuencias de objetos y trampas. El texto
+  // sigue siendo privado del DM hasta resolver la interacción o recoger el
+  // objeto; entonces puede mostrarse solo al personaje implicado o a todo el
+  // grupo mediante el chat filtrado del servidor.
+  `
+  ALTER TABLE map_tokens ADD COLUMN consequence_scope TEXT NOT NULL DEFAULT 'player'
+    CHECK (consequence_scope IN ('player', 'party'));
+  `,
+
+  // v43 — Iconos editables del archivo narrativo. NULL conserva el modo
+  // automático: el servidor infiere un icono contextual por tipo y título,
+  // por lo que los archivos existentes no necesitan una actualización masiva.
+  `
+  ALTER TABLE campaign_narrative_nodes ADD COLUMN icon TEXT
+    CHECK (icon IS NULL OR icon IN (
+      'folder', 'book', 'scroll', 'document', 'users', 'flag', 'pin', 'map',
+      'castle', 'crown', 'shield', 'sword', 'skull', 'gem', 'potion', 'sparkles'
+    ));
+  `,
+
+  // v44 — Iniciativa auditable y concentración.
+  //
+  // initiative_source distingue los tres estados que initiative (INTEGER NOT
+  // NULL DEFAULT 0) no puede expresar por sí sola: NULL = todavía sin tirar,
+  // 'auto' = la tiró el servidor, 'manual' = la escribió el DM. Hace falta
+  // porque 0 es un total legítimo (un 1 natural con DES -1), así que no se
+  // puede usar como centinela de "sin tirar" al respetar tiradas previas.
+  //
+  // initiative_d20/initiative_mod guardan el desglose de la tirada automática
+  // para que la mesa pueda comprobar de dónde sale cada valor mucho después
+  // de que el mensaje de chat se haya perdido en el scroll. NULL con
+  // source='manual': un número escrito a mano no tiene desglose.
+  //
+  // concentration_spell guarda el nombre del hechizo al que se concentra un
+  // combatiente (NULL = no concentra). Se guarda el nombre y no un booleano
+  // porque la mesa necesita saber QUÉ se cae cuando falla la salvación.
+  `
+  ALTER TABLE combatants ADD COLUMN initiative_source TEXT
+    CHECK (initiative_source IS NULL OR initiative_source IN ('auto', 'manual'));
+  ALTER TABLE combatants ADD COLUMN initiative_d20 INTEGER;
+  ALTER TABLE combatants ADD COLUMN initiative_mod INTEGER;
+  ALTER TABLE combatants ADD COLUMN concentration_spell TEXT;
+  `,
 ];
 
 export function runMigrations() {
