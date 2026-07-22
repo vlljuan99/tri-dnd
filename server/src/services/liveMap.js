@@ -8,6 +8,7 @@ import { getActiveMapId } from './mapLibrary.js';
 // más de lo que su rol le permite ver.
 let ioRef = null;
 let combatBroadcaster = null;
+let campaignMemberEvicter = null;
 
 export function bindIo(io) {
   ioRef = io;
@@ -18,6 +19,18 @@ export function bindIo(io) {
 // avisar cuando el mapa mete enemigos en el tracker
 export function bindCombatBroadcaster(fn) {
   combatBroadcaster = fn;
+}
+
+// Las rutas HTTP de administración pueden retirar a un jugador mientras su
+// socket sigue unido a la sala. El callback vive en sockets.js, donde existe
+// el conocimiento de presencia necesario para sacarlo y recalcular la lista
+// online sin enviarle ninguna actualización posterior.
+export function bindCampaignMemberEvicter(fn) {
+  campaignMemberEvicter = fn;
+}
+
+export function evictCampaignMember(campaignId, userId) {
+  campaignMemberEvicter?.(Number(campaignId), Number(userId));
 }
 
 // sockets.js registra aquí su inserción+difusión de mensajes de chat, para

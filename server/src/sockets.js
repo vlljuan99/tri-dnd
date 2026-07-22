@@ -5,15 +5,32 @@ import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
 import { getMembership, countPlayers } from './routes/campaigns.js';
-import { bindCombatBroadcaster, bindChatPoster, notifyCampaignMap, notifyCombatStarted } from './services/liveMap.js';
+import {
+  bindCampaignMemberEvicter,
+  bindCombatBroadcaster,
+  bindChatPoster,
+  postSystemMessage,
+  notifyCampaignMap,
+  notifyCombatStarted,
+} from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
 import { buildFallDamageRoll, fallDiceForFeet } from './services/fallDamage.js';
 import { buildPerceptionRoll, discoverableTrapIds } from './services/perception.js';
+import {
+  concentrationDC,
+  concentrationSaveBonus,
+  buildConcentrationSaveRoll,
+  resolveConcentrationSave,
+} from './services/concentration.js';
 import { computeFloorVision } from './services/vision.js';
 import {
   orderedCombatants,
-  rollInitiativeValue,
+  rollInitiativeDetailed,
+  rollInitiativeFor,
+  setManualInitiative,
+  initiativeSummary,
+  setConcentration,
   monsterSpeedFeet,
   startTurnFor,
   ensureTurnStarted,
@@ -87,6 +104,11 @@ function combatantView(row, { isDm, round }) {
     kind: row.kind,
     name: row.name,
     initiative: row.initiative,
+    // De dónde sale la iniciativa: null = sin tirar todavía, 'auto' = la tiró
+    // el servidor, 'manual' = la escribió el DM. Público para todos: el orden
+    // de turnos ya lo es, y saber si un número está tirado o puesto a mano es
+    // justo lo que hace auditable la automatización.
+    initiativeSource: row.initiative_source ?? null,
     characterId: row.character_id,
     movedSquares: row.moved_squares,
     actionUsed: Boolean(row.action_used),
@@ -95,6 +117,9 @@ function combatantView(row, { isDm, round }) {
     dashed: Boolean(row.dashed),
     stance: row.stance ?? null,
     conditions,
+    // Qué hechizo concentra (null = ninguno). Público: la mesa entera ve al
+    // mago apretando los dientes, y el grupo decide a quién protege.
+    concentration: row.concentration_spell ?? null,
   };
   if (row.kind === 'pj' && row.character_id) {
     const c = db.prepare('SELECT hp_current, hp_max, ac, speed FROM characters WHERE id = ?').get(row.character_id);
@@ -105,6 +130,10 @@ function combatantView(row, { isDm, round }) {
         hpMax: c.hp_max,
         ac: c.ac,
         speed: c.speed,
+        // Desglose de la tirada (1d20 + DES). El del grupo es público: los
+        // jugadores comprueban entre ellos que el servidor tiró limpio.
+        initiativeRoll:
+          row.initiative_d20 != null ? { d20: row.initiative_d20, modifier: row.initiative_mod } : null,
         downed,
         // Muerto de verdad (3 fallos): a diferencia de "agonizando", ya no
         // se pueden tirar más salvaciones de muerte ni volver con un 20.
@@ -122,6 +151,11 @@ function combatantView(row, { isDm, round }) {
       hpCurrent: row.hp_current,
       hpMax: row.hp_max,
       ac: row.ac,
+      // El desglose del enemigo es del DM, como sus PG y su CA: el modificador
+      // de DES delata su ficha. El total sí lo ve todo el mundo (base.initiative):
+      // el orden de turnos siempre ha sido público.
+      initiativeRoll:
+        row.initiative_d20 != null ? { d20: row.initiative_d20, modifier: row.initiative_mod } : null,
       monsterIndex: row.monster_index,
       speed: Number.isInteger(overrides.speed) ? overrides.speed : monsterSpeedFeet(row.monster_index),
       // Variante por instancia (miniboss): el bloque de estadísticas del DM
@@ -130,6 +164,40 @@ function combatantView(row, { isDm, round }) {
     });
   }
   return base;
+}
+
+// Un combatiente en el resumen de iniciativa: «Elara 19 (d20:17 +2 DES)».
+function formatInitiativeRoll({ name, d20, modifier, total }) {
+  const sign = modifier >= 0 ? '+' : '−';
+  return `${name} ${total} (d20:${d20} ${sign}${Math.abs(modifier)} DES)`;
+}
+
+// Narra en el chat lo que acaba de tirar el servidor. La automatización solo
+// es aceptable si la mesa puede ver de dónde sale cada número, así que el
+// desglose del grupo va en un mensaje público; el de los enemigos delata su
+// modificador de DES, así que va en uno oculto (solo DM), igual que sus PG y
+// su CA. El total de todos, enemigos incluidos, siempre ha sido público.
+function narrateInitiativeRolls(campaignId, rolls) {
+  if (!rolls.length) return;
+
+  const party = rolls.filter((r) => r.kind === 'pj');
+  const enemies = rolls.filter((r) => r.kind !== 'pj');
+
+  postSystemMessage(
+    campaignId,
+    `Iniciativa tirada por la mesa — ${[
+      ...party.map(formatInitiativeRoll),
+      ...enemies.map((r) => `${r.name} ${r.total}`),
+    ].join(' · ')}`
+  );
+
+  if (enemies.length) {
+    postSystemMessage(
+      campaignId,
+      `Iniciativa de los enemigos — ${enemies.map(formatInitiativeRoll).join(' · ')}`,
+      { hidden: true }
+    );
+  }
 }
 
 function combatStateFor(campaignId, isDm) {
@@ -314,6 +382,32 @@ function resolveCombatDamageTarget(campaignId, target) {
 // objetivo puede venir de cualquiera de los dos caminos de arriba, pero
 // aplicar el daño es exactamente lo mismo. Devuelve el mensaje de sistema a
 // narrar y el detalle para quien preguntó (remainingHp, maxHp, defeated).
+// Recibir daño concentrando obliga a una salvación de Constitución (CD 10 o
+// la mitad del daño). La app no la tira sola: avisa a la mesa con la CD ya
+// calculada y deja el botón en el tracker, porque quien concentra puede tener
+// rasgos que la modifiquen y eso vive en texto libre de la ficha. Sin este
+// aviso la regla simplemente se olvidaba.
+function promptConcentrationCheck(campaignId, combatant, damage) {
+  if (!combatant?.concentration_spell) return '';
+  const dc = concentrationDC(damage);
+  postSystemMessage(
+    campaignId,
+    `${combatant.name} concentra en ${combatant.concentration_spell} y recibe ${damage} de daño: salvación de Constitución CD ${dc}.`
+  );
+  return ` Debe salvar concentración (CD ${dc}).`;
+}
+
+// Caer inconsciente rompe la concentración sin salvación posible.
+function dropConcentrationOnDowned(campaignId, combatant) {
+  if (!combatant?.concentration_spell) return '';
+  db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(combatant.id);
+  postSystemMessage(
+    campaignId,
+    `${combatant.name} cae inconsciente: pierde la concentración en ${combatant.concentration_spell}.`
+  );
+  return '';
+}
+
 function applyCombatDamage(campaignId, resolved, damage) {
   let body;
   const detail = { damage, remainingHp: null, maxHp: null, defeated: false };
@@ -355,6 +449,8 @@ function applyCombatDamage(campaignId, resolved, damage) {
         db.prepare('UPDATE combatants SET hp_current = ? WHERE id = ?').run(newHp, combatant.id);
         detail.remainingHp = newHp;
         body = `${resolved.name} recibe ${damage} puntos de daño.`;
+        // Un PNJ lanzador también concentra: mismo aviso que para el grupo
+        body += promptConcentrationCheck(campaignId, combatant, damage);
       }
     } else {
       // Sin ficha en el tracker (p. ej. un aliado): solo se narra
@@ -380,6 +476,7 @@ function applyCombatDamage(campaignId, resolved, damage) {
     if (newHp <= 0) {
       if (prevHp > 0) {
         if (pjCombatant) startDeathSaves(pjCombatant.id);
+        dropConcentrationOnDowned(campaignId, pjCombatant);
         body = `${resolved.name} recibe ${damage} puntos de daño y cae inconsciente.`;
       } else if (pjCombatant) {
         const failures = Math.min(3, pjCombatant.death_failures + 1);
@@ -393,6 +490,7 @@ function applyCombatDamage(campaignId, resolved, damage) {
       }
     } else {
       body = `${resolved.name} recibe ${damage} puntos de daño.`;
+      body += promptConcentrationCheck(campaignId, pjCombatant, damage);
     }
   }
 
@@ -439,6 +537,21 @@ export function setupSockets(io) {
     return [...seen.values()];
   }
 
+  // Si el DM expulsa a alguien, abandonar la sala es parte de la operación
+  // de seguridad: eliminar la membresía en SQLite impediría nuevas acciones,
+  // pero el socket ya unido todavía podría recibir broadcasts.
+  bindCampaignMemberEvicter((campaignId, userId) => {
+    const room = roomName(campaignId);
+    for (const sid of io.sockets.adapter.rooms.get(room) ?? []) {
+      const memberSocket = io.sockets.sockets.get(sid);
+      if (memberSocket?.data.user.id !== userId) continue;
+      memberSocket.leave(room);
+      memberSocket.data.campaigns?.delete(campaignId);
+      memberSocket.emit('campaign:removed', { campaignId });
+    }
+    io.to(room).emit('room:members', onlineMembers(campaignId));
+  });
+
   // Emite un mensaje a la sala; los ocultos solo llegan al DM y a su autor
   function broadcastMessage(campaignId, message, { senderId, dmUserId }) {
     if (!message.hidden) {
@@ -474,11 +587,11 @@ export function setupSockets(io) {
   // los servicios: firmados por el DM de la campaña y, si el evento es
   // oculto, filtrados igual que una tirada oculta (solo DM/autor los reciben)
   bindChatPoster((campaignId, { body, hidden, userId }) => {
-    const dmUserId =
-      userId ?? db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id;
+    const dmUserId = db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id;
     if (!dmUserId) return;
-    const message = insertMessage({ campaignId, userId: dmUserId, type: 'system', body, hidden });
-    broadcastMessage(campaignId, message, { senderId: dmUserId, dmUserId });
+    const senderId = userId ?? dmUserId;
+    const message = insertMessage({ campaignId, userId: senderId, type: 'system', body, hidden });
+    broadcastMessage(campaignId, message, { senderId, dmUserId });
   });
 
   io.on('connection', (socket) => {
@@ -690,16 +803,61 @@ export function setupSockets(io) {
       }
 
       // Si el DM no fija una iniciativa concreta, se tira sola (1d20+DES)
-      const init = Number.isInteger(initiative)
-        ? initiative
-        : rollInitiativeValue({ kind: cleanKind, character_id: charId, monster_index: monsterIdx });
+      // Sin iniciativa explícita se tira sola (1d20 + DES) y se guarda el
+      // desglose; con un número del DM, se respeta y se marca como 'manual'.
+      const manual = Number.isInteger(initiative);
+      const detail = manual
+        ? null
+        : rollInitiativeDetailed({ kind: cleanKind, character_id: charId, monster_index: monsterIdx });
 
       db.prepare(
-        'INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current, hp_max, ac, monster_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).run(campaignId, charId, cleanKind, cleanName, init, hpC, hpM, acVal, monsterIdx);
+        `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current,
+         hp_max, ac, monster_index, initiative_source, initiative_d20, initiative_mod)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        campaignId,
+        charId,
+        cleanKind,
+        cleanName,
+        manual ? initiative : detail.total,
+        hpC,
+        hpM,
+        acVal,
+        monsterIdx,
+        manual ? 'manual' : 'auto',
+        detail?.d20 ?? null,
+        detail?.modifier ?? null
+      );
       ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
+      if (detail) narrateInitiativeRolls(campaignId, [{ name: cleanName, kind: cleanKind, ...detail }]);
       cb?.({ ok: true });
+    });
+
+    // Tira (o vuelve a tirar) la iniciativa de un combatiente en el servidor.
+    // Sustituye a que el cliente tirase por su cuenta: mismo código para
+    // todos, y la tirada se narra sola. El DM puede pedirla para cualquiera;
+    // un jugador, solo para su propio personaje.
+    socket.on('combat:roll-initiative', ({ campaignId, combatantId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db
+        .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
+        .get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+
+      if (membership.role !== 'dm') {
+        if (row.kind !== 'pj' || !row.character_id) return cb?.({ error: 'No puedes tirar por este combatiente' });
+        const char = db.prepare('SELECT user_id FROM characters WHERE id = ?').get(row.character_id);
+        if (!char || char.user_id !== user.id) return cb?.({ error: 'No puedes tirar por este combatiente' });
+      }
+
+      const result = rollInitiativeFor(campaignId, combatantId);
+      if (!result.ok) return cb?.(result);
+      broadcastCombat(campaignId);
+      narrateInitiativeRolls(campaignId, [result]);
+      cb?.({ ok: true, total: result.total });
     });
 
     socket.on('combat:add-party', ({ campaignId }, cb) => {
@@ -718,15 +876,20 @@ export function setupSockets(io) {
           .map((r) => r.character_id)
       );
       const insert = db.prepare(
-        "INSERT INTO combatants (campaign_id, character_id, kind, name, initiative) VALUES (?, ?, 'pj', ?, ?)"
+        `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative,
+         initiative_source, initiative_d20, initiative_mod)
+         VALUES (?, ?, 'pj', ?, ?, 'auto', ?, ?)`
       );
+      const rolls = [];
       for (const c of characters) {
-        if (!existingIds.has(c.id)) {
-          insert.run(campaignId, c.id, c.name, rollInitiativeValue({ kind: 'pj', character_id: c.id }));
-        }
+        if (existingIds.has(c.id)) continue;
+        const detail = rollInitiativeDetailed({ kind: 'pj', character_id: c.id });
+        insert.run(campaignId, c.id, c.name, detail.total, detail.d20, detail.modifier);
+        rolls.push({ name: c.name, kind: 'pj', ...detail });
       }
       ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
+      narrateInitiativeRolls(campaignId, rolls);
       cb?.({ ok: true });
     });
 
@@ -745,7 +908,9 @@ export function setupSockets(io) {
 
       const init = Number(initiative);
       if (!Number.isInteger(init) || init < -20 || init > 60) return cb?.({ error: 'Iniciativa no válida' });
-      db.prepare('UPDATE combatants SET initiative = ? WHERE id = ?').run(init, row.id);
+      // A mano: sin desglose que auditar, y marcada como 'manual' para que
+      // "respetar las tiradas existentes" no la pise al abrir el combate.
+      setManualInitiative(campaignId, row.id, init);
       broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
@@ -801,17 +966,18 @@ export function setupSockets(io) {
       cb?.({ ok: true });
     });
 
-    socket.on('combat:start', ({ campaignId }, cb) => {
+    socket.on('combat:start', ({ campaignId, rerollAll = true }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede iniciar el combate' });
 
-      // Arranque fresco: tira iniciativa para todos los presentes y resetea
-      // sus recursos, aunque ya llevaran un rato en el tracker
-      activateTurnMode(campaignId);
+      // Arranque fresco: resetea los recursos de todos y tira iniciativa según
+      // lo que haya elegido el DM (por todos, o solo por quien no tenga)
+      const { rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false });
       // Primero el estado (para que el cartel ya tenga el orden), luego el
       // aviso: cartel a pantalla + mensaje de chat, igual que el automático
       broadcastCombat(campaignId);
       notifyCombatStarted(campaignId);
+      narrateInitiativeRolls(campaignId, rolls);
       cb?.({ ok: true });
     });
 
@@ -936,6 +1102,86 @@ export function setupSockets(io) {
 
     // Pone o quita una condición de combate a un combatiente (envenenado,
     // derribado…). Solo el DM: es su llamada narrativa. Persiste entre turnos.
+    // Marca o levanta la concentración. A diferencia de las condiciones (que
+    // gestiona solo el DM), quien concentra suele ser un PJ y es su jugador
+    // quien sabe lo que acaba de lanzar: puede marcarlo él mismo.
+    socket.on('combat:set-concentration', ({ campaignId, combatantId, spell }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db
+        .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
+        .get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+
+      if (membership.role !== 'dm') {
+        if (row.kind !== 'pj' || !row.character_id) return cb?.({ error: 'No puedes concentrar por este combatiente' });
+        const char = db.prepare('SELECT user_id FROM characters WHERE id = ?').get(row.character_id);
+        if (!char || char.user_id !== user.id) return cb?.({ error: 'No puedes concentrar por este combatiente' });
+      }
+
+      const previous = row.concentration_spell;
+      const result = setConcentration(campaignId, combatantId, spell);
+      if (!result.ok) return cb?.(result);
+
+      if (result.spell && result.spell !== previous) {
+        postSystemMessage(campaignId, `${row.name} empieza a concentrarse en ${result.spell}.`);
+      } else if (!result.spell && previous) {
+        postSystemMessage(campaignId, `${row.name} deja de concentrarse en ${previous}.`);
+      }
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, spell: result.spell });
+    });
+
+    // Salvación de concentración: la tira el SERVIDOR (1d20 + CON, con
+    // competencia si la ficha la tiene) y decide, igual que percepción o
+    // caída. Quien concentra no elige su propio resultado.
+    socket.on('combat:concentration-save', ({ campaignId, combatantId, dc }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+
+      const row = db
+        .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
+        .get(combatantId, campaignId);
+      if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+      if (!row.concentration_spell) return cb?.({ error: 'Ese combatiente no está concentrando' });
+
+      if (membership.role !== 'dm') {
+        if (row.kind !== 'pj' || !row.character_id) return cb?.({ error: 'No puedes tirar por este combatiente' });
+        const char = db.prepare('SELECT user_id FROM characters WHERE id = ?').get(row.character_id);
+        if (!char || char.user_id !== user.id) return cb?.({ error: 'No puedes tirar por este combatiente' });
+      }
+
+      const targetDc = Number.isInteger(dc) && dc >= 10 && dc <= 40 ? dc : 10;
+      // El bonificador sale de la ficha si es un PJ; un PNJ del DM no tiene
+      // ficha 5e completa aquí, así que tira a pelo y el DM ajusta si toca.
+      const character = row.character_id
+        ? db.prepare('SELECT * FROM characters WHERE id = ?').get(row.character_id)
+        : null;
+      const roll = buildConcentrationSaveRoll({
+        actorName: row.name,
+        bonus: character ? concentrationSaveBonus(character) : 0,
+        spell: row.concentration_spell,
+      });
+      const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
+
+      const rollNote = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollNote);
+
+      const spell = row.concentration_spell;
+      if (!outcome.held) {
+        db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(row.id);
+      }
+      postSystemMessage(
+        campaignId,
+        outcome.held
+          ? `${row.name} aguanta la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+          : `${row.name} pierde la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+      );
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, held: outcome.held, total: roll.total, dc: targetDc });
+    });
+
     socket.on('combat:toggle-condition', ({ campaignId, combatantId, condition }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM gestiona las condiciones' });
@@ -1005,7 +1251,11 @@ export function setupSockets(io) {
 
     // Alterna entre modo por turnos (bloquea movimiento/acción fuera de tu
     // turno) y modo libre (sin restricciones), sin vaciar el tracker.
-    socket.on('combat:toggle-mode', ({ campaignId }, cb) => {
+    // `rerollAll` solo se mira al ENCENDER el modo por turnos: true tira por
+    // todos, false respeta a quien ya tenga iniciativa propia. Lo elige el DM
+    // en el diálogo de la mesa; el valor por defecto conserva el
+    // comportamiento histórico (tirar por todos).
+    socket.on('combat:toggle-mode', ({ campaignId, rerollAll = true }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede cambiar el modo de la mesa' });
 
@@ -1013,8 +1263,9 @@ export function setupSockets(io) {
       const turningOn = !table?.combat_active;
 
       let body;
+      let rolls = [];
       if (turningOn) {
-        activateTurnMode(campaignId);
+        ({ rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false }));
         body = 'Modo por turnos activado: movimiento y acciones solo en tu turno.';
       } else {
         deactivateTurnMode(campaignId);
@@ -1025,7 +1276,16 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       // Cartel de aviso tras difundir el estado, para que ya tenga el orden
       if (turningOn) io.to(roomName(campaignId)).emit('combat:started');
+      narrateInitiativeRolls(campaignId, rolls);
       cb?.({ ok: true, active: turningOn });
+    });
+
+    // Cuántas iniciativas conservaría "respetar las existentes": el diálogo
+    // del DM lo necesita para no ofrecer una opción que no cambia nada.
+    socket.on('combat:initiative-summary', ({ campaignId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM' });
+      cb?.({ ok: true, ...initiativeSummary(campaignId) });
     });
 
     socket.on('combat:end', ({ campaignId }, cb) => {

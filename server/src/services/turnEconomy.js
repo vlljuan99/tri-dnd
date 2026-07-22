@@ -46,8 +46,46 @@ function dexModifierForCombatant(row) {
   return 0;
 }
 
-export function rollInitiativeValue(row) {
-  return rollD20() + dexModifierForCombatant(row);
+// Tira la iniciativa de un combatiente devolviendo el desglose completo, no
+// solo el total: la mesa tiene derecho a ver de dónde sale cada número (1d20
+// + DES). Quien llama decide si lo publica en el chat, lo guarda o ambos.
+export function rollInitiativeDetailed(row) {
+  const d20 = rollD20();
+  const modifier = dexModifierForCombatant(row);
+  return { d20, modifier, total: d20 + modifier };
+}
+
+// Guarda una iniciativa tirada por el servidor con su desglose, para que el
+// tracker pueda mostrarla auditada mucho después de perderse el chat.
+export function storeRolledInitiative(combatantId, { d20, modifier, total }) {
+  db.prepare(
+    "UPDATE combatants SET initiative = ?, initiative_source = 'auto', initiative_d20 = ?, initiative_mod = ? WHERE id = ?"
+  ).run(total, d20, modifier, combatantId);
+}
+
+// Tira la iniciativa de un combatiente concreto y la guarda. Devuelve el
+// desglose y el nombre, listos para narrar en el chat.
+export function rollInitiativeFor(campaignId, combatantId) {
+  const row = db
+    .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  const detail = rollInitiativeDetailed(row);
+  storeRolledInitiative(row.id, detail);
+  return { ok: true, ...detail, id: row.id, name: row.name, kind: row.kind };
+}
+
+// Fija una iniciativa a mano (el DM escribe el número). Sin desglose: no hay
+// tirada que auditar, y marcarla como 'manual' es justo lo que permite que
+// "respetar las tiradas existentes" no la pise.
+export function setManualInitiative(campaignId, combatantId, initiative) {
+  const changed = db
+    .prepare(
+      `UPDATE combatants SET initiative = ?, initiative_source = 'manual',
+       initiative_d20 = NULL, initiative_mod = NULL WHERE id = ? AND campaign_id = ?`
+    )
+    .run(initiative, combatantId, campaignId).changes;
+  return changed > 0;
 }
 
 // Velocidad a pie de un monstruo del compendio SRD (p. ej. "30 ft." → 30).
@@ -113,23 +151,46 @@ export function ensureTurnStarted(campaignId) {
   startTurnFor(campaignId, list[0].id, table.combat_round ?? 1);
 }
 
-// Activa el modo por turnos como arranque fresco de encuentro: tira
-// iniciativa para todos los presentes (pisa cualquier valor anterior),
-// resetea los recursos de todos (incluida la reacción: es una ronda 1
-// nueva) y empieza por el primero. Devuelve el orden final.
-export function activateTurnMode(campaignId) {
+// Activa el modo por turnos como arranque fresco de encuentro: resetea los
+// recursos de todos (incluida la reacción: es una ronda 1 nueva), asegura que
+// todo el mundo tiene iniciativa y empieza por el primero.
+//
+// `rerollAll` decide qué pasa con lo ya tirado, que es la única pregunta que
+// esto no puede contestar solo (la hace el DM en la mesa):
+//   true  → tira por todos, pisando cualquier valor previo.
+//   false → tira solo por quien no tenga iniciativa propia todavía
+//           (initiative_source IS NULL), respetando al resto.
+// En ambos casos se devuelve el desglose de lo tirado para narrarlo: la
+// automatización no vale nada si la mesa no puede ver de dónde sale.
+export function activateTurnMode(campaignId, { rerollAll = true } = {}) {
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
      dashed = 0, stance = NULL, reaction_used_round = NULL WHERE campaign_id = ?`
   ).run(campaignId);
+
+  const rolls = [];
   for (const c of orderedCombatants(campaignId)) {
-    db.prepare('UPDATE combatants SET initiative = ? WHERE id = ?').run(rollInitiativeValue(c), c.id);
+    if (!rerollAll && c.initiative_source !== null) continue;
+    const detail = rollInitiativeDetailed(c);
+    storeRolledInitiative(c.id, detail);
+    rolls.push({ id: c.id, name: c.name, kind: c.kind, ...detail });
   }
+
   const fresh = orderedCombatants(campaignId);
   if (fresh.length) startTurnFor(campaignId, fresh[0].id, 1);
   else db.prepare('UPDATE game_tables SET combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
-  return fresh;
+  return { order: fresh, rolls };
+}
+
+// ¿Hay iniciativas que "respetar las tiradas existentes" conservaría? El DM
+// necesita saberlo para elegir con criterio antes de arrancar el combate.
+export function initiativeSummary(campaignId) {
+  const list = orderedCombatants(campaignId);
+  return {
+    total: list.length,
+    withInitiative: list.filter((c) => c.initiative_source !== null).length,
+  };
 }
 
 // Modo libre: se desactiva el bloqueo de movimiento/acción sin borrar el
@@ -152,18 +213,28 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
   const character = db.prepare('SELECT id, name FROM characters WHERE id = ?').get(characterId);
   if (!character) return false;
 
+  // Entrar a un combate ya en marcha tira iniciativa sola (y guarda el
+  // desglose); fuera del modo por turnos se queda sin tirar hasta que el DM
+  // abra el combate, que es cuando el orden importa.
   const table = db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId);
-  const initiative = table?.combat_active
-    ? rollInitiativeValue({ kind: 'pj', character_id: characterId })
-    : 0;
-  db.prepare("INSERT INTO combatants (campaign_id, character_id, kind, name, initiative) VALUES (?, ?, 'pj', ?, ?)").run(
+  const detail = table?.combat_active
+    ? rollInitiativeDetailed({ kind: 'pj', character_id: characterId })
+    : null;
+  db.prepare(
+    `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative,
+     initiative_source, initiative_d20, initiative_mod)
+     VALUES (?, ?, 'pj', ?, ?, ?, ?, ?)`
+  ).run(
     campaignId,
     characterId,
     character.name,
-    initiative
+    detail?.total ?? 0,
+    detail ? 'auto' : null,
+    detail?.d20 ?? null,
+    detail?.modifier ?? null
   );
   ensureTurnStarted(campaignId);
-  return true;
+  return detail ? { inserted: true, name: character.name, ...detail } : { inserted: true };
 }
 
 // ¿Está este personaje a 0 PG o menos? Inconsciente (agonizando o ya
@@ -341,6 +412,21 @@ export function toggleCondition(campaignId, combatantId, condition) {
   const next = has ? list.filter((c) => c !== condition) : [...list, condition];
   db.prepare('UPDATE combatants SET conditions = ? WHERE id = ?').run(JSON.stringify(next), combatantId);
   return { ok: true, conditions: next, added: !has };
+}
+
+// --- Concentración ---------------------------------------------------------
+
+// Marca (o levanta, con spell = null) la concentración de un combatiente. Se
+// guarda el nombre del hechizo porque al fallar la salvación la mesa necesita
+// saber qué se acaba de caer, no solo que "algo" se cayó.
+export function setConcentration(campaignId, combatantId, spell) {
+  const row = db
+    .prepare('SELECT id FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
+  if (!row) return { ok: false, error: 'Combatiente no encontrado' };
+  const clean = typeof spell === 'string' && spell.trim() ? spell.trim().slice(0, 60) : null;
+  db.prepare('UPDATE combatants SET concentration_spell = ? WHERE id = ?').run(clean, combatantId);
+  return { ok: true, spell: clean };
 }
 
 // Pone a un combatiente PJ "agonizando": 0 salvaciones de muerte pendientes.

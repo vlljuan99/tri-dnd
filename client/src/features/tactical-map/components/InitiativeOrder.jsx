@@ -1,7 +1,15 @@
 import { useState } from 'react';
 import { useRoom } from '../../../store/socket.js';
+import { toastError } from '../../../store/toast.js';
 import { rollPool } from '../../../lib/dice.js';
-import { TurnBadges, ConditionChips, DeathSaveDots, ConditionEditor } from './CombatantStatus.jsx';
+import {
+  TurnBadges,
+  ConditionChips,
+  DeathSaveDots,
+  ConditionEditor,
+  InitiativeValue,
+  ConcentrationChip,
+} from './CombatantStatus.jsx';
 
 // Barritas de vida y color por proporción (mismo criterio que el resto de la mesa)
 function hpColor(ratio) {
@@ -23,7 +31,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
     const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: c.name });
     const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
     const resp = await room.deathSave(c.id, roll, natural);
-    if (resp?.error) window.alert(resp.error);
+    if (resp?.error) toastError(resp.error);
   }
 
   return (
@@ -56,7 +64,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
                 {c.name}
               </span>
               <TurnBadges combatant={c} />
-              <span className="font-mono text-[0.65rem] text-bone/50">{c.initiative}</span>
+              <InitiativeValue combatant={c} />
             </div>
 
             {knowsHp && (
@@ -67,6 +75,12 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
                 <span className="font-mono text-[0.6rem] text-bone/50">
                   {c.hpCurrent}/{c.hpMax}
                 </span>
+              </div>
+            )}
+
+            {c.concentration && (
+              <div className="mt-1 flex items-center gap-1">
+                <ConcentrationChip spell={c.concentration} />
               </div>
             )}
 

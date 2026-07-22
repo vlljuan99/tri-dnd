@@ -14,6 +14,7 @@ export const useRoom = create((set, get) => ({
   messages: [],
   online: [],
   joinError: null,
+  removedCampaignId: null,
   combat: { active: false, round: 1, turnId: null, combatants: [] },
   // Sube cada vez que el servidor avisa de que ACABA de empezar el combate
   // (arranque manual del DM o automático al descubrir enemigos): la mesa lo
@@ -56,6 +57,19 @@ export const useRoom = create((set, get) => ({
       set((s) => ({ messages: [...s.messages.slice(-199), message] }));
     });
     socket.on('room:members', (online) => set({ online }));
+    socket.on('campaign:removed', ({ campaignId }) => {
+      if (Number(campaignId) !== Number(get().campaignId)) return;
+      set({
+        campaignId: null,
+        campaignName: '',
+        role: null,
+        isLive: false,
+        messages: [],
+        online: [],
+        joinError: 'El DM te ha retirado de esta campaña.',
+        removedCampaignId: Number(campaignId),
+      });
+    });
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
@@ -76,7 +90,7 @@ export const useRoom = create((set, get) => ({
     const s = get().ensureSocket();
     if (get().campaignId === campaignId) return;
     if (get().campaignId) s.emit('room:leave', { campaignId: get().campaignId });
-    set({ campaignId, messages: [], online: [], joinError: null });
+    set({ campaignId, messages: [], online: [], joinError: null, removedCampaignId: null });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
         set({ joinError: resp.error, campaignId: null });
@@ -199,6 +213,24 @@ export const useRoom = create((set, get) => ({
     if (socket && campaignId) socket.emit('combat:set-initiative', { campaignId, combatantId, initiative });
   },
 
+  /**
+   * Pide al SERVIDOR que tire la iniciativa de un combatiente (1d20 + DES) y
+   * la narre. Antes tiraba el cliente por su cuenta, lo que dejaba dos motores
+   * de tirada distintos para lo mismo y una tirada que nadie podía auditar.
+   */
+  rollInitiative(combatantId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:roll-initiative', { campaignId, combatantId }, resolve));
+  },
+
+  /** Cuántos combatientes ya tienen iniciativa propia (para el diálogo del DM). */
+  initiativeSummary() {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:initiative-summary', { campaignId }, resolve));
+  },
+
   updateCombatant(combatantId, patch) {
     const { campaignId } = get();
     if (!socket || !campaignId) return;
@@ -211,9 +243,10 @@ export const useRoom = create((set, get) => ({
     if (socket && campaignId) socket.emit('combat:remove', { campaignId, combatantId });
   },
 
-  startCombat() {
+  /** Abre el combate. `rerollAll` false respeta las iniciativas ya tiradas. */
+  startCombat({ rerollAll = true } = {}) {
     const { campaignId } = get();
-    if (socket && campaignId) socket.emit('combat:start', { campaignId });
+    if (socket && campaignId) socket.emit('combat:start', { campaignId, rerollAll });
   },
 
   nextTurn() {
@@ -235,11 +268,15 @@ export const useRoom = create((set, get) => ({
     return new Promise((resolve) => socket.emit('combat:end-turn', { campaignId }, resolve));
   },
 
-  /** Alterna modo por turnos / modo libre (solo DM), sin vaciar el tracker. */
-  toggleTurnMode() {
+  /**
+   * Alterna modo por turnos / modo libre (solo DM), sin vaciar el tracker.
+   * `rerollAll` solo se mira al encender: true tira iniciativa por todos,
+   * false respeta a quien ya tenga la suya. Al apagar se ignora.
+   */
+  toggleTurnMode({ rerollAll = true } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
-    return new Promise((resolve) => socket.emit('combat:toggle-mode', { campaignId }, resolve));
+    return new Promise((resolve) => socket.emit('combat:toggle-mode', { campaignId, rerollAll }, resolve));
   },
 
   /** Marca la reacción ('reaccion') o la acción adicional ('adicional') como gastada. */
@@ -266,6 +303,27 @@ export const useRoom = create((set, get) => ({
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
       socket.emit('combat:toggle-condition', { campaignId, combatantId, condition }, resolve)
+    );
+  },
+
+  /**
+   * Marca (spell) o levanta (null) la concentración de un combatiente. Lo
+   * puede hacer el DM o el dueño del PJ: quien lanza sabe lo que ha lanzado.
+   */
+  setConcentration(combatantId, spell) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:set-concentration', { campaignId, combatantId, spell }, resolve)
+    );
+  },
+
+  /** Salvación de concentración contra una CD; la tira y resuelve el servidor. */
+  concentrationSave(combatantId, dc) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:concentration-save', { campaignId, combatantId, dc }, resolve)
     );
   },
 

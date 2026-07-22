@@ -18,6 +18,58 @@ export function TurnBadges({ combatant }) {
   );
 }
 
+/**
+ * La iniciativa con su procedencia. Automatizar las tiradas solo es aceptable
+ * si la mesa puede auditarlas, así que el número lleva siempre su desglose
+ * (1d20 + DES) donde el servidor lo tiró, y se distingue de un valor escrito
+ * a mano por el DM o de uno que aún no se ha tirado.
+ *
+ * El desglose de un enemigo solo llega al socket del DM (delata su DES); para
+ * un jugador `initiativeRoll` viene vacío y solo se ve el total, que siempre
+ * ha sido público.
+ */
+export function InitiativeValue({ combatant }) {
+  const { initiative, initiativeSource: source, initiativeRoll: roll } = combatant;
+
+  if (source == null) {
+    return (
+      <span title="Todavía sin tirar: se tirará al abrir el combate" className="font-mono text-xs text-bone/30">
+        Ini —
+      </span>
+    );
+  }
+
+  const detail = roll
+    ? `Tirada por el servidor: d20 ${roll.d20} ${roll.modifier >= 0 ? '+' : '−'} ${Math.abs(roll.modifier)} de DES = ${initiative}`
+    : source === 'manual'
+      ? 'Puesta a mano por el DM'
+      : 'Tirada por el servidor';
+
+  return (
+    <span title={detail} className="flex items-center gap-1 font-mono text-xs text-bone/50">
+      Ini {initiative}
+      {source === 'manual' ? (
+        <span aria-label="puesta a mano" className="text-[0.6rem] text-ochre/80">✎</span>
+      ) : (
+        <span aria-label="tirada automática" className="text-[0.6rem] text-sage/80">⚄</span>
+      )}
+    </span>
+  );
+}
+
+/** Chip del hechizo al que se concentra un combatiente. */
+export function ConcentrationChip({ spell }) {
+  if (!spell) return null;
+  return (
+    <span
+      title={`Concentrándose en ${spell}: recibir daño obliga a una salvación de Constitución`}
+      className="rounded-sm border border-gold/50 bg-gold/10 px-1 text-[0.6rem] text-gold"
+    >
+      ◎ {spell}
+    </span>
+  );
+}
+
 /** Chips de las condiciones activas de un combatiente. */
 export function ConditionChips({ conditions }) {
   if (!conditions?.length) return null;

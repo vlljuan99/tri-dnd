@@ -6,6 +6,7 @@ import { buildBoardWalkable, findBoardPath, reachableWithin, buildBoardElevation
 import { buildBoardWalls } from '../domain/walls.js';
 import { computeBoardVision } from '../domain/vision.js';
 import { useRoom } from '../../../store/socket.js';
+import { toastError } from '../../../store/toast.js';
 import { rollPool } from '../../../lib/dice.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
@@ -749,7 +750,7 @@ export default function TacticalMap({
               <button
                 onClick={async () => {
                   const resp = await endTurn();
-                  if (resp?.error) window.alert(resp.error);
+                  if (resp?.error) toastError(resp.error);
                 }}
                 className="rounded-sm border border-gold/40 px-2.5 py-1 text-xs text-gold hover:bg-gold/10"
               >
@@ -767,20 +768,20 @@ export default function TacticalMap({
               isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
               onEndTurn={async () => {
                 const resp = await endTurn();
-                if (resp?.error) window.alert(resp.error);
+                if (resp?.error) toastError(resp.error);
               }}
               // Acciones especiales del turno (gastan la acción): las lanza el
               // controlador del combatiente activo (su dueño, o el DM con enemigos)
               onSpecialAction={async (kind) => {
                 const resp = await specialAction(hudCombatant.id, kind);
-                if (resp?.error) window.alert(resp.error);
+                if (resp?.error) toastError(resp.error);
               }}
               // Salvación de muerte de un PJ agonizante mostrado en el HUD
               onDeathSave={async () => {
                 const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: hudDisplay?.name });
                 const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
                 const resp = await deathSave(hudCombatant.id, roll, natural);
-                if (resp?.error) window.alert(resp.error);
+                if (resp?.error) toastError(resp.error);
               }}
               // Ficha/Inventario son conceptos de personaje: no existen para un
               // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
