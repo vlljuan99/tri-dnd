@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { computeFloorVision } from './vision.js';
-import { rollInitiativeValue, ensureTurnStarted, activateTurnMode } from './turnEconomy.js';
+import { rollInitiativeDetailed, ensureTurnStarted, activateTurnMode } from './turnEconomy.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -91,6 +91,7 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     // interacción devuelve al jugador solo la consecuencia ya resuelta.
     successConsequence: forPlayer ? undefined : row.success_consequence ?? '',
     failureConsequence: forPlayer ? undefined : row.failure_consequence ?? '',
+    consequenceScope: forPlayer ? undefined : row.consequence_scope ?? 'player',
     // La CD de detección y el alcance de criaturas son herramientas del DM.
     // Una trampa oculta ni siquiera llega al jugador; al descubrirse tampoco
     // se filtra su CD, para no revelar más información de la necesaria.
@@ -274,8 +275,9 @@ export function spawnRoomEnemies(campaignId, roomIds) {
       .map((r) => r.map_token_id)
   );
   const insert = db.prepare(
-    `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac, monster_index, map_token_id, overrides)
-     VALUES (?, 'enemigo', ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO combatants (campaign_id, kind, name, initiative, hp_current, hp_max, ac,
+     monster_index, map_token_id, overrides, initiative_source, initiative_d20, initiative_mod)
+     VALUES (?, 'enemigo', ?, ?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?)`
   );
 
   let added = 0;
@@ -318,9 +320,24 @@ export function spawnRoomEnemies(campaignId, roomIds) {
     if (Number.isInteger(overrides.ac)) ac = overrides.ac;
 
     // Iniciativa tirada sola (1d20+DES del monstruo), como cualquier otro
-    // combatiente que se une con el modo por turnos activo
-    const initiative = rollInitiativeValue({ kind: 'enemigo', monster_index: enemy.monster_index });
-    insert.run(campaignId, enemy.name, initiative, hp, hp, ac, enemy.monster_index, enemy.id, enemy.overrides || '{}');
+    // combatiente que se une con el modo por turnos activo. Se guarda el
+    // desglose y el origen 'auto': sin ellos el tracker mostraría a estos
+    // enemigos como «sin tirar» pese a tener iniciativa, y «respetar las
+    // existentes» al abrir el combate volvería a tirar por ellos.
+    const roll = rollInitiativeDetailed({ kind: 'enemigo', monster_index: enemy.monster_index });
+    insert.run(
+      campaignId,
+      enemy.name,
+      roll.total,
+      hp,
+      hp,
+      ac,
+      enemy.monster_index,
+      enemy.id,
+      enemy.overrides || '{}',
+      roll.d20,
+      roll.modifier
+    );
     added += 1;
   }
   let startedCombat = false;

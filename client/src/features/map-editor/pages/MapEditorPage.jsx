@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import BestiaryBrowser from '../../../components/BestiaryBrowser.jsx';
 import SrdPicker from '../../../components/SrdPicker.jsx';
 import { useMapEditor } from '../hooks/useMapEditor.js';
 import { buildObjectMarkerLoot } from '../lib/objectMarker.js';
 import { applyWallStroke } from '../lib/wallBrush.js';
+import { readMapCreationIntent } from '../lib/mapCreationIntent.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
 import DoorPanel from '../components/DoorPanel.jsx';
 import TokenPanel from '../components/TokenPanel.jsx';
+import MapSettingsSection from '../components/MapSettingsSection.jsx';
 
 const TOKEN_KINDS = [
   { key: 'enemigo', label: 'Enemigo' },
@@ -32,24 +34,71 @@ const ROOM_TEMPLATES = [
 ];
 
 const toolButton = (active) =>
-  `rounded-sm border px-3 py-1 font-display text-xs uppercase tracking-widest ${
+  `shrink-0 rounded-sm border px-3 py-1 font-display text-xs uppercase tracking-widest ${
     active ? 'border-gold bg-gold/15 text-gold' : 'border-bone/20 text-bone/60 hover:border-bone/40'
+  }`;
+
+// Las diez herramientas agrupadas en tres capas de trabajo, que son tres
+// momentos de la cabeza del DM: dibujar la planta (Estructura), poblarla
+// (Contenido) y darle propiedades a las casillas (Ambiente). Mientras una
+// herramienta está activa, el lienzo atenúa las otras dos capas.
+const TOOL_LAYERS = [
+  {
+    id: 'estructura',
+    label: 'Estructura',
+    tools: [
+      { mode: 'add-room', label: 'Añadir sala' },
+      { mode: 'door', label: 'Puertas' },
+      { mode: 'wall', label: 'Paredes' },
+    ],
+  },
+  {
+    id: 'contenido',
+    label: 'Contenido',
+    tools: [
+      { mode: 'token', label: 'Marcadores' },
+      { mode: 'obstacle', label: 'Obstáculos' },
+      { mode: 'spawn', label: 'Aparición' },
+    ],
+  },
+  {
+    id: 'ambiente',
+    label: 'Ambiente',
+    tools: [
+      { mode: 'light', label: 'Luces' },
+      { mode: 'elevation', label: 'Elevación' },
+      { mode: 'terrain', label: 'Terreno' },
+    ],
+  },
+];
+
+const layerTabButton = (active) =>
+  `shrink-0 rounded-sm px-3 py-1 font-display text-xs uppercase tracking-widest ${
+    active ? 'bg-gold text-night-950' : 'text-bone/55 hover:bg-bone/10 hover:text-bone'
   }`;
 
 export default function MapEditorPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const campaignId = Number(id);
+  const {
+    requestedMapId,
+    createMapIntent,
+    requestedMapName,
+    requestedLocationId,
+    returnToWorld,
+  } = readMapCreationIntent(searchParams);
   const [campaign, setCampaign] = useState(null);
   const [campaignError, setCampaignError] = useState('');
 
-  const requestedMapId = Number(searchParams.get('mapa')) || null;
   const editor = useMapEditor(campaignId, { initialMapId: requestedMapId });
   const { map, maps, busy, error } = editor;
 
   const [activeFloorId, setActiveFloorId] = useState(null);
   const [selection, setSelection] = useState(null); // { type: 'room'|'door', id }
   const [mode, setMode] = useState('select'); // select | add-room | door | token
+  const [activeLayer, setActiveLayer] = useState('estructura'); // estructura | contenido | ambiente
   const [template, setTemplate] = useState(ROOM_TEMPLATES[0]);
   const [customSize, setCustomSize] = useState({ width: 4, height: 4 });
   const [doorDraft, setDoorDraft] = useState(null); // { roomId, x, y }
@@ -57,7 +106,7 @@ export default function MapEditorPage() {
   // el pincel de paredes); 'link' = escalera/portal entre salas o plantas
   // distintas (dos clics)
   const [doorPlacement, setDoorPlacement] = useState('edge');
-  const [newMapName, setNewMapName] = useState('');
+  const [newMapName, setNewMapName] = useState(createMapIntent ? requestedMapName : '');
   const [tokenKind, setTokenKind] = useState('enemigo');
   const [tokenName, setTokenName] = useState('');
   const [terrainCost, setTerrainCost] = useState(2); // coste del pincel de terreno difícil
@@ -71,7 +120,11 @@ export default function MapEditorPage() {
   const [tokenTemplateId, setTokenTemplateId] = useState(''); // plantilla de enemigo configurado
   const [templates, setTemplates] = useState([]); // biblioteca de plantillas del DM (v35)
   const [notice, setNotice] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [showEmptyMapGuide, setShowEmptyMapGuide] = useState(true);
   const uvttInputRef = useRef(null);
+  const createIntentHandledRef = useRef(false);
 
   useEffect(() => {
     api('/characters')
@@ -110,6 +163,42 @@ export default function MapEditorPage() {
       .catch((e) => setCampaignError(e.message));
   }, [campaignId]);
 
+  // Una ubicación del mundo sin tableros ofrece una CTA explícita. Al llegar
+  // desde ella creamos el primer tablero, lo enlazamos y dejamos al DM dentro
+  // del lienzo; la cabecera conserva el camino de vuelta al mundo.
+  useEffect(() => {
+    if (
+      campaign?.role !== 'dm' ||
+      !createMapIntent ||
+      maps === null ||
+      createIntentHandledRef.current
+    ) {
+      return;
+    }
+
+    createIntentHandledRef.current = true;
+    editor
+      .createMap(requestedMapName)
+      .then(async (created) => {
+        if (requestedLocationId) {
+          await api(`/campaigns/${campaignId}/mundo/ubicaciones/${requestedLocationId}`, {
+            method: 'PATCH',
+            body: { mapId: created.id },
+          });
+          flash(`Tablero «${created.name}» creado y enlazado a la ubicación.`);
+        }
+        const nextParams = new URLSearchParams({ mapa: String(created.id) });
+        if (returnToWorld) nextParams.set('volver', 'mundo');
+        navigate(`/campanas/${campaignId}/editor?${nextParams.toString()}`, { replace: true });
+      })
+      .catch(() => {
+        createIntentHandledRef.current = false;
+      });
+    // El objeto editor se recrea en cada render; las dependencias primitivas
+    // describen por completo cuándo debe consumirse esta intención una sola vez.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign?.role, maps, createMapIntent, requestedMapName, requestedLocationId, returnToWorld, campaignId, navigate]);
+
   // Planta activa: la primera del mapa al cargarlo o si la actual desapareció
   useEffect(() => {
     if (!map) return;
@@ -122,7 +211,14 @@ export default function MapEditorPage() {
   useEffect(() => {
     setSelection(null);
     setDoorDraft(null);
+    setSettingsOpen(false);
+    setRightPanelOpen(false);
+    setShowEmptyMapGuide(true);
   }, [editor.selectedMapId]);
+
+  useEffect(() => {
+    if (selection) setRightPanelOpen(true);
+  }, [selection?.type, selection?.id]);
 
   const activeFloor = map?.floors.find((f) => f.id === activeFloorId) ?? null;
   const allRooms = useMemo(() => (map ? map.floors.flatMap((f) => f.rooms) : []), [map]);
@@ -137,6 +233,7 @@ export default function MapEditorPage() {
     selection?.type === 'door' ? map?.doors.find((d) => d.id === selection.id) ?? null : null;
   const selectedToken =
     selection?.type === 'token' ? (map?.tokens ?? []).find((t) => t.id === selection.id) ?? null : null;
+  const selectedElement = selectedRoom ?? selectedDoor ?? selectedToken;
 
   function templateSize() {
     return template.key === 'libre' ? customSize : { width: template.width, height: template.height };
@@ -276,6 +373,34 @@ export default function MapEditorPage() {
     await editor.patchRoom(room.id, { spawnCells: next });
   }
 
+  // Activa una herramienta conservando el matiz de cada una: elegir una de
+  // colocado limpia la selección, y solo la de puertas conserva la puerta a
+  // medio crear.
+  function activateTool(nextMode) {
+    setSettingsOpen(false);
+    setMode(nextMode);
+    if (nextMode !== 'select') setSelection(null);
+    if (nextMode !== 'door') setDoorDraft(null);
+  }
+
+  function switchLayer(layerId) {
+    setSettingsOpen(false);
+    setActiveLayer(layerId);
+    const layer = TOOL_LAYERS.find((candidate) => candidate.id === layerId);
+    if (!layer.tools.some((tool) => tool.mode === mode)) {
+      setMode('select');
+      setDoorDraft(null);
+    }
+  }
+
+  function openSettings() {
+    setSettingsOpen(true);
+    setMode('select');
+    setSelection(null);
+    setDoorDraft(null);
+    setRightPanelOpen(false);
+  }
+
   // Sala de la planta activa que contiene una casilla activa (no desactivada)
   function roomAtCell(x, y) {
     if (!activeFloor) return null;
@@ -375,7 +500,7 @@ export default function MapEditorPage() {
   if (campaign.role !== 'dm') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-night-950 text-bone">
-        <p className="font-display text-xl text-blood">Solo el DM puede entrar al editor de campaña.</p>
+        <p className="font-display text-xl text-blood">Solo el DM puede entrar al editor de mapas.</p>
         <Link to={`/campanas/${campaignId}`} className="text-gold underline">Volver a la mesa</Link>
       </div>
     );
@@ -385,18 +510,47 @@ export default function MapEditorPage() {
     <div className="flex h-full flex-col bg-night-950 text-bone">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gold/20 bg-night-900 px-4 py-2">
         <div className="flex items-center gap-3">
-          <Link to={`/campanas/${campaignId}`} className="font-display text-sm text-gold/70 hover:text-gold">
-            ← Mesa
+          <Link
+            to={returnToWorld ? `/campanas/${campaignId}/mundo` : `/campanas/${campaignId}/taller/mapas`}
+            className="font-display text-sm text-gold/70 hover:text-gold"
+          >
+            {returnToWorld ? '← Mapa de mundo' : '← Taller'}
           </Link>
-          <h1 className="font-display text-xl tracking-wide text-gold">Editor de campaña</h1>
+          <h1 className="font-display text-xl tracking-wide text-gold">Editor de mapas</h1>
           <span className="text-sm text-bone/60">{campaign.name}</span>
+          <Link to={`/campanas/${campaignId}`} className="text-xs text-bone/50 underline hover:text-gold">
+            Mesa
+          </Link>
         </div>
-        {error && <p className="text-sm text-blood">{error}</p>}
+        <div className="flex items-center gap-2">
+          {error && <p className="text-sm text-blood">{error}</p>}
+          {selectedElement && !settingsOpen && (
+            <button
+              type="button"
+              onClick={() => setRightPanelOpen((open) => !open)}
+              className="rounded-sm border border-gold/25 px-2.5 py-1 text-xs text-gold/80 hover:border-gold hover:bg-gold/10"
+            >
+              {rightPanelOpen ? 'Ocultar inspector' : 'Editar selección'}
+            </button>
+          )}
+        </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <input
+        ref={uvttInputRef}
+        type="file"
+        accept=".dd2vtt,.uvtt,.df2vtt,.json,application/json"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) editor.importUvtt(file).catch(() => {});
+          event.target.value = '';
+        }}
+      />
+
+      <div className="relative flex min-h-0 flex-1">
         {/* Biblioteca de mapas */}
-        <aside className="flex w-60 shrink-0 flex-col border-r border-gold/15 bg-night-900/60">
+        {maps?.length > 0 && <aside className="hidden w-60 shrink-0 flex-col border-r border-gold/15 bg-night-900/60 md:flex">
           <p className="px-3 pb-1 pt-3 font-display text-xs uppercase tracking-widest text-gold/80">
             Mapas de la campaña
           </p>
@@ -433,17 +587,6 @@ export default function MapEditorPage() {
             >
               Importar UVTT (.dd2vtt)
             </button>
-            <input
-              ref={uvttInputRef}
-              type="file"
-              accept=".dd2vtt,.uvtt,.df2vtt,.json,application/json"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) editor.importUvtt(file).catch(() => {});
-                e.target.value = '';
-              }}
-            />
             {mapTemplates.length > 0 && (
               <select
                 value=""
@@ -534,13 +677,22 @@ export default function MapEditorPage() {
               ))
             )}
           </div>
-        </aside>
+        </aside>}
 
         {/* Lienzo y herramientas */}
         <main className="flex min-w-0 flex-1 flex-col">
           {map ? (
             <>
-              <div className="flex flex-wrap items-center gap-2 border-b border-gold/15 bg-night-900/40 px-3 py-2">
+              <div className="shrink-0 border-b border-gold/15 bg-night-900/40">
+              <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap border-b border-gold/10 px-3 py-1.5 [scrollbar-width:thin]">
+                <select
+                  value={editor.selectedMapId ?? ''}
+                  onChange={(event) => editor.setSelectedMapId(Number(event.target.value))}
+                  className="max-w-44 rounded-sm border border-gold/25 bg-night-950 px-2 py-1 text-xs text-gold md:hidden"
+                  aria-label="Mapa en edición"
+                >
+                  {maps.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
                 {/* Plantas */}
                 <div className="flex items-center gap-1">
                   {map.floors.map((f) => (
@@ -585,37 +737,49 @@ export default function MapEditorPage() {
 
                 <span className="mx-1 h-5 w-px bg-gold/15" />
 
-                {/* Modos */}
-                <button type="button" onClick={() => { setMode('select'); setDoorDraft(null); }} className={toolButton(mode === 'select')}>
+                {/* Capas de trabajo */}
+                <button type="button" onClick={() => activateTool('select')} className={toolButton(mode === 'select' && !settingsOpen)}>
                   Seleccionar
                 </button>
-                <button type="button" onClick={() => { setMode('add-room'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'add-room')}>
-                  Añadir sala
-                </button>
-                <button type="button" onClick={() => { setMode('door'); setSelection(null); }} className={toolButton(mode === 'door')}>
-                  Puerta
-                </button>
-                <button type="button" onClick={() => { setMode('token'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'token')}>
-                  Marcador
-                </button>
-                <button type="button" onClick={() => { setMode('obstacle'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'obstacle')}>
-                  Obstáculos
-                </button>
-                <button type="button" onClick={() => { setMode('wall'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'wall')}>
-                  Paredes
-                </button>
-                <button type="button" onClick={() => { setMode('elevation'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'elevation')}>
-                  Elevación
-                </button>
-                <button type="button" onClick={() => { setMode('light'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'light')}>
-                  Luces
-                </button>
-                <button type="button" onClick={() => { setMode('terrain'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'terrain')}>
-                  Terreno
-                </button>
-                <button type="button" onClick={() => { setMode('spawn'); setSelection(null); setDoorDraft(null); }} className={toolButton(mode === 'spawn')}>
-                  Aparición
-                </button>
+                <span className="mx-1 h-5 w-px bg-gold/15" />
+                <div className="flex shrink-0 items-center gap-0.5 rounded-sm border border-bone/15 p-0.5">
+                  {TOOL_LAYERS.map((layer) => (
+                    <button
+                      key={layer.id}
+                      type="button"
+                      onClick={() => switchLayer(layer.id)}
+                      className={layerTabButton(activeLayer === layer.id && !settingsOpen)}
+                    >
+                      {layer.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={openSettings}
+                    className={layerTabButton(settingsOpen)}
+                  >
+                    Ajustes
+                  </button>
+                </div>
+              </div>
+
+              {/* Herramientas de la capa activa y controles contextuales */}
+              {!settingsOpen && <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap px-3 py-1.5 [scrollbar-width:thin]">
+                {TOOL_LAYERS.find((layer) => layer.id === activeLayer).tools.map((tool) => (
+                  <button
+                    key={tool.mode}
+                    type="button"
+                    onClick={() => activateTool(mode === tool.mode ? 'select' : tool.mode)}
+                    className={toolButton(mode === tool.mode)}
+                  >
+                    {tool.label}
+                  </button>
+                ))}
+                {mode === 'select' && (
+                  <span className="text-xs italic text-bone/40">
+                    elige una herramienta, o pulsa una pieza del plano para editarla
+                  </span>
+                )}
 
                 {mode === 'add-room' && (
                   <>
@@ -716,7 +880,7 @@ export default function MapEditorPage() {
                 {mode === 'light' && (
                   <span className="text-xs italic text-bone/50">
                     clic en una casilla para poner o quitar una fuente de luz (brasero, vela…); las antorchas
-                    automáticas de pared se configuran en el panel del mapa
+                    automáticas de pared se configuran en «Ajustes»
                   </span>
                 )}
                 {mode === 'elevation' && (
@@ -878,46 +1042,177 @@ export default function MapEditorPage() {
                     <span className="text-xs italic text-bone/50">clic en una sala para colocarlo</span>
                   </>
                 )}
+              </div>}
               </div>
 
-              <EditorCanvas
-                floor={activeFloor}
-                doors={map.doors}
-                tokens={floorTokens}
-                selection={selection}
-                mode={mode}
-                doorDraft={doorDraft}
-                doorPlacement={doorPlacement}
-                wallColor={map.wallColor}
-                busy={busy}
-                onSelect={setSelection}
-                onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
-                onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
-                onDoorEdgeClick={(edge) => doorEdgeClick(edge).catch(() => {})}
-                onTokenCellClick={(target) => placeToken(target).catch(() => {})}
-                onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
-                onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}
-                onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
-                onWallStroke={saveWallStroke}
-                onElevationCellClick={(target) => toggleElevation(target).catch(() => {})}
-                onLightCellClick={(target) => toggleLight(target).catch(() => {})}
-                onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
-                onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
-              />
+              {settingsOpen ? (
+                <MapSettingsSection
+                  map={map}
+                  busy={busy}
+                  onRename={(mapId, name) => editor.renameMap(mapId, name).catch(() => {})}
+                  onPatch={(mapId, fields) => editor.patchMap(mapId, fields).catch(() => {})}
+                  onActivate={(mapId) => editor.activateMap(mapId).catch(() => {})}
+                  onBack={() => setSettingsOpen(false)}
+                />
+              ) : (
+                <div className="relative flex min-h-0 flex-1">
+                  <EditorCanvas
+                    floor={activeFloor}
+                    doors={map.doors}
+                    tokens={floorTokens}
+                    selection={selection}
+                    mode={mode}
+                    activeLayer={activeLayer}
+                    doorDraft={doorDraft}
+                    doorPlacement={doorPlacement}
+                    wallColor={map.wallColor}
+                    busy={busy}
+                    onSelect={(nextSelection) => {
+                      setSelection(nextSelection);
+                      if (nextSelection) setRightPanelOpen(true);
+                    }}
+                    onPlaceRoom={(cellPos) => placeRoom(cellPos).catch(() => {})}
+                    onDoorCellClick={(end) => doorCellClick(end).catch(() => {})}
+                    onDoorEdgeClick={(edge) => doorEdgeClick(edge).catch(() => {})}
+                    onTokenCellClick={(target) => placeToken(target).catch(() => {})}
+                    onObstacleCellClick={(target) => toggleObstacle(target).catch(() => {})}
+                    onTerrainCellClick={(target) => toggleTerrain(target).catch(() => {})}
+                    onSpawnCellClick={(target) => toggleSpawn(target).catch(() => {})}
+                    onWallStroke={saveWallStroke}
+                    onElevationCellClick={(target) => toggleElevation(target).catch(() => {})}
+                    onLightCellClick={(target) => toggleLight(target).catch(() => {})}
+                    onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
+                    onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
+                  />
+                  {allRooms.length === 0 && showEmptyMapGuide && mode === 'select' && (
+                    <div className="absolute left-1/2 top-5 z-10 w-[min(24rem,calc(100%-2rem))] -translate-x-1/2 rounded-md border border-gold/30 bg-night-900/95 p-4 text-center shadow-xl shadow-black/30 backdrop-blur">
+                      <button
+                        type="button"
+                        onClick={() => setShowEmptyMapGuide(false)}
+                        aria-label="Cerrar ayuda inicial"
+                        className="absolute right-2 top-1.5 px-1 text-bone/40 hover:text-bone"
+                      >
+                        ✕
+                      </button>
+                      <p className="font-display text-base text-gold">Empieza por la primera sala</p>
+                      <p className="mt-1 text-xs text-bone/55">Elige su forma y colócala en cualquier casilla de la rejilla.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveLayer('estructura');
+                          activateTool('add-room');
+                          setShowEmptyMapGuide(false);
+                        }}
+                        className="mt-3 rounded-sm bg-gold px-4 py-2 font-display text-sm text-night-950 hover:bg-gold/90"
+                      >
+                        + Añadir la primera sala
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center">
-              <p className="max-w-sm text-bone/60">
-                {maps?.length
-                  ? 'Selecciona un mapa de la biblioteca para editarlo.'
-                  : 'Crea tu primer mapa: podrás componerlo con salas, pasillos y salones conectados por puertas, y llevarlo a la mesa cuando esté listo.'}
-              </p>
+            <div className="flex flex-1 items-center justify-center overflow-y-auto p-6">
+              {maps === null ? (
+                <p className="font-display text-lg text-gold">Cargando mapas…</p>
+              ) : maps.length > 0 ? (
+                <p className="max-w-sm text-center text-bone/60">Selecciona un mapa de la biblioteca para editarlo.</p>
+              ) : (
+                <div className="w-full max-w-xl rounded-lg border border-gold/20 bg-night-900/55 p-6 text-center shadow-xl shadow-black/15">
+                  <p className="text-[0.65rem] uppercase tracking-[0.22em] text-gold/55">Primer paso</p>
+                  <h2 className="mt-2 font-display text-2xl text-gold">
+                    {createMapIntent ? `Creando «${requestedMapName}»` : 'Crea tu primer tablero'}
+                  </h2>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-bone/55">
+                    Empieza en blanco, importa un UVTT o reutiliza una plantilla. Después podrás añadir salas y llevarlo a la mesa.
+                  </p>
+                  {createMapIntent && busy ? (
+                    <p className="mt-5 text-sm text-sage">Creando y enlazando el tablero a la ubicación…</p>
+                  ) : (
+                    <>
+                      <form
+                        className="mx-auto mt-5 flex max-w-md flex-col gap-2 sm:flex-row"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const name = newMapName.trim();
+                          if (!name) return;
+                          editor.createMap(name).catch(() => {});
+                          setNewMapName('');
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={newMapName}
+                          maxLength={80}
+                          onChange={(event) => setNewMapName(event.target.value)}
+                          placeholder="Cripta inferior, Taberna del puerto…"
+                          className="min-w-0 flex-1 rounded-sm border border-gold/25 bg-night-950 px-3 py-2 text-sm text-bone placeholder:text-bone/30 focus:border-gold focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          disabled={busy || !newMapName.trim()}
+                          className="rounded-sm bg-gold px-4 py-2 font-display text-sm text-night-950 hover:bg-gold/90 disabled:opacity-40"
+                        >
+                          Crear y empezar →
+                        </button>
+                      </form>
+                      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => uvttInputRef.current?.click()}
+                          className="rounded-sm border border-gold/30 px-3 py-2 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+                        >
+                          Importar UVTT
+                        </button>
+                        {mapTemplates.length > 0 && (
+                          <select
+                            value=""
+                            disabled={busy}
+                            onChange={(event) => {
+                              if (event.target.value) editor.createMapFromTemplate(Number(event.target.value)).catch(() => {});
+                              event.target.value = '';
+                            }}
+                            className="rounded-sm border border-gold/30 bg-night-950 px-3 py-2 text-xs text-gold focus:border-gold focus:outline-none"
+                          >
+                            <option value="">Crear desde plantilla…</option>
+                            {mapTemplates.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </main>
 
         {/* Panel derecho contextual */}
-        <aside className="w-72 shrink-0 overflow-y-auto border-l border-gold/15 bg-night-900/60">
+        {selectedElement && rightPanelOpen && !settingsOpen && <aside className="absolute inset-y-0 right-0 z-20 w-[min(20rem,92vw)] shrink-0 overflow-y-auto border-l border-gold/15 bg-night-900/95 shadow-2xl shadow-black/25 xl:static xl:z-auto xl:w-80 xl:bg-night-900/70">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gold/15 bg-night-900/95 px-3 py-2 backdrop-blur">
+            <div className="min-w-0">
+              <p className="truncate font-display text-sm tracking-wide text-gold">
+                {selectedRoom
+                  ? `Sala · ${selectedRoom.name}`
+                  : selectedDoor
+                    ? 'Puerta / conexión'
+                    : selectedToken
+                      ? `${selectedToken.kind === 'objeto' ? 'Objeto' : selectedToken.kind} · ${selectedToken.name}`
+                      : ''}
+              </p>
+              <p className="text-[0.65rem] text-bone/40">Cambios del elemento seleccionado</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRightPanelOpen(false)}
+              aria-label="Cerrar inspector"
+              className="rounded-sm px-2 py-1 text-bone/50 hover:bg-bone/5 hover:text-bone"
+            >
+              ✕
+            </button>
+          </div>
           {selectedRoom ? (
             <RoomPanel
               room={selectedRoom}
@@ -943,7 +1238,7 @@ export default function MapEditorPage() {
                 editor.deleteDoor(doorId).catch(() => {});
               }}
             />
-          ) : selectedToken ? (
+          ) : (
             <TokenPanel
               token={selectedToken}
               roomName={allRooms.find((r) => r.id === selectedToken.roomId)?.name || 'Sala'}
@@ -955,93 +1250,8 @@ export default function MapEditorPage() {
                 editor.deleteToken(tokenId).catch(() => {});
               }}
             />
-          ) : map ? (
-            <div className="space-y-3 p-3 text-sm text-bone/60">
-              <div>
-                <p className="text-[0.65rem] uppercase tracking-widest text-bone/50">Mapa</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const name = window.prompt('Nombre del mapa', map.name);
-                    if (name?.trim()) editor.renameMap(map.id, name.trim());
-                  }}
-                  className="font-display text-base text-gold hover:underline"
-                  title="Renombrar"
-                >
-                  {map.name}
-                </button>
-                {map.isActive && (
-                  <p className="mt-1 text-[0.65rem] uppercase tracking-widest text-sage">● En la mesa</p>
-                )}
-              </div>
-
-              <div className="border-t border-gold/15 pt-3">
-                <p className="text-[0.65rem] uppercase tracking-widest text-bone/50">
-                  Visión de los jugadores
-                </p>
-                <select
-                  value={map.visionMode ?? 'sala'}
-                  onChange={(e) => editor.patchMap(map.id, { visionMode: e.target.value }).catch(() => {})}
-                  className="mt-1 w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none"
-                >
-                  <option value="sala">Sala completa (sin niebla fina)</option>
-                  <option value="compartida">Compartida: lo que ve el grupo</option>
-                  <option value="individual">Individual: cada cual lo suyo</option>
-                </select>
-                {map.visionMode !== 'sala' && (
-                  <label className="mt-2 flex items-center gap-2 text-xs text-bone/70">
-                    Radio de visión
-                    <input
-                      type="number"
-                      min={1}
-                      max={30}
-                      defaultValue={map.visionRadius ?? 6}
-                      key={`radius-${map.id}-${map.visionRadius}`}
-                      onBlur={(e) => {
-                        const value = Number.parseInt(e.target.value, 10);
-                        if (Number.isInteger(value) && value !== map.visionRadius) {
-                          editor.patchMap(map.id, { visionRadius: value }).catch(() => {});
-                        }
-                      }}
-                      className="w-16 rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-sm text-bone focus:border-gold focus:outline-none"
-                    />
-                    casillas
-                  </label>
-                )}
-                <p className="mt-1 text-[0.65rem] text-bone/45">
-                  Con niebla fina, los obstáculos y las paredes bloquean la línea de visión.
-                </p>
-              </div>
-
-              <div className="border-t border-gold/15 pt-3">
-                <p className="text-[0.65rem] uppercase tracking-widest text-bone/50">
-                  Antorchas de pared
-                </p>
-                <select
-                  value={map.wallLightEvery ?? 4}
-                  onChange={(e) => editor.patchMap(map.id, { wallLightEvery: Number(e.target.value) }).catch(() => {})}
-                  className="mt-1 w-full rounded-sm border border-gold/20 bg-night-950 px-2 py-1.5 text-sm text-bone focus:border-gold focus:outline-none"
-                >
-                  <option value={0}>Desactivadas (solo luces a mano)</option>
-                  {[2, 3, 4, 5, 6, 8].map((n) => (
-                    <option key={n} value={n}>Cada {n} casillas</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-[0.65rem] text-bone/45">
-                  Las paredes del mapa lucen una antorcha cada N casillas. Con el pincel «Luces» añades
-                  braseros o velas donde quieras.
-                </p>
-              </div>
-
-              <ul className="list-inside list-disc space-y-1 text-xs">
-                <li>Arrastra una sala para recolocarla; combina pasillos y salones pegándolos.</li>
-                <li>Las salas <span className="text-bone">ocultas</span> (borde discontinuo) no existen para los jugadores hasta que las reveles.</li>
-                <li>Una puerta con control del DM (roja) solo se abre desde aquí o desde la mesa.</li>
-                <li>Escaleras y portales conectan plantas distintas.</li>
-              </ul>
-            </div>
-          ) : null}
-        </aside>
+          )}
+        </aside>}
       </div>
 
       {showMonsterPicker && (

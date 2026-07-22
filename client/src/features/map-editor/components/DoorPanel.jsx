@@ -21,6 +21,19 @@ export default function DoorPanel({ door, rooms, busy, onPatch, onDelete }) {
         </p>
       </div>
 
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onPatch(door.id, { isOpen: !door.isOpen })}
+        className={`w-full rounded-sm border px-3 py-2 font-display text-sm disabled:opacity-40 ${
+          door.isOpen
+            ? 'border-sage/60 bg-sage/5 text-sage hover:bg-sage/10'
+            : 'border-bone/30 text-bone/70 hover:bg-bone/5'
+        }`}
+      >
+        {door.isOpen ? 'Abierta — cerrar' : 'Cerrada — abrir'}
+      </button>
+
       <div>
         <p className={labelClass}>Tipo</p>
         <div className="mt-1 flex gap-1">
@@ -106,19 +119,6 @@ export default function DoorPanel({ door, rooms, busy, onPatch, onDelete }) {
           )}
         </div>
       </div>
-
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onPatch(door.id, { isOpen: !door.isOpen })}
-        className={`w-full rounded-sm border px-3 py-1.5 font-display text-sm disabled:opacity-40 ${
-          door.isOpen
-            ? 'border-sage/60 text-sage hover:bg-sage/10'
-            : 'border-bone/30 text-bone/70 hover:bg-bone/5'
-        }`}
-      >
-        {door.isOpen ? 'Abierta — cerrar' : 'Cerrada — abrir'}
-      </button>
 
       <div className="border-t border-gold/15 pt-3">
         <button

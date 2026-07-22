@@ -148,6 +148,7 @@ export default function EditorCanvas({
   tokens = [],
   selection,
   mode,
+  activeLayer = null,
   doorDraft,
   doorPlacement = 'edge',
   wallColor = '#9b8555',
@@ -177,6 +178,17 @@ export default function EditorCanvas({
   const cell = BASE_CELL * zoom;
 
   const rooms = floor?.rooms ?? [];
+
+  // Atenuación por capas: mientras hay una herramienta activa, los elementos
+  // de las otras dos capas se apagan para destacar lo que se está tocando.
+  // En modo selección todo luce a plena intensidad. Las salas y la rejilla
+  // son la base y nunca se atenúan.
+  const layerOpacity = (layer) =>
+    mode !== 'select' && activeLayer && activeLayer !== layer ? 0.22 : 1;
+  const structureDim = layerOpacity('estructura');
+  const contentDim = layerOpacity('contenido');
+  const ambientDim = layerOpacity('ambiente');
+
   const bounds = useMemo(() => floorBounds(rooms), [rooms]);
   const cols = bounds.maxX - bounds.minX;
   const rows = bounds.maxY - bounds.minY;
@@ -611,10 +623,11 @@ export default function EditorCanvas({
                   fill="#5a4632"
                   stroke="#2c2117"
                   strokeWidth={1.5}
+                  opacity={contentDim}
                 />
               ))}
               {(room.terrainCells ?? []).map(([c, r, cost]) => (
-                <g key={`terr-${c},${r}`} className="pointer-events-none">
+                <g key={`terr-${c},${r}`} className="pointer-events-none" opacity={ambientDim}>
                   <rect
                     x={pos.left + c * cell + 1}
                     y={pos.top + r * cell + 1}
@@ -648,11 +661,12 @@ export default function EditorCanvas({
                   stroke="#e8c368"
                   strokeWidth={2}
                   strokeDasharray="3 2"
+                  opacity={contentDim}
                 />
               ))}
               {/* Elevación: tinte (azul foso / cálido plataforma) + número de nivel */}
               {(room.elevationCells ?? []).map(([c, r, level]) => (
-                <g key={`elev-${c},${r}`} className="pointer-events-none">
+                <g key={`elev-${c},${r}`} className="pointer-events-none" opacity={ambientDim}>
                   <rect
                     x={pos.left + c * cell + 1}
                     y={pos.top + r * cell + 1}
@@ -675,7 +689,7 @@ export default function EditorCanvas({
               ))}
               {/* Fuentes de luz manuales: brasa cálida con halo */}
               {(room.lightCells ?? []).map(([c, r]) => (
-                <g key={`light-${c},${r}`} className="pointer-events-none">
+                <g key={`light-${c},${r}`} className="pointer-events-none" opacity={ambientDim}>
                   <circle
                     cx={pos.left + c * cell + cell / 2}
                     cy={pos.top + r * cell + cell / 2}
@@ -714,7 +728,7 @@ export default function EditorCanvas({
                     stroke={wallColor}
                     strokeWidth={Math.max(4, cell * 0.22)}
                     strokeLinecap="round"
-                    opacity={0.95}
+                    opacity={0.95 * structureDim}
                     className="pointer-events-none"
                   />
                 );
@@ -770,6 +784,7 @@ export default function EditorCanvas({
 
         {/* Línea entre los dos extremos de una escalera/portal (las puertas en
             muro se dibujan sobre su arista, sin línea) */}
+        <g opacity={structureDim}>
         {doors.map((door) => {
           const displayDoor = doorForScreen(door);
           if (isEdgeDoor(displayDoor)) return null;
@@ -836,6 +851,7 @@ export default function EditorCanvas({
           }
           return markers;
         })}
+        </g>
 
         {/* Marcadores preparados: enemigos, aliados, objetos y trampas */}
         {tokens.map((token) => {
@@ -847,7 +863,7 @@ export default function EditorCanvas({
               key={`token-${token.id}`}
               onPointerDown={(e) => handleTokenPointerDown(e, token)}
               className={mode === 'select' ? 'cursor-move' : 'pointer-events-none'}
-              opacity={token.hidden ? 0.55 : 1}
+              opacity={(token.hidden ? 0.55 : 1) * contentDim}
             >
               <circle
                 cx={cx}

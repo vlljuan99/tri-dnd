@@ -653,7 +653,8 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
 
   const {
     kind = 'enemigo', name, x, y, monsterIndex, characterId, hidden, dc, skill,
-    perceptionDc, visionRadius, successConsequence, failureConsequence, loot,
+    perceptionDc, visionRadius, successConsequence, failureConsequence,
+    consequenceScope = 'player', loot,
   } = req.body ?? {};
   if (!TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
@@ -674,6 +675,9 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
   }
   if (failureConsequence !== undefined && !(typeof failureConsequence === 'string' && failureConsequence.length <= 2000)) {
     return res.status(400).json({ error: 'Consecuencia de fallo no válida' });
+  }
+  if (consequenceScope !== 'player' && consequenceScope !== 'party') {
+    return res.status(400).json({ error: 'Audiencia de consecuencia no válida' });
   }
   if (
     perceptionDc !== undefined && perceptionDc !== null &&
@@ -722,12 +726,13 @@ mapsRouter.post('/:mapId/salas/:roomId/fichas', (req, res) => {
     .prepare(
       `INSERT INTO map_tokens
        (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
-        success_consequence, failure_consequence, perception_dc, vision_radius, loot)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        success_consequence, failure_consequence, consequence_scope, perception_dc, vision_radius, loot)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       room.id, kind, cleanName, monsterIdx, bossId, x, y, isHidden, dc ?? null, skill ?? null,
       successConsequence ?? '', failureConsequence ?? '',
+      consequenceScope,
       perceptionDc ?? (kind === 'trampa' ? 10 : null), visionRadius ?? 6, lootJson
     );
   touchAndNotify(map);
@@ -772,7 +777,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
 
   const {
     name, x, y, hidden, kind, dc, skill, perceptionDc, visionRadius, successConsequence,
-    failureConsequence, overrides, loot,
+    failureConsequence, consequenceScope, overrides, loot,
   } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
@@ -791,6 +796,9 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   }
   if (failureConsequence !== undefined && !(typeof failureConsequence === 'string' && failureConsequence.length <= 2000)) {
     return res.status(400).json({ error: 'Consecuencia de fallo no válida' });
+  }
+  if (consequenceScope !== undefined && consequenceScope !== 'player' && consequenceScope !== 'party') {
+    return res.status(400).json({ error: 'Audiencia de consecuencia no válida' });
   }
   if (
     perceptionDc !== undefined && perceptionDc !== null &&
@@ -868,7 +876,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
 
   db.prepare(
     `UPDATE map_tokens SET room_id = ?, name = ?, x = ?, y = ?, hidden = ?, kind = ?, dc = ?, skill = ?,
-       success_consequence = ?, failure_consequence = ?, perception_dc = ?, vision_radius = ?, overrides = ?, loot = ?
+       success_consequence = ?, failure_consequence = ?, consequence_scope = ?, perception_dc = ?, vision_radius = ?, overrides = ?, loot = ?
        WHERE id = ?`
   ).run(
     roomId,
@@ -881,6 +889,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     skill !== undefined ? skill : token.skill,
     successConsequence !== undefined ? successConsequence : token.success_consequence,
     failureConsequence !== undefined ? failureConsequence : token.failure_consequence,
+    consequenceScope !== undefined ? consequenceScope : token.consequence_scope,
     perceptionDc !== undefined ? perceptionDc : token.perception_dc,
     visionRadius !== undefined ? visionRadius : token.vision_radius,
     overridesJson !== undefined ? overridesJson : token.overrides,

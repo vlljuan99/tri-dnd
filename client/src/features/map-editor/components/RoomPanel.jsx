@@ -72,6 +72,16 @@ export default function RoomPanel({
 
   return (
     <div className="space-y-4 p-3">
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy}
+        className="w-full rounded-sm bg-gold px-3 py-2 font-display text-sm text-night-950 hover:bg-gold/90 disabled:opacity-40"
+      >
+        Guardar sala
+      </button>
+
+      <p className={labelClass}>Propiedades esenciales</p>
       <div>
         <label className={labelClass} htmlFor="room-name">Nombre</label>
         <input id="room-name" className={inputClass} {...field('name')} />
@@ -101,20 +111,13 @@ export default function RoomPanel({
         <textarea id="room-notes" rows={3} className={inputClass} {...field('notes')} />
       </div>
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy}
-          className="flex-1 rounded-sm bg-gold/80 px-3 py-1.5 font-display text-sm text-night-950 hover:bg-gold disabled:opacity-40"
-        >
-          Guardar cambios
-        </button>
+      <div className="border-t border-gold/15 pt-3">
+        <p className={labelClass}>Visibilidad</p>
         <button
           type="button"
           onClick={() => onPatch(room.id, { revealed: !room.revealed })}
           disabled={busy}
-          className={`flex-1 rounded-sm border px-3 py-1.5 font-display text-sm disabled:opacity-40 ${
+          className={`mt-2 w-full rounded-sm border px-3 py-1.5 font-display text-sm disabled:opacity-40 ${
             room.revealed
               ? 'border-sage/60 text-sage hover:bg-sage/10'
               : 'border-bone/30 text-bone/70 hover:bg-bone/5'

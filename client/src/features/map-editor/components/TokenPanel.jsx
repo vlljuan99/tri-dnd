@@ -35,6 +35,7 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
   const [loot, setLoot] = useState(token.loot ?? []);
   const [successConsequence, setSuccessConsequence] = useState(token.successConsequence ?? '');
   const [failureConsequence, setFailureConsequence] = useState(token.failureConsequence ?? '');
+  const [consequenceScope, setConsequenceScope] = useState(token.consequenceScope ?? 'player');
   const [lootPicker, setLootPicker] = useState(false);
   const [lootText, setLootText] = useState('');
 
@@ -44,6 +45,7 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
     setLoot(token.loot ?? []);
     setSuccessConsequence(token.successConsequence ?? '');
     setFailureConsequence(token.failureConsequence ?? '');
+    setConsequenceScope(token.consequenceScope ?? 'player');
   }, [token]);
 
   const isEnemy = token.kind === 'enemigo';
@@ -332,10 +334,13 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
 
       {(token.kind === 'objeto' || token.kind === 'trampa') && (
         <div>
-          <p className={labelClass}>Interacción (opcional)</p>
+          <p className={labelClass}>
+            {token.kind === 'objeto' && loot.length > 0 ? 'Recogida e interacción' : 'Interacción (opcional)'}
+          </p>
           <p className="mt-1 text-xs text-bone/50">
-            Si pides una habilidad, interactuar cuesta la acción del turno y el jugador tiene que tirar
-            contra la dificultad (oculta hasta que resuelve el intento).
+            {token.kind === 'objeto' && loot.length > 0
+              ? 'Al recoger el botín se revela la consecuencia configurada. También puedes pedir una tirada si el objeto se examina antes.'
+              : 'Si pides una habilidad, interactuar cuesta la acción del turno y el jugador tira contra una dificultad oculta.'}
           </p>
           <div className="mt-1.5 flex gap-1.5">
             <select
@@ -370,7 +375,11 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
           </div>
           <div className="mt-3 space-y-2">
             <label className="block">
-              <span className={labelClass}>Consecuencia si lo supera</span>
+              <span className={labelClass}>
+                {token.kind === 'objeto' && loot.length > 0
+                  ? 'Consecuencia al recogerlo / superarlo'
+                  : 'Consecuencia si lo supera'}
+              </span>
               <textarea
                 rows={3}
                 maxLength={2000}
@@ -397,17 +406,31 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
                 className={`${inputClass} mt-1 resize-y text-xs disabled:opacity-50`}
               />
             </label>
+            <label className="block">
+              <span className={labelClass}>Quién conoce la consecuencia</span>
+              <select
+                value={consequenceScope}
+                disabled={busy}
+                onChange={(event) => setConsequenceScope(event.target.value)}
+                className={`${inputClass} mt-1 text-xs`}
+              >
+                <option value="player">Solo el jugador implicado y el DM</option>
+                <option value="party">Todo el grupo</option>
+              </select>
+            </label>
             <button
               type="button"
               disabled={
                 busy ||
                 (successConsequence === (token.successConsequence ?? '') &&
-                  failureConsequence === (token.failureConsequence ?? ''))
+                  failureConsequence === (token.failureConsequence ?? '') &&
+                  consequenceScope === (token.consequenceScope ?? 'player'))
               }
               onClick={() =>
                 onPatch(token.id, {
                   successConsequence,
                   failureConsequence,
+                  consequenceScope,
                 })
               }
               className="w-full rounded-sm border border-gold/30 px-2 py-1 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
@@ -415,7 +438,7 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
               Guardar consecuencias
             </button>
             <p className="text-[0.65rem] text-bone/40">
-              Solo es informativo: la app muestra el resultado, pero no aplica daño ni estados automáticamente.
+              La app lo muestra al público elegido y lo registra en el chat; el DM sigue aplicando daño o estados narrados.
             </p>
           </div>
         </div>
