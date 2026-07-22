@@ -75,22 +75,33 @@ const NEIGHBORS = [
 // el Set de buildWallSet: las aristas con pared cortan el paso entre
 // casillas vecinas aunque ambas sean pisables. `elevation` (opcional) es el
 // Map de buildElevationMap: subir de nivel añade coste al paso.
-export function findPathCost(walkable, from, to, maxCost = 100, walls = null, elevation = null) {
+export function findPath(walkable, from, to, maxCost = 100, walls = null, elevation = null) {
   const fromKey = `${from.x},${from.y}`;
   const toKey = `${to.x},${to.y}`;
-  if (fromKey === toKey) return 0;
+  if (fromKey === toKey) return { cost: 0, path: [] };
   if (!walkable.has(toKey)) return null;
   // El origen puede no estar en el grid (p. ej. el token quedó sobre una
   // casilla luego editada): se permite salir de él igualmente.
 
   const dist = new Map([[fromKey, 0]]);
+  const previous = new Map();
   const buckets = [[fromKey]];
   for (let cost = 0; cost < buckets.length && cost <= maxCost; cost += 1) {
     const bucket = buckets[cost];
     if (!bucket) continue;
     for (const key of bucket) {
       if (dist.get(key) !== cost) continue; // entrada obsoleta
-      if (key === toKey) return cost;
+      if (key === toKey) {
+        const path = [];
+        let cursor = toKey;
+        while (cursor !== fromKey) {
+          const [x, y] = cursor.split(',').map(Number);
+          path.unshift({ x, y });
+          cursor = previous.get(cursor);
+          if (!cursor) return null;
+        }
+        return { cost, path };
+      }
       const [x, y] = key.split(',').map(Number);
       for (const [dx, dy] of NEIGHBORS) {
         const nKey = `${x + dx},${y + dy}`;
@@ -101,10 +112,15 @@ export function findPathCost(walkable, from, to, maxCost = 100, walls = null, el
         if (next > maxCost) continue;
         if (next < (dist.get(nKey) ?? Infinity)) {
           dist.set(nKey, next);
+          previous.set(nKey, key);
           (buckets[next] ??= []).push(nKey);
         }
       }
     }
   }
   return null;
+}
+
+export function findPathCost(walkable, from, to, maxCost = 100, walls = null, elevation = null) {
+  return findPath(walkable, from, to, maxCost, walls, elevation)?.cost ?? null;
 }

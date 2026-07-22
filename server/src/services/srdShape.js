@@ -30,6 +30,75 @@ export const SRD_CATEGORIES = Object.freeze([
 
 export const SRD_CATEGORY_KEYS = Object.freeze(SRD_CATEGORIES.map(({ key }) => key));
 
+// --- Texto de búsqueda para el índice FTS -----------------------------------
+// El buscador transversal antes solo miraba unas pocas ramas concretas del
+// JSON (`$.desc`, `$.higher_level`…). Para que el compendio sea de verdad
+// buscable, se aplana TODO el texto descriptivo de la entrada: rasgos y
+// acciones de monstruos, prosa de rasgos de clase, efectos de condiciones,
+// secciones de reglas, nombres de referencias (clase, escuela, tipo de daño)…
+// El `data` del SRD está en inglés; los nombres/descripciones en español viven
+// en name_es/desc_es y se añaden aparte, así que el índice cubre ambos idiomas.
+
+// Claves cuyo valor nunca es prosa útil (rutas de la API, imágenes): se saltan
+// para no ensuciar el índice con URLs ni fragmentos de ruta.
+const SEARCH_SKIP_KEYS = new Set(['url', 'image', 'icon']);
+
+function collectSearchStrings(value, out) {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text && !text.startsWith('/api/') && !/^https?:\/\//.test(text)) out.add(text);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectSearchStrings(item, out);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if (SEARCH_SKIP_KEYS.has(key) || key.endsWith('_url')) continue;
+      collectSearchStrings(child, out);
+    }
+  }
+}
+
+export function collectReferenceIndexes(value, out = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectReferenceIndexes(item, out);
+    return out;
+  }
+  if (value && typeof value === 'object') {
+    if (typeof value.index === 'string' && value.index) out.add(value.index);
+    for (const child of Object.values(value)) collectReferenceIndexes(child, out);
+  }
+  return out;
+}
+
+// Blob de texto de una entrada para el índice FTS. Reúne los nombres español e
+// inglés, la descripción traducida y todo el texto libre del `data`.
+export function buildSearchText(
+  data = {},
+  { nameEs = null, nameEn = null, descEs = null, relatedNames = [] } = {}
+) {
+  const strings = new Set();
+  if (nameEs) strings.add(nameEs);
+  if (nameEn) strings.add(nameEn);
+  if (descEs) strings.add(descEs);
+  for (const name of relatedNames) if (name) strings.add(name);
+  collectSearchStrings(data, strings);
+  return [...strings].join('\n');
+}
+
+// Primeras líneas de la descripción para la tarjeta suelta del chat: prioriza
+// el español traducido y cae al inglés del SRD si aún no hay traducción.
+export function buildSnippet(data = {}, descEs = null, limit = 240) {
+  const source = descEs
+    ?? (Array.isArray(data.desc) ? data.desc.filter(Boolean).join(' ') : data.desc)
+    ?? '';
+  const text = String(source).replace(/\s+/g, ' ').trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit).replace(/\s+\S*$/, '')}…`;
+}
+
 function referenceIndex(reference) {
   return reference?.index ?? null;
 }
@@ -76,6 +145,8 @@ export function buildMeta(category, data = {}) {
           : null,
         properties: referenceIndexes(data.properties),
         weaponRange: data.weapon_range ?? null,
+        range: data.range ?? null,
+        throwRange: data.throw_range ?? null,
         armorClass: data.armor_class ?? null,
         cost: data.cost ?? null,
         weight: data.weight ?? null,
@@ -122,6 +193,9 @@ export function buildMeta(category, data = {}) {
         attackType: data.attack_type ?? null,
         hasDamage: Boolean(data.damage),
         dc: referenceIndex(data.dc?.dc_type),
+        range: data.range ?? null,
+        area: data.area ?? data.area_of_effect ?? null,
+        castingTime: data.casting_time ?? null,
         classes: referenceIndexes(data.classes),
       };
     case 'subclasses':

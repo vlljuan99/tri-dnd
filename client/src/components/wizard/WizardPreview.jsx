@@ -11,7 +11,8 @@ import StatTooltip from '../StatTooltip.jsx';
  */
 export default function WizardPreview({ char, classDisplayName, raceName, classDetail }) {
   if (!char) return null;
-  const primary = char.class_index ? PRIMARY_ABILITY[char.class_index] : null;
+  const primary = classDetail?.spellcasting?.spellcasting_ability?.index ??
+    (char.class_index ? PRIMARY_ABILITY[char.class_index] : null);
   const conMod = abilityModifier(char.abilities.con);
   const dexMod = abilityModifier(char.abilities.dex);
   const hpEstimate = classDetail ? estimateHitPoints(classDetail.hit_die, conMod, char.level) : char.hp_max;

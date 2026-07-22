@@ -21,12 +21,13 @@ function availableValuesFor(pool, assignment, currentKey) {
   return remaining.sort((a, b) => b - a);
 }
 
-export default function StepCaracteristicas({ char, patch, raceDetail, errors }) {
+export default function StepCaracteristicas({ char, patch, classDetail, raceDetail, errors }) {
   const wd = char.wizard_data;
   const method = wd.abilityMethod;
   const pool = method === 'array' ? STANDARD_ARRAY : method === 'roll' ? wd.rolledPool : null;
   const assignment = wd.poolAssignment ?? {};
-  const primaryKey = char.class_index ? PRIMARY_ABILITY[char.class_index] : null;
+  const primaryKey = classDetail?.spellcasting?.spellcasting_ability?.index ??
+    (char.class_index ? PRIMARY_ABILITY[char.class_index] : null);
 
   function chooseMethod(id) {
     patch({

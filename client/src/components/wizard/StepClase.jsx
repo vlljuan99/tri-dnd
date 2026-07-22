@@ -22,6 +22,11 @@ function ClassCard({ entry, detail, selected, onSelect }) {
           {!entry.translated && (
             <span className="ml-2 rounded-sm border border-bone/20 px-1 text-[10px] font-normal text-bone/40">EN</span>
           )}
+          {entry.custom && (
+            <span className="ml-2 rounded-sm border border-gold/25 px-1 text-[10px] font-normal text-gold/70">
+              {entry.sharedFromDm ? 'Del DM' : 'Propia'}
+            </span>
+          )}
         </span>
         {summary?.difficulty && (
           <span className="shrink-0 rounded-sm border border-bone/15 px-1.5 py-0.5 text-[10px] text-bone/50">
@@ -46,6 +51,17 @@ export default function StepClase({ char, patch, classes, classDetails, errors }
   const { skillChoice } = detail ? parseProficiencyChoices(detail) : {};
   const autoProf = detail ? classAutoProficiencies(detail) : [];
 
+  function selectClass(index) {
+    if (index === char.class_index) return;
+    const raceSkills = char.wizard_data.appliedRaceSkillProficiencies ?? [];
+    patch({
+      class_index: index,
+      skill_proficiencies: raceSkills,
+      other_proficiencies: [],
+      wizard_data: { ...char.wizard_data, otherProficiencyChoices: {} },
+    });
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-bone/70">
@@ -63,7 +79,7 @@ export default function StepClase({ char, patch, classes, classDetails, errors }
               entry={c}
               detail={classDetails[c.index]}
               selected={char.class_index === c.index}
-              onSelect={(idx) => patch({ class_index: idx })}
+              onSelect={selectClass}
             />
           ))}
         </div>

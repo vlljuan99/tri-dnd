@@ -18,6 +18,21 @@ import {
   spellDataToForm,
   emptySpellForm,
 } from '../lib/customLibrary.js';
+import { ABILITIES, SKILLS } from '../lib/dnd.js';
+import {
+  HIT_DICE,
+  SIZES,
+  DAMAGE_TYPES,
+  damageTypeLabel,
+  emptyClassForm,
+  classDataToForm,
+  buildClassData,
+  emptyRaceForm,
+  raceDataToForm,
+  buildRaceData,
+  classSummary,
+  raceSummary,
+} from '../lib/classRaceForm.js';
 
 const inputClass =
   'w-full rounded-sm border border-ink/25 bg-parchment-100 px-2 py-1.5 text-sm text-ink focus:border-ember focus:outline-none';
@@ -261,9 +276,281 @@ function SpellForm({ initial, damageTypes, schools, onSave, onCancel, busy }) {
 }
 
 // ---------------------------------------------------------------------------
+// Editor de rasgos narrativos (compartido por clase y raza). Los rasgos NO son
+// efectos: son texto libre que la mesa narra, igual que el campo `features` de
+// la ficha. Los efectos estructurados (bonos, destrezas, resistencias) van en
+// sus propios campos del formulario.
+// ---------------------------------------------------------------------------
+function FeaturesEditor({ features, onChange }) {
+  const update = (i, key, value) => onChange(features.map((f, j) => (j === i ? { ...f, [key]: value } : f)));
+  const add = () => onChange([...features, { name: '', text: '' }]);
+  const remove = (i) => onChange(features.filter((_, j) => j !== i));
+
+  return (
+    <div className="space-y-2">
+      {features.map((f, i) => (
+        <div key={i} className="rounded-sm border border-ink/15 bg-parchment-100/60 p-2">
+          <div className="flex gap-2">
+            <input
+              className={inputClass}
+              value={f.name}
+              onChange={(e) => update(i, 'name', e.target.value)}
+              placeholder="Nombre del rasgo"
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="shrink-0 rounded-sm border border-ember/40 px-2 text-sm text-ember hover:bg-ember/10"
+            >
+              ✕
+            </button>
+          </div>
+          <textarea
+            className={`${inputClass} mt-2 resize-y`}
+            rows={2}
+            value={f.text}
+            onChange={(e) => update(i, 'text', e.target.value)}
+            placeholder="Qué hace (lo narra la mesa; no se aplica solo)"
+          />
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="rounded-sm border border-ink/25 px-3 py-1 text-sm text-ink/70 hover:bg-ink/5"
+      >
+        + Añadir rasgo
+      </button>
+    </div>
+  );
+}
+
+// Casillas de un conjunto de opciones (característica, habilidad, daño): un
+// toggle multiselección compacto reutilizado por varias secciones.
+function ChipToggle({ options, selected, onToggle, disabled }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const on = selected.includes(o.value);
+        return (
+          <button
+            key={o.value}
+            type="button"
+            disabled={disabled?.(o.value, on)}
+            onClick={() => onToggle(o.value)}
+            className={`rounded-sm border px-2 py-1 text-xs disabled:opacity-30 ${
+              on ? 'border-ember bg-ember/15 text-ember' : 'border-ink/25 text-ink/60 hover:border-ink/40'
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const ABILITY_OPTIONS = ABILITIES.map((a) => ({ value: a.key, label: a.short }));
+const SKILL_OPTIONS = SKILLS.map((s) => ({ value: s.index, label: s.name }));
+const DAMAGE_OPTIONS = DAMAGE_TYPES.map((d) => ({ value: d.index, label: d.label }));
+
+// ---------------------------------------------------------------------------
+// Formulario de CLASE personalizada
+// ---------------------------------------------------------------------------
+function ClassForm({ initial, onSave, onCancel, busy }) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [form, setForm] = useState(() => (initial ? classDataToForm(initial.data) : emptyClassForm()));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const toggleSave = (key) =>
+    set('savingThrows', form.savingThrows.includes(key)
+      ? form.savingThrows.filter((s) => s !== key)
+      : [...form.savingThrows, key]);
+  const toggleSkill = (idx) =>
+    set('skillFrom', form.skillFrom.includes(idx)
+      ? form.skillFrom.filter((s) => s !== idx)
+      : [...form.skillFrom, idx]);
+
+  return (
+    <div className="space-y-3">
+      <Field label="Nombre">
+        <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Guardián de sangre" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Dado de golpe">
+          <select className={inputClass} value={form.hitDie} onChange={(e) => set('hitDie', Number(e.target.value))}>
+            {HIT_DICE.map((d) => (
+              <option key={d} value={d}>d{d}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Conjuros por">
+          <select
+            className={inputClass}
+            value={form.spellcastingAbility}
+            onChange={(e) => set('spellcastingAbility', e.target.value)}
+          >
+            <option value="">— sin conjuros —</option>
+            {ABILITIES.map((a) => (
+              <option key={a.key} value={a.key}>{a.name}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Salvaciones competentes (elige hasta 2)">
+        <ChipToggle
+          options={ABILITY_OPTIONS}
+          selected={form.savingThrows}
+          onToggle={toggleSave}
+          disabled={(value, on) => !on && form.savingThrows.length >= 2}
+        />
+      </Field>
+
+      <div className="rounded-sm border border-ink/15 p-2">
+        <div className="flex items-center gap-2">
+          <span className={labelClass + ' mb-0'}>Habilidades: elige</span>
+          <input
+            type="number"
+            min={0}
+            max={form.skillFrom.length || SKILLS.length}
+            value={form.skillChoose}
+            onChange={(e) => set('skillChoose', e.target.value)}
+            className="w-16 rounded-sm border border-ink/25 bg-parchment-100 px-2 py-1 text-sm text-ink focus:border-ember focus:outline-none"
+          />
+          <span className="text-xs text-ink/50">
+            {form.skillFrom.length ? `de estas ${form.skillFrom.length}` : 'de cualquiera'}
+          </span>
+        </div>
+        <p className="mt-1 mb-2 text-xs text-ink/50">
+          Marca de qué habilidades puede elegir el jugador. Sin marcar ninguna, elige de todas.
+        </p>
+        <ChipToggle options={SKILL_OPTIONS} selected={form.skillFrom} onToggle={toggleSkill} />
+      </div>
+
+      <Field label="Rasgos (texto libre, los narra la mesa)">
+        <FeaturesEditor features={form.features} onChange={(v) => set('features', v)} />
+      </Field>
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={() => onSave(name.trim(), buildClassData(form))}
+          disabled={busy || !name.trim()}
+          className="rounded-sm bg-ember px-4 py-2 font-display text-sm tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40"
+        >
+          {busy ? 'Guardando…' : 'Guardar'}
+        </button>
+        <button onClick={onCancel} className="rounded-sm border border-ink/25 px-4 py-2 text-sm text-ink/70 hover:bg-ink/5">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Formulario de RAZA personalizada
+// ---------------------------------------------------------------------------
+function RaceForm({ initial, onSave, onCancel, busy }) {
+  const [name, setName] = useState(initial?.name ?? '');
+  const [form, setForm] = useState(() => (initial ? raceDataToForm(initial.data) : emptyRaceForm()));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const setBonus = (key, value) =>
+    set('abilityBonuses', { ...form.abilityBonuses, [key]: value === '' ? '' : Number(value) });
+  const toggleIn = (field, value) =>
+    set(field, form[field].includes(value) ? form[field].filter((v) => v !== value) : [...form[field], value]);
+
+  return (
+    <div className="space-y-3">
+      <Field label="Nombre">
+        <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nacido de la tormenta" />
+      </Field>
+
+      <Field label="Bonos de característica (se suman solos a la ficha)">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+          {ABILITIES.map((a) => (
+            <label key={a.key} className="flex flex-col items-center gap-1">
+              <span className="text-xs text-ink/50">{a.short}</span>
+              <input
+                type="number"
+                min={-5}
+                max={5}
+                value={form.abilityBonuses[a.key] ?? ''}
+                onChange={(e) => setBonus(a.key, e.target.value)}
+                placeholder="0"
+                className="w-full rounded-sm border border-ink/25 bg-parchment-100 px-1 py-1 text-center text-sm text-ink focus:border-ember focus:outline-none"
+              />
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Velocidad (pies)">
+          <input
+            type="number"
+            min={0}
+            max={120}
+            className={inputClass}
+            value={form.speed}
+            onChange={(e) => set('speed', e.target.value)}
+            placeholder="Base (30)"
+          />
+        </Field>
+        <Field label="Tamaño">
+          <select className={inputClass} value={form.size} onChange={(e) => set('size', e.target.value)}>
+            {SIZES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Destrezas concedidas (se marcan solas)">
+        <ChipToggle options={SKILL_OPTIONS} selected={form.skillProficiencies} onToggle={(v) => toggleIn('skillProficiencies', v)} />
+      </Field>
+
+      <Field label="Resistencias a daño (etiqueta en la ficha)">
+        <ChipToggle options={DAMAGE_OPTIONS} selected={form.resistances} onToggle={(v) => toggleIn('resistances', v)} />
+      </Field>
+
+      <Field label="Sentidos (uno por línea, p. ej. «Visión en la oscuridad 18 m»)">
+        <textarea
+          className={`${inputClass} resize-y`}
+          rows={2}
+          value={form.senses.join('\n')}
+          onChange={(e) => set('senses', e.target.value.split('\n'))}
+          placeholder="Visión en la oscuridad 18 m"
+        />
+      </Field>
+
+      <Field label="Rasgos (texto libre, los narra la mesa)">
+        <FeaturesEditor features={form.features} onChange={(v) => set('features', v)} />
+      </Field>
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={() => onSave(name.trim(), buildRaceData(form))}
+          disabled={busy || !name.trim()}
+          className="rounded-sm bg-ember px-4 py-2 font-display text-sm tracking-wide text-parchment-100 hover:bg-ember/90 disabled:opacity-40"
+        >
+          {busy ? 'Guardando…' : 'Guardar'}
+        </button>
+        <button onClick={onCancel} className="rounded-sm border border-ink/25 px-4 py-2 text-sm text-ink/70 hover:bg-ink/5">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Resumen corto de una entrada para la lista
 // ---------------------------------------------------------------------------
 function entrySummary(tipo, entry) {
+  if (tipo === 'clases') return classSummary(entry);
+  if (tipo === 'razas') return raceSummary(entry);
   const m = entry.meta ?? {};
   if (tipo === 'objetos') {
     const parts = [];
@@ -403,6 +690,11 @@ function TemplatesSection({ q }) {
   );
 }
 
+// Nombre en singular de cada categoría (con artículo por género), para los
+// títulos del editor y los estados vacíos.
+const SINGULAR = { objetos: 'objeto', hechizos: 'hechizo', clases: 'clase', razas: 'raza' };
+const NEW_LABEL = { objetos: 'Nuevo objeto', hechizos: 'Nuevo hechizo', clases: 'Nueva clase', razas: 'Nueva raza' };
+
 export default function BibliotecaPage() {
   const [tipo, setTipo] = useState('objetos');
   const [entries, setEntries] = useState(null);
@@ -468,6 +760,8 @@ export default function BibliotecaPage() {
     () => [
       { key: 'objetos', label: 'Objetos' },
       { key: 'hechizos', label: 'Hechizos' },
+      { key: 'clases', label: 'Clases' },
+      { key: 'razas', label: 'Razas' },
       { key: 'plantillas', label: 'Plantillas' },
     ],
     []
@@ -481,8 +775,8 @@ export default function BibliotecaPage() {
       </div>
       <h2 className="mb-1 font-display text-3xl font-semibold text-ink">Biblioteca del DM</h2>
       <p className="mb-6 text-sm text-ink/60">
-        Tus objetos y hechizos propios, reutilizables en cualquier campaña. Aparecen junto al compendio SRD
-        cuando añades equipo o hechizos a una ficha.
+        Tu contenido propio, reutilizable en cualquier campaña: objetos, hechizos, y clases y razas con
+        efectos que se aplican solos a la ficha. Aparece junto al compendio SRD al construir un personaje.
       </p>
 
       <div className="mb-4 flex items-center gap-2">
@@ -520,9 +814,9 @@ export default function BibliotecaPage() {
       {editing && (
         <div className="mb-5 rounded-md border border-ember/40 bg-parchment-100/70 p-4 shadow-sm">
           <h3 className="mb-3 font-display text-lg text-ink">
-            {editing === 'new' ? `Nuevo ${tipo === 'objetos' ? 'objeto' : 'hechizo'}` : `Editar ${editing.name}`}
+            {editing === 'new' ? NEW_LABEL[tipo] : `Editar ${editing.name}`}
           </h3>
-          {tipo === 'objetos' ? (
+          {tipo === 'objetos' && (
             <ItemForm
               initial={editing === 'new' ? null : editing}
               damageTypes={damageTypes}
@@ -531,11 +825,28 @@ export default function BibliotecaPage() {
               onSave={save}
               onCancel={() => setEditing(null)}
             />
-          ) : (
+          )}
+          {tipo === 'hechizos' && (
             <SpellForm
               initial={editing === 'new' ? null : editing}
               damageTypes={damageTypes}
               schools={schools}
+              busy={busy}
+              onSave={save}
+              onCancel={() => setEditing(null)}
+            />
+          )}
+          {tipo === 'clases' && (
+            <ClassForm
+              initial={editing === 'new' ? null : editing}
+              busy={busy}
+              onSave={save}
+              onCancel={() => setEditing(null)}
+            />
+          )}
+          {tipo === 'razas' && (
+            <RaceForm
+              initial={editing === 'new' ? null : editing}
               busy={busy}
               onSave={save}
               onCancel={() => setEditing(null)}
@@ -548,7 +859,7 @@ export default function BibliotecaPage() {
         <p className="text-ink/60">Cargando…</p>
       ) : entries.length === 0 ? (
         <p className="italic text-ink/60">
-          Nada todavía. Crea tu primer {tipo === 'objetos' ? 'objeto' : 'hechizo'} con el botón «+ Crear».
+          Nada todavía. Crea tu primer{tipo === 'clases' || tipo === 'razas' ? 'a' : ''} {SINGULAR[tipo]} con el botón «+ Crear».
         </p>
       ) : (
         <ul className="space-y-2">

@@ -7,8 +7,15 @@ import { getMembership } from './campaigns.js';
 import { MAP_UPLOADS_DIR } from '../config.js';
 import { generateWorldMapImage } from '../services/mapImageGeneration.js';
 import { extensionForMimeType } from '../utils/uploads.js';
-import { notifyCampaignMap, notifyCampaignWorld } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyCampaignWorld, notifyWorldTravel } from '../services/liveMap.js';
 import { fireTravelEvents } from '../services/events.js';
+import {
+  cleanRouteLabel,
+  filterRoutesByVisibleLocations,
+  findTravelRoute,
+  normalizeRouteCost,
+  sameRoutePair,
+} from '../services/worldRoutes.js';
 import {
   snapshotWorldMap,
   instantiateWorldMap,
@@ -73,6 +80,30 @@ function getLocation(campaignId, locationId) {
     .get(locationId, campaignId);
 }
 
+function getRoute(campaignId, routeId) {
+  return db
+    .prepare('SELECT * FROM world_routes WHERE id = ? AND campaign_id = ?')
+    .get(routeId, campaignId);
+}
+
+function listRoutes(campaignId) {
+  return db
+    .prepare('SELECT * FROM world_routes WHERE campaign_id = ? ORDER BY id')
+    .all(campaignId);
+}
+
+function serializeRoute(route) {
+  return {
+    id: route.id,
+    worldMapId: route.world_map_id,
+    fromLocationId: route.from_location_id,
+    toLocationId: route.to_location_id,
+    cost: route.cost,
+    label: route.label ?? '',
+    oneWay: Boolean(route.one_way),
+  };
+}
+
 // El padre de un submapa es el pin que salta a él (no hay parent_id en la tabla)
 function getParentLocation(campaignId, worldMapId) {
   return db
@@ -106,6 +137,7 @@ function serializeLocation(l) {
     lore: l.lore,
     kind: LOCATION_KINDS.has(l.kind) ? l.kind : 'dungeon',
     hidden: Boolean(l.hidden),
+    visited: Boolean(l.visited),
     mapId: l.map_id ?? null,
     mapName: l.map_id ? l.map_name : null,
     floorCount: l.map_id ? l.floor_count : 0,
@@ -126,6 +158,7 @@ function serializeWorld(campaign, role) {
   const rootId = campaign.has_world_map ? ensureRootWorldMap(campaign) : (campaign.root_world_map_id ?? null);
   const mapRows = db.prepare('SELECT * FROM world_maps WHERE campaign_id = ? ORDER BY id').all(campaign.id);
   const allLocations = listLocations(campaign.id);
+  const allRoutes = listRoutes(campaign.id);
 
   const table = gameTable(campaign.id);
   const currentLocationId = table?.current_location_id ?? null;
@@ -137,6 +170,10 @@ function serializeWorld(campaign, role) {
   // El jugador no recibe pins ocultos (filtrado en servidor, como las tiradas
   // ocultas), salvo que sea la ubicación actual (viajar allí la revela igualmente)
   const visible = allLocations.filter((l) => isDm || !l.hidden || l.id === currentLocationId);
+  const visibleLocationIds = new Set(visible.map((location) => location.id));
+  // Una arista conectada a un pin oculto también es información oculta: su
+  // geometría no debe delatar un destino que el jugador aún no conoce.
+  const visibleRoutes = filterRoutesByVisibleLocations(allRoutes, visibleLocationIds);
 
   return {
     hasWorldMap: Boolean(campaign.has_world_map),
@@ -155,6 +192,7 @@ function serializeWorld(campaign, role) {
           ? { locationId: parent.id, locationName: parent.name, mapId: parent.world_map_id }
           : null,
         locations: visible.filter((l) => l.world_map_id === m.id).map(serializeLocation),
+        routes: visibleRoutes.filter((route) => route.world_map_id === m.id).map(serializeRoute),
       };
     }),
   };
@@ -510,20 +548,158 @@ worldRouter.delete('/ubicaciones/:locId', requireDm, (req, res) => {
   respondWorld(req, res);
 });
 
+// ---- Rutas entre ubicaciones (solo DM) ----
+
+worldRouter.post('/rutas', requireDm, (req, res) => {
+  const campaign = getCampaign(req.params.campaignId);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
+
+  const { worldMapId, fromLocationId, toLocationId, cost = 1, label = '', oneWay = false } = req.body ?? {};
+  const worldMap = getWorldMap(campaign.id, worldMapId);
+  if (!worldMap) return res.status(400).json({ error: 'Ese mapa de mundo no pertenece a la campaña' });
+
+  const from = getLocation(campaign.id, fromLocationId);
+  const to = getLocation(campaign.id, toLocationId);
+  if (!from || !to) return res.status(400).json({ error: 'Alguno de los extremos de la ruta no existe' });
+  if (from.id === to.id) return res.status(400).json({ error: 'Una ruta necesita dos ubicaciones distintas' });
+  if (from.world_map_id !== worldMap.id || to.world_map_id !== worldMap.id) {
+    return res.status(400).json({ error: 'Los dos extremos deben pertenecer a esta misma capa' });
+  }
+
+  const cleanCost = normalizeRouteCost(cost);
+  if (cleanCost == null) return res.status(400).json({ error: 'El coste debe ser un número entero de jornadas' });
+  const cleanLabel = cleanRouteLabel(label);
+  if (cleanLabel == null) return res.status(400).json({ error: 'La etiqueta de la ruta no es válida' });
+  if (typeof oneWay !== 'boolean') return res.status(400).json({ error: 'El sentido de la ruta no es válido' });
+
+  const duplicate = listRoutes(campaign.id).find(
+    (route) => route.world_map_id === worldMap.id && sameRoutePair(route, from.id, to.id)
+  );
+  if (duplicate) return res.status(409).json({ error: 'Esas ubicaciones ya están conectadas' });
+
+  db.prepare(
+    `INSERT INTO world_routes
+      (campaign_id, world_map_id, from_location_id, to_location_id, cost, label, one_way)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(campaign.id, worldMap.id, from.id, to.id, cleanCost, cleanLabel, oneWay ? 1 : 0);
+
+  notifyCampaignWorld(campaign.id);
+  respondWorld(req, res, 201);
+});
+
+worldRouter.patch('/rutas/:routeId', requireDm, (req, res) => {
+  const route = getRoute(req.params.campaignId, req.params.routeId);
+  if (!route) return res.status(404).json({ error: 'Ruta no encontrada' });
+
+  const { cost, label, oneWay, reverse } = req.body ?? {};
+  const sets = [];
+  const values = [];
+
+  if (cost !== undefined) {
+    const cleanCost = normalizeRouteCost(cost);
+    if (cleanCost == null) return res.status(400).json({ error: 'El coste debe ser un número entero de jornadas' });
+    sets.push('cost = ?');
+    values.push(cleanCost);
+  }
+  if (label !== undefined) {
+    const cleanLabel = cleanRouteLabel(label);
+    if (cleanLabel == null) return res.status(400).json({ error: 'La etiqueta de la ruta no es válida' });
+    sets.push('label = ?');
+    values.push(cleanLabel);
+  }
+  if (oneWay !== undefined) {
+    if (typeof oneWay !== 'boolean') return res.status(400).json({ error: 'El sentido de la ruta no es válido' });
+    sets.push('one_way = ?');
+    values.push(oneWay ? 1 : 0);
+  }
+  if (reverse !== undefined) {
+    if (reverse !== true) return res.status(400).json({ error: 'La inversión de la ruta no es válida' });
+    sets.push('from_location_id = to_location_id', 'to_location_id = from_location_id');
+  }
+
+  if (sets.length) {
+    db.prepare(`UPDATE world_routes SET ${sets.join(', ')} WHERE id = ?`).run(...values, route.id);
+  }
+  notifyCampaignWorld(req.params.campaignId);
+  respondWorld(req, res);
+});
+
+worldRouter.delete('/rutas/:routeId', requireDm, (req, res) => {
+  const route = getRoute(req.params.campaignId, req.params.routeId);
+  if (!route) return res.status(404).json({ error: 'Ruta no encontrada' });
+  db.prepare('DELETE FROM world_routes WHERE id = ?').run(route.id);
+  notifyCampaignWorld(req.params.campaignId);
+  respondWorld(req, res);
+});
+
 // ---- Viajar y volver (solo DM) ----
 
 // Fija la ubicación actual del grupo. Un pin con tablero lo activa (puede ser
 // NULL: tablero vacío, estado ya soportado); un pin tipo ciudad con submapa
 // mete al grupo en esa capa. Viajar a un pin oculto lo revela, y dispara los
 // eventos de camino colgados de la ubicación.
-worldRouter.post('/viajar', requireDm, (req, res) => {
-  const { locationId } = req.body ?? {};
+worldRouter.post('/viajar', requireDm, async (req, res) => {
+  const { locationId, skipRoute = false } = req.body ?? {};
+  if (typeof skipRoute !== 'boolean') return res.status(400).json({ error: 'Opción de viaje no válida' });
+  const campaign = getCampaign(req.params.campaignId);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
   const location = getLocation(req.params.campaignId, locationId);
   if (!location) return res.status(404).json({ error: 'Ubicación no encontrada' });
+
+  const table = gameTable(campaign.id);
+  const rootMapId = ensureRootWorldMap(campaign);
+  const currentMapId = getWorldMap(campaign.id, table?.current_world_map_id)
+    ? table.current_world_map_id
+    : rootMapId;
+  if (location.world_map_id !== currentMapId) {
+    return res.status(400).json({ error: 'Esa ubicación no está en la capa actual del grupo' });
+  }
+
+  const currentLocation = table?.current_location_id
+    ? getLocation(campaign.id, table.current_location_id)
+    : null;
+  if (currentLocation?.id === location.id) return respondWorld(req, res);
+
+  let travelRoute = null;
+  if (!skipRoute) {
+    if (!currentLocation || currentLocation.world_map_id !== currentMapId) {
+      return res.status(409).json({
+        error: 'El grupo no está situado en un extremo de esta capa. Usa «Saltar sin ruta» para colocarlo.',
+        code: 'ROUTE_REQUIRED',
+      });
+    }
+    travelRoute = findTravelRoute(
+      listRoutes(campaign.id).filter((route) => route.world_map_id === currentMapId),
+      currentLocation.id,
+      location.id
+    );
+    if (!travelRoute) {
+      return res.status(409).json({
+        error: 'No hay una ruta recorrible desde la ubicación actual.',
+        code: 'ROUTE_REQUIRED',
+      });
+    }
+
+    const durationMs = 900;
+    notifyWorldTravel(campaign.id, {
+      id: `${Date.now()}-${travelRoute.id}`,
+      worldMapId: currentMapId,
+      routeId: travelRoute.id,
+      from: { id: currentLocation.id, x: currentLocation.x, y: currentLocation.y },
+      to: { id: location.id, x: location.x, y: location.y },
+      durationMs,
+    });
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+  }
 
   db.transaction(() => {
     if (location.hidden) {
       db.prepare('UPDATE world_locations SET hidden = 0 WHERE id = ?').run(location.id);
+    }
+    // Al viajar allí, la ubicación queda descubierta (penumbra → nítida). No es
+    // secreto: viaja a todos, a diferencia de `hidden`.
+    if (!location.visited) {
+      db.prepare('UPDATE world_locations SET visited = 1 WHERE id = ?').run(location.id);
     }
     db.prepare(
       "UPDATE game_tables SET current_location_id = ?, current_world_map_id = ?, active_map_id = ?, updated_at = datetime('now') WHERE campaign_id = ?"
@@ -531,15 +707,20 @@ worldRouter.post('/viajar', requireDm, (req, res) => {
       location.id,
       location.target_world_map_id ?? location.world_map_id,
       location.map_id ?? null,
-      req.params.campaignId
+      campaign.id
     );
   })();
-  fireTravelEvents(req.params.campaignId, location.id);
+  // El escape hatch recoloca al grupo al improvisar: no dispara consecuencias
+  // automáticas y, cuando exista el reloj (Corte C), tampoco consumirá jornadas.
+  if (!skipRoute) fireTravelEvents(campaign.id, location.id);
 
   // El tablero se refresca (nuevo mapa activo) y la mesa muestra el lore de destino
-  notifyCampaignMap(req.params.campaignId);
-  notifyCampaignWorld(req.params.campaignId);
-  respondWorld(req, res);
+  notifyCampaignMap(campaign.id);
+  notifyCampaignWorld(campaign.id);
+  res.json({
+    world: serializeWorld(getCampaign(campaign.id), req.membership.role),
+    travel: { routeId: travelRoute?.id ?? null, skippedRoute: skipRoute },
+  });
 });
 
 // Sube del submapa actual al mapa donde vive el pin que lo enlaza

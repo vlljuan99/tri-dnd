@@ -166,18 +166,19 @@ export default function CampaignGamePage() {
     setScreen(screenForCurrentLocation());
   }
 
-  async function travel(loc) {
+  async function travel(loc, { skipRoute = false } = {}) {
     if (loc.id === currentLocationId) {
       setScreen(screenForCurrentLocation());
-      return;
+      return true;
     }
     setTravelError('');
     try {
       // El cambio de ubicación llega por socket y el efecto pasa a 'locationLore'
       await api(`/campaigns/${campaignId}/mundo/viajar`, {
         method: 'POST',
-        body: { locationId: loc.id },
+        body: { locationId: loc.id, skipRoute },
       });
+      return true;
     } catch (error) {
       setTravelError(error.message || 'No se pudo viajar a esa ubicación.');
     }

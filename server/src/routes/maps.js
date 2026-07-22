@@ -22,7 +22,8 @@ import {
 } from '../services/mapLibrary.js';
 import { notifyCampaignMap, notifyIfActive, notifyCombat, notifyCombatStarted } from '../services/liveMap.js';
 import { trySpendEnemyMovement } from '../services/turnEconomy.js';
-import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/pathfinding.js';
+import { buildWalkableGrid, findPath, buildElevationMap } from '../services/pathfinding.js';
+import { queueOpportunityAttacks } from '../services/opportunityAttacks.js';
 import { buildWallSet, isValidWallEdges } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 import {
@@ -834,6 +835,9 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   // Al moverlo puede cambiar de sala: se busca la sala de la misma planta
   // que contiene la casilla de destino
   let roomId = token.room_id;
+  let movementPath = null;
+  let movementFloorId = null;
+  let movementVisibleToPlayers = false;
   if (x !== undefined || y !== undefined) {
     const nextX = x ?? token.x;
     const nextY = y ?? token.y;
@@ -841,6 +845,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       return res.status(400).json({ error: 'Posición del marcador no válida' });
     }
     const currentRoom = db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(token.room_id);
+    movementFloorId = currentRoom.floor_id;
     const targetRoom = db
       .prepare(
         `SELECT r.* FROM map_rooms r WHERE r.floor_id = ?
@@ -851,6 +856,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     if (!targetRoom) {
       return res.status(400).json({ error: 'El marcador debe quedar en una casilla activa de una sala' });
     }
+    movementVisibleToPlayers = Boolean(currentRoom.revealed || targetRoom.revealed);
     roomId = targetRoom.id;
 
     // Con el modo por turnos activo, arrastrar un enemigo también gasta su
@@ -861,7 +867,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     const floorRooms = db
       .prepare('SELECT * FROM map_rooms WHERE floor_id = ?')
       .all(currentRoom.floor_id);
-    const pathCost = findPathCost(
+    const pathResult = findPath(
       buildWalkableGrid(floorRooms),
       { x: token.x, y: token.y },
       { x: nextX, y: nextY },
@@ -869,7 +875,10 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       buildWallSet(floorRooms, doorsForRooms(map.id, floorRooms)),
       buildElevationMap(floorRooms)
     );
-    const distance = pathCost ?? Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
+    const distance = pathResult?.cost ?? Math.max(Math.abs(nextX - token.x), Math.abs(nextY - token.y));
+    movementPath = pathResult
+      ? [{ x: token.x, y: token.y }, ...pathResult.path]
+      : [{ x: token.x, y: token.y }, { x: nextX, y: nextY }];
     const spend = trySpendEnemyMovement(req.params.campaignId, token.id, distance);
     if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
@@ -898,7 +907,29 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   );
   touchAndNotify(map);
   // El movimiento gastado se refleja en vivo en el tracker/HUD del DM
-  if (x !== undefined || y !== undefined) notifyCombat(map.campaign_id);
+  if (x !== undefined || y !== undefined) {
+    const visibleMover = !(hidden !== undefined ? Boolean(hidden) : Boolean(token.hidden));
+    if (
+      token.kind === 'enemigo' &&
+      visibleMover &&
+      movementPath &&
+      movementVisibleToPlayers
+    ) {
+      const moverCombatant = db
+        .prepare('SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+        .get(map.campaign_id, token.id);
+      queueOpportunityAttacks({
+        campaignId: map.campaign_id,
+        moverKind: 'marcador',
+        moverMapTokenId: token.id,
+        moverName: name !== undefined ? name.trim().slice(0, 60) : token.name,
+        moverCombatant,
+        floorId: movementFloorId,
+        path: movementPath,
+      });
+    }
+    notifyCombat(map.campaign_id);
+  }
 
   const updated = db.prepare('SELECT * FROM map_tokens WHERE id = ?').get(token.id);
   res.json({ token: serializeToken(updated) });

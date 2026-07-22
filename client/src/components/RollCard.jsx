@@ -24,6 +24,7 @@ export default function RollCard({ roll, authorName, compact = false }) {
       {roll.advantage && roll.advantage !== 'none' && (
         <em className="ml-1 text-bone/50">({ADVANTAGE_LABEL[roll.advantage]})</em>
       )}
+      {roll.forcedCrit && <em className="ml-1 text-gold/70">(crítico automático)</em>}
       {roll.hiddenBadge && (
         <span className="ml-2 rounded-sm border border-gold/40 px-1 text-xs text-gold/80">oculta</span>
       )}

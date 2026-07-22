@@ -19,8 +19,10 @@ import { mapsRouter } from './routes/maps.js';
 import { worldRouter } from './routes/world.js';
 import { setupSockets } from './sockets.js';
 import { bindIo } from './services/liveMap.js';
+import { ensureSrdFtsPopulated } from './services/srdSearch.js';
 
 runMigrations();
+ensureSrdFtsPopulated();
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));

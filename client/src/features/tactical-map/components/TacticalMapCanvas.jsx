@@ -86,6 +86,7 @@ export default function TacticalMapCanvas({
   terrainCells = [],
   pathCells = [],
   visionCells = [],
+  spellCells = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -126,6 +127,7 @@ export default function TacticalMapCanvas({
       <MovementRange cells={visionCells} gridSize={map.gridSize} color="#6cb7d9" opacity={0.24} y={0.018} />
       <MovementRange cells={reachableCells} gridSize={map.gridSize} />
       <MovementRange cells={pathCells} gridSize={map.gridSize} color="#e8c368" opacity={0.4} y={0.024} />
+      <MovementRange cells={spellCells} gridSize={map.gridSize} color="#b78cff" opacity={0.42} y={0.03} />
       {(map.doors ?? []).map((door, index) => (
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}

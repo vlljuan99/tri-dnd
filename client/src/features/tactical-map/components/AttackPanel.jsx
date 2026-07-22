@@ -11,6 +11,8 @@ import {
 } from '../../../lib/dnd.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
+import { resolveAttackEffects } from '../domain/combatRules.js';
+import { rangeValidation, weaponGeometry } from '../domain/combatGeometry.js';
 
 // Golpe desarmado de 5e: ataque FUE + competencia, daño fijo 1 + FUE
 function unarmedWeapon(char) {
@@ -63,12 +65,22 @@ export function D20Chips({ roll }) {
  * daño; aquí se desglosa el porqué: dados, bonificador, total contra la CA,
  * y cuánta vida ha quitado el golpe.
  */
-export default function AttackPanel({ attacker, target, highGround = false, onClose }) {
+export default function AttackPanel({
+  attacker,
+  target,
+  attackerCombatant,
+  targetCombatant,
+  distance = Infinity,
+  highGround = false,
+  lineOfSight = true,
+  onClose,
+}) {
   const attackTarget = useRoom((s) => s.attackTarget);
   const dealDamage = useRoom((s) => s.dealDamage);
   const [char, setChar] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [thrownModes, setThrownModes] = useState({});
   // Resultado de la última acción, anclado a su arma:
   // { type: 'attack', weaponId, hit, crit, ac, roll } |
   // { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
@@ -80,8 +92,30 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
     setFeedback(null);
     setError('');
     api(`/characters/${attacker.characterId}`)
-      .then(({ character }) => {
-        if (!cancelled) setChar(character);
+      .then(async ({ character }) => {
+        const inventory = await Promise.all(
+          character.inventory.map(async (item) => {
+            if (!item.weapon || item.weapon.range || !item.srdIndex) return item;
+            try {
+              const detail = await api(`/srd/equipment/${item.srdIndex}`);
+              return {
+                ...item,
+                weapon: {
+                  ...item.weapon,
+                  range: detail.data?.range ?? null,
+                  throwRange: detail.data?.throw_range ?? null,
+                  properties:
+                    item.weapon.properties?.length
+                      ? item.weapon.properties
+                      : (detail.data?.properties ?? []).map((property) => property.index),
+                },
+              };
+            } catch {
+              return item;
+            }
+          })
+        );
+        if (!cancelled) setChar({ ...character, inventory });
       })
       .catch((e) => {
         if (!cancelled) setError(e.message || 'No se pudo cargar tu ficha.');
@@ -101,21 +135,65 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
   const weapons = char ? char.inventory.filter((i) => i.weapon && i.equipped) : [];
   const rows = char ? [...weapons, unarmedWeapon(char)] : [];
 
-  async function attack(row, advantage) {
+  function effectsFor(row, manualAdvantage = 'none', thrown = false) {
+    const geometry = row.unarmed
+      ? { ranged: false, reach: 1, normalRange: null, longRange: null }
+      : weaponGeometry(row.weapon, { thrown });
+    const range = rangeValidation(distance, geometry);
+    const attackerConditions = [
+      ...(attackerCombatant?.conditions ?? []),
+      ...(attackerCombatant?.downed ? ['inconsciente'] : []),
+    ];
+    const targetConditions = [
+      ...(targetCombatant?.conditions ?? []),
+      ...(targetCombatant?.downed ? ['inconsciente'] : []),
+    ];
+    return resolveAttackEffects({
+      attackerConditions,
+      targetConditions,
+      targetStance: targetCombatant?.stance,
+      distance,
+      highGround,
+      ranged: geometry.ranged,
+      longRange: Boolean(range.longRange),
+      manualAdvantage,
+    });
+  }
+
+  async function attack(row, manualAdvantage) {
     if (!char || busy) return;
+    const thrown = !row.unarmed && Boolean(thrownModes[row.id]);
+    const geometry = row.unarmed
+      ? { ranged: false, reach: 1, normalRange: null, longRange: null }
+      : weaponGeometry(row.weapon, { thrown });
+    const range = rangeValidation(distance, geometry);
+    if (!range.ok) {
+      setError(range.error);
+      return;
+    }
+    if (!lineOfSight) {
+      setError('No hay línea de visión hasta el objetivo.');
+      return;
+    }
+    const effects = effectsFor(row, manualAdvantage, thrown);
+    if (effects.blocked) {
+      setError('Tus condiciones actuales te impiden atacar.');
+      return;
+    }
     setBusy(true);
     setError('');
     const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
     const roll = rollAttack(bonus, {
-      advantage,
+      advantage: effects.advantage,
       label: `${row.name} — ataque contra ${target.name}`,
       actorName: char.name,
     });
     const resp = await attackTarget({
       characterId: char.id,
       target: targetRef,
-      weaponName: row.name,
-      melee: row.unarmed || row.weapon.weaponRange !== 'Ranged',
+      weaponId: row.id,
+      thrown,
+      manualAdvantage,
       roll,
     });
     setBusy(false);
@@ -123,7 +201,15 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
       setError(resp.error);
       return;
     }
-    setFeedback({ type: 'attack', weaponId: row.id, hit: resp.hit, crit: resp.crit, ac: resp.ac, roll });
+    setFeedback({
+      type: 'attack',
+      weaponId: row.id,
+      hit: resp.hit,
+      crit: resp.crit,
+      ac: resp.ac,
+      roll,
+      effects: resp.effects ?? effects,
+    });
   }
 
   async function damage(row) {
@@ -155,7 +241,14 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
         actorName: char.name,
       });
     }
-    const resp = await dealDamage({ characterId: char.id, target: targetRef, roll });
+    const damageType = row.unarmed ? 'bludgeoning' : row.weapon.damageType ?? null;
+    const resp = await dealDamage({
+      characterId: char.id,
+      target: targetRef,
+      weaponId: row.id,
+      components: [{ amount: roll.total, type: damageType }],
+      roll,
+    });
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -165,6 +258,10 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
       type: 'damage',
       weaponId: row.id,
       damage: resp.damage ?? roll.total,
+      rolledDamage: resp.rolledDamage ?? roll.total,
+      adjustments: resp.adjustments ?? [],
+      tempAbsorbed: resp.tempAbsorbed ?? 0,
+      remainingTempHp: resp.remainingTempHp,
       remainingHp: resp.remainingHp,
       maxHp: resp.maxHp,
       defeated: Boolean(resp.defeated),
@@ -192,20 +289,30 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
 
       <div className="space-y-2">
         {rows.map((row) => {
+          const thrown = !row.unarmed && Boolean(thrownModes[row.id]);
+          const canThrow = Boolean(row.weapon?.properties?.includes('thrown'));
           const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
           const fb = feedback?.weaponId === row.id ? feedback : null;
-          // Cota alta: un arma a distancia disparada desde más arriba tiene
-          // ventaja automática (el botón central ataca con ventaja)
-          const isRanged = !row.unarmed && row.weapon.weaponRange === 'Ranged';
-          const rangedAdv = isRanged && highGround;
+          const automaticEffects = effectsFor(row, 'none', thrown);
+          const geometry = row.unarmed
+            ? { ranged: false, reach: 1, normalRange: null, longRange: null }
+            : weaponGeometry(row.weapon, { thrown });
+          const range = rangeValidation(distance, geometry);
+          const geometryBlocked = !range.ok || !lineOfSight;
+          const automaticReasons =
+            automaticEffects.advantage === 'adv'
+              ? automaticEffects.advantageReasons
+              : automaticEffects.advantage === 'dis'
+                ? automaticEffects.disadvantageReasons
+                : [];
           return (
             <div key={row.id} className="rounded-sm border border-bone/10 bg-night-950/60 p-2">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">
                   {row.name}
-                  {rangedAdv && (
+                  {automaticEffects.advantage !== 'none' && (
                     <span className="ml-1.5 rounded-sm border border-moss/60 bg-moss/15 px-1 py-0.5 text-[0.6rem] uppercase tracking-wider text-bone/90">
-                      ⛰ cota alta · ventaja
+                      {automaticEffects.advantage === 'adv' ? 'ventaja' : 'desventaja'} · {automaticReasons.join(', ')}
                     </span>
                   )}
                 </span>
@@ -214,28 +321,63 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
                   {row.unarmed ? ` · ${row.damageTotal} contundente` : ` · ${row.weapon.damageDice}`}
                 </span>
               </div>
+              {canThrow && (
+                <div className="mt-1.5 flex gap-1 text-[0.65rem]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThrownModes((current) => ({ ...current, [row.id]: false }));
+                      setFeedback(null);
+                    }}
+                    className={`rounded-sm border px-2 py-0.5 ${!thrown ? 'border-gold/50 text-gold' : 'border-bone/15 text-bone/45'}`}
+                  >
+                    Cuerpo a cuerpo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThrownModes((current) => ({ ...current, [row.id]: true }));
+                      setFeedback(null);
+                    }}
+                    className={`rounded-sm border px-2 py-0.5 ${thrown ? 'border-gold/50 text-gold' : 'border-bone/15 text-bone/45'}`}
+                  >
+                    Lanzar
+                  </button>
+                </div>
+              )}
+              {geometryBlocked && (
+                <p className="mt-1 text-[0.65rem] text-blood">
+                  {!lineOfSight ? 'Sin línea de visión' : range.error}
+                </p>
+              )}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <button
                   onClick={() => attack(row, 'dis')}
-                  disabled={busy}
+                  disabled={busy || geometryBlocked}
                   className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40"
                 >
                   Desv.
                 </button>
                 <button
-                  onClick={() => attack(row, rangedAdv ? 'adv' : 'none')}
-                  disabled={busy}
+                  onClick={() => attack(row, 'none')}
+                  disabled={busy || geometryBlocked}
                   className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
-                    rangedAdv
+                    automaticEffects.advantage === 'adv'
                       ? 'border-moss bg-moss/15 text-bone/90 hover:bg-moss/25'
+                      : automaticEffects.advantage === 'dis'
+                        ? 'border-blood/50 bg-blood/10 text-blood hover:bg-blood/20'
                       : 'border-gold/50 text-gold hover:bg-gold/10'
                   }`}
                 >
-                  {rangedAdv ? 'Atacar (ventaja)' : 'Atacar'}
+                  {automaticEffects.advantage === 'adv'
+                    ? 'Atacar (ventaja)'
+                    : automaticEffects.advantage === 'dis'
+                      ? 'Atacar (desventaja)'
+                      : 'Atacar'}
                 </button>
                 <button
                   onClick={() => attack(row, 'adv')}
-                  disabled={busy}
+                  disabled={busy || geometryBlocked}
                   className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40"
                 >
                   Vent.
@@ -310,8 +452,26 @@ export default function AttackPanel({ attacker, target, highGround = false, onCl
                       >
                         −{fb.damage}
                       </motion.span>
-                      <span className="text-xs text-bone/50">HP</span>
+                      <span className="text-xs text-bone/50">daño aplicado</span>
                     </div>
+                    {fb.rolledDamage !== fb.damage && (
+                      <p className="mt-1 text-xs text-bone/60">
+                        Tirada: {fb.rolledDamage} · aplicado tras defensas: {fb.damage}
+                      </p>
+                    )}
+                    {fb.adjustments?.length > 0 && (
+                      <p className="mt-1 text-xs text-gold/70">{fb.adjustments.join(' · ')}</p>
+                    )}
+                    {fb.tempAbsorbed > 0 && (
+                      <p className="mt-1 text-xs text-moss">
+                        {fb.tempAbsorbed === true
+                          ? 'Los PG temporales absorben parte del golpe'
+                          : `PG temporales absorbidos: ${fb.tempAbsorbed}`}
+                        {fb.tempAbsorbed !== true && Number.isInteger(fb.remainingTempHp)
+                          ? ` · quedan ${fb.remainingTempHp}`
+                          : ''}
+                      </p>
+                    )}
                     {Number.isInteger(fb.remainingHp) && Number.isInteger(fb.maxHp) && (
                       <p className="mt-1 text-xs text-bone/70">
                         {target.name} queda en{' '}

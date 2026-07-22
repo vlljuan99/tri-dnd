@@ -886,6 +886,129 @@ const migrations = [
   ALTER TABLE combatants ADD COLUMN initiative_mod INTEGER;
   ALTER TABLE combatants ADD COLUMN concentration_spell TEXT;
   `,
+
+  // v45 — Clases y razas personalizables del DM (Fase 26, corte 1). Mismo
+  // patrón que custom_items/custom_spells (v15): por usuario, reutilizables en
+  // cualquier campaña, con `data` JSON que la ficha consumirá igual que una
+  // entrada del SRD. La forma del `data` (bonos de característica, velocidad,
+  // destrezas, resistencias, rasgos…) la valida el servidor en routes/library;
+  // aquí solo se guarda el blob, como con objetos y hechizos.
+  `
+  CREATE TABLE custom_classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_custom_classes_user ON custom_classes(user_id);
+
+  CREATE TABLE custom_races (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_custom_races_user ON custom_races(user_id);
+  `,
+
+  // v46 — Exploración v2 (Corte A): descubrimiento del mapa de mundo. Estado
+  // 'visitada' por ubicación, marcado al viajar allí (world.js). A diferencia
+  // de `hidden`, NO es secreto: viaja a todos los jugadores y alimenta la
+  // "penumbra" del mapa (las ubicaciones aún no visitadas se pintan atenuadas).
+  // La ubicación actual del grupo se marca ya visitada aquí para que las
+  // campañas existentes no arranquen con el mapa entero a oscuras.
+  `
+  ALTER TABLE world_locations ADD COLUMN visited INTEGER NOT NULL DEFAULT 0;
+  UPDATE world_locations SET visited = 1 WHERE id IN
+    (SELECT current_location_id FROM game_tables WHERE current_location_id IS NOT NULL);
+  `,
+
+  // v47 — Resolución mecánica del combate. Los PG temporales de los PJ ya
+  // vivían en characters; el tracker necesita el equivalente para enemigos.
+  // multiattack_state guarda solo la secuencia restante del turno.
+  `
+  ALTER TABLE combatants ADD COLUMN hp_temp INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN multiattack_state TEXT NOT NULL DEFAULT '{}';
+  `,
+
+  // v48 — Índice de texto completo del compendio (FTS5). Tabla virtual con el
+  // texto aplanado de cada entrada del SRD (nombres es/en, descripción
+  // traducida y toda la prosa del `data`: rasgos, acciones, condiciones,
+  // reglas…). category/idx quedan UNINDEXED (se guardan para localizar la fila
+  // en srd_entries, no se tokenizan). remove_diacritics 2 pliega acentos para
+  // que "hidra" encuentre "Hidra" y "bola de fuego" ignore las tildes. La
+  // tabla se POBLA fuera de la migración (services/srdSearch.js), al arrancar
+  // el servidor y al sincronizar, porque el aplanado necesita lógica JS que no
+  // cabe en SQL puro; así las bases ya sincronizadas se rellenan sin re-sync.
+  `
+  CREATE VIRTUAL TABLE IF NOT EXISTS srd_fts USING fts5(
+    category UNINDEXED,
+    idx UNINDEXED,
+    text,
+    tokenize = 'unicode61 remove_diacritics 2'
+  );
+  `,
+
+  // v49 — Exploración v2 (Corte B): red de rutas por capa del mapa de
+  // mundo. El sentido natural es from → to; one_way=0 permite recorrerla en
+  // ambos sentidos. Las rutas desaparecen con su capa o cualquiera de sus
+  // extremos. La pertenencia de ambos pins a la misma campaña/capa y la
+  // ausencia de duplicados se validan en routes/world.js.
+  `
+  CREATE TABLE world_routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    world_map_id INTEGER NOT NULL REFERENCES world_maps(id) ON DELETE CASCADE,
+    from_location_id INTEGER NOT NULL REFERENCES world_locations(id) ON DELETE CASCADE,
+    to_location_id INTEGER NOT NULL REFERENCES world_locations(id) ON DELETE CASCADE,
+    cost INTEGER NOT NULL DEFAULT 1 CHECK (cost >= 1),
+    label TEXT NOT NULL DEFAULT '',
+    one_way INTEGER NOT NULL DEFAULT 0 CHECK (one_way IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (from_location_id <> to_location_id)
+  );
+  CREATE INDEX idx_world_routes_campaign ON world_routes(campaign_id);
+  CREATE INDEX idx_world_routes_map ON world_routes(world_map_id);
+  CREATE INDEX idx_world_routes_from ON world_routes(from_location_id);
+  CREATE INDEX idx_world_routes_to ON world_routes(to_location_id);
+  `,
+
+  // v50 — Referencias del compendio dentro del chat. El texto sigue en
+  // `body` para conservar compatibilidad con todo el historial; esta columna
+  // guarda únicamente los rangos y las claves SRD validadas por el servidor.
+  // No se permiten referencias a la biblioteca privada del DM.
+  `
+  ALTER TABLE chat_messages ADD COLUMN srd_references TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v51 — Ataques de oportunidad detectados por el camino real. La decisión
+  // es opcional y puede sobrevivir a una recarga: se guarda quién reacciona,
+  // a quién alcanza y las opciones cuerpo a cuerpo que cruzaron su alcance.
+  `
+  CREATE TABLE opportunity_attacks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    attacker_combatant_id INTEGER NOT NULL REFERENCES combatants(id) ON DELETE CASCADE,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('personaje', 'marcador')),
+    target_character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+    target_map_token_id INTEGER REFERENCES map_tokens(id) ON DELETE CASCADE,
+    attacker_name TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    attacks TEXT NOT NULL DEFAULT '[]',
+    created_round INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (
+      (target_kind = 'personaje' AND target_character_id IS NOT NULL AND target_map_token_id IS NULL) OR
+      (target_kind = 'marcador' AND target_map_token_id IS NOT NULL AND target_character_id IS NULL)
+    )
+  );
+  CREATE INDEX idx_opportunity_campaign ON opportunity_attacks(campaign_id);
+  CREATE INDEX idx_opportunity_attacker ON opportunity_attacks(attacker_combatant_id);
+  `,
 ];
 
 export function runMigrations() {

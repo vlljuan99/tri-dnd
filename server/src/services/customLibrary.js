@@ -7,7 +7,12 @@ import { buildMeta } from './srdShape.js';
 // listados del compendio se mezclan con index sintético `custom:<id>`.
 
 // Categoría del SRD (la de las rutas /srd/:category) → tabla propia
-const TABLE_BY_CATEGORY = { equipment: 'custom_items', spells: 'custom_spells' };
+const TABLE_BY_CATEGORY = {
+  equipment: 'custom_items',
+  spells: 'custom_spells',
+  classes: 'custom_classes',
+  races: 'custom_races',
+};
 
 export function customCategorySupported(category) {
   return category in TABLE_BY_CATEGORY;
@@ -23,7 +28,7 @@ export function customIdFromIndex(idx) {
   return Number.isInteger(n) ? n : null;
 }
 
-export function serializeCustomEntry(row, category, { full = false } = {}) {
+export function serializeCustomEntry(row, category, { full = false, sharedFromDm = false } = {}) {
   const data = JSON.parse(row.data || '{}');
   const entry = {
     category,
@@ -32,10 +37,11 @@ export function serializeCustomEntry(row, category, { full = false } = {}) {
     nameEn: row.name,
     translated: true, // el DM lo escribe ya en español
     custom: true,
+    sharedFromDm,
     meta: buildMeta(category, data),
   };
   if (full) {
-    entry.data = data;
+    entry.data = { ...data, index: entry.index, name: row.name };
     entry.descEs = null;
   }
   return entry;
@@ -50,10 +56,16 @@ function tableFor(category) {
 // Filas propias del usuario en una categoría, con filtros equivalentes a los
 // del compendio (texto, y para hechizos nivel máximo; la categoría de equipo
 // se filtra por equipment_category del data)
-export function listCustomRows(userId, category, { q = '', cat = null, maxLevel = null } = {}) {
+export function listCustomRowsForOwners(ownerIds, category, { q = '', cat = null, maxLevel = null } = {}) {
+  const uniqueOwnerIds = [...new Set(ownerIds)].filter(Number.isInteger);
+  if (uniqueOwnerIds.length === 0) return [];
   const rows = db
-    .prepare(`SELECT * FROM ${tableFor(category)} WHERE user_id = ? ORDER BY name`)
-    .all(userId);
+    .prepare(
+      `SELECT * FROM ${tableFor(category)}
+       WHERE user_id IN (${uniqueOwnerIds.map(() => '?').join(', ')})
+       ORDER BY name`
+    )
+    .all(...uniqueOwnerIds);
   const needle = q.trim().toLowerCase();
   return rows.filter((row) => {
     if (needle && !row.name.toLowerCase().includes(needle)) return false;
@@ -66,8 +78,23 @@ export function listCustomRows(userId, category, { q = '', cat = null, maxLevel 
   });
 }
 
+export function listCustomRows(userId, category, filters = {}) {
+  return listCustomRowsForOwners([userId], category, filters);
+}
+
+export function getCustomRowForOwners(ownerIds, category, id) {
+  const uniqueOwnerIds = [...new Set(ownerIds)].filter(Number.isInteger);
+  if (uniqueOwnerIds.length === 0) return undefined;
+  return db
+    .prepare(
+      `SELECT * FROM ${tableFor(category)}
+       WHERE id = ? AND user_id IN (${uniqueOwnerIds.map(() => '?').join(', ')})`
+    )
+    .get(id, ...uniqueOwnerIds);
+}
+
 export function getCustomRow(userId, category, id) {
-  return db.prepare(`SELECT * FROM ${tableFor(category)} WHERE id = ? AND user_id = ?`).get(id, userId);
+  return getCustomRowForOwners([userId], category, id);
 }
 
 export function createCustomRow(userId, category, name, data) {

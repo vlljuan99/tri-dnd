@@ -4,7 +4,9 @@ import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
 import { buildBoardWalkable, findBoardPath, reachableWithin, buildBoardElevation } from '../domain/pathfinding.js';
 import { buildBoardWalls } from '../domain/walls.js';
-import { computeBoardVision } from '../domain/vision.js';
+import { computeBoardVision, hasBoardLineOfSight } from '../domain/vision.js';
+import { spellRangeSquares } from '../domain/combatGeometry.js';
+import { spellAimValidation, spellArea, spellAreaCells } from '../domain/spellAreas.js';
 import { useRoom } from '../../../store/socket.js';
 import { toastError } from '../../../store/toast.js';
 import { rollPool } from '../../../lib/dice.js';
@@ -21,6 +23,8 @@ import CharacterQuickView from './CharacterQuickView.jsx';
 import MapControls from './MapControls.jsx';
 import CombatAlert from './CombatAlert.jsx';
 import InitiativeOrder from './InitiativeOrder.jsx';
+import OpportunityPrompt from './OpportunityPrompt.jsx';
+import SpellPanel from './SpellPanel.jsx';
 
 class CanvasErrorBoundary extends Component {
   constructor(props) {
@@ -81,6 +85,10 @@ export default function TacticalMap({
   const [notesOpen, setNotesOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [spellOpen, setSpellOpen] = useState(false);
+  const [spellCast, setSpellCast] = useState(null);
+  const [spellBusy, setSpellBusy] = useState(false);
+  const [spellError, setSpellError] = useState('');
   const [showSelectedVision, setShowSelectedVision] = useState(false);
   const [perceptionState, setPerceptionState] = useState({ busy: false, message: '' });
   const selectedToken = useMemo(
@@ -97,6 +105,24 @@ export default function TacticalMap({
   const specialAction = useRoom((s) => s.specialAction);
   const deathSave = useRoom((s) => s.deathSave);
   const searchTraps = useRoom((s) => s.searchTraps);
+  const castBoardSpell = useRoom((s) => s.castBoardSpell);
+  const combatantForToken = (token) =>
+    token
+      ? combat.combatants.find((combatant) =>
+          token.characterId
+            ? combatant.characterId === token.characterId
+            : combatant.mapTokenId === token.serverId
+        ) ?? null
+      : null;
+  const selectedCombatant = combatantForToken(selectedToken);
+  const targetCombatant = combatantForToken(combatTarget);
+  const attackDistance =
+    selectedToken && combatTarget
+      ? Math.max(
+          Math.abs(worldToGrid(selectedToken.position, map.gridSize).col - worldToGrid(combatTarget.position, map.gridSize).col),
+          Math.abs(worldToGrid(selectedToken.position, map.gridSize).row - worldToGrid(combatTarget.position, map.gridSize).row)
+        )
+      : Infinity;
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
@@ -148,6 +174,56 @@ export default function TacticalMap({
   const boardWalkable = useMemo(() => buildBoardWalkable(map), [map]);
   const boardWalls = useMemo(() => buildBoardWalls(map), [map]);
   const boardElevation = useMemo(() => buildBoardElevation(map), [map]);
+  const spellOrigin = hudToken ? worldToGrid(hudToken.position, map.gridSize) : null;
+  const spellPreview = useMemo(() => {
+    if (!spellCast?.data || !spellCast.aim || !spellOrigin) {
+      return { validation: null, cells: [], affectedNames: [] };
+    }
+    const sight = hasBoardLineOfSight(map, spellOrigin, spellCast.aim);
+    const validation = spellAimValidation(spellCast.data, spellOrigin, spellCast.aim, sight);
+    if (!validation.ok) return { validation, cells: [], affectedNames: [] };
+    const rawCells = spellAreaCells({
+      origin: spellOrigin,
+      aim: spellCast.aim,
+      area: spellCast.area,
+      self: validation.range === 0,
+    });
+    const keys = new Set(rawCells.map((cell) => `${cell.x},${cell.y}`));
+    const affectedNames = spellCast.area
+      ? map.tokens
+          .filter((token) => {
+            if (!token.visible) return false;
+            if (!token.characterId && token.kind !== 'enemigo' && token.kind !== 'aliado') return false;
+            const cell = worldToGrid(token.position, map.gridSize);
+            return keys.has(`${cell.col},${cell.row}`);
+          })
+          .map((token) => token.name)
+      : spellCast.target
+        ? [map.tokens.find((token) => token.id === spellCast.targetTokenId)?.name].filter(Boolean)
+        : [];
+    return {
+      validation,
+      cells: rawCells.map((cell) => ({ col: cell.x, row: cell.y })),
+      affectedNames,
+    };
+  }, [hudToken, map, spellCast, spellOrigin?.col, spellOrigin?.row]);
+  const selectedHasHighGround = (() => {
+    if (!selectedToken || !combatTarget) return false;
+    const attackerCell = worldToGrid(selectedToken.position, map.gridSize);
+    const targetCell = worldToGrid(combatTarget.position, map.gridSize);
+    return (
+      (boardElevation.get(cellKey(attackerCell.col, attackerCell.row)) ?? 0) >
+      (boardElevation.get(cellKey(targetCell.col, targetCell.row)) ?? 0)
+    );
+  })();
+  const attackLineOfSight = (() => {
+    if (!selectedToken || !combatTarget) return false;
+    return hasBoardLineOfSight(
+      map,
+      worldToGrid(selectedToken.position, map.gridSize),
+      worldToGrid(combatTarget.position, map.gridSize)
+    );
+  })();
   const canMakeSelectedFall = Boolean(
     isDm &&
       selectedToken &&
@@ -240,6 +316,12 @@ export default function TacticalMap({
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key !== 'Escape') return;
+      if (spellOpen) {
+        setSpellOpen(false);
+        setSpellCast(null);
+        setSpellError('');
+        return;
+      }
       setMovePreview((preview) => {
         if (!preview) setSelectedTokenId(null);
         return null;
@@ -247,12 +329,23 @@ export default function TacticalMap({
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [spellOpen]);
 
   // Clic en el suelo: con un token tuyo seleccionado, calcula camino y coste
   // hasta esa casilla y muestra la vista previa (el movimiento espera a la
   // confirmación); clic fuera del suelo pisable = deseleccionar.
   function handleGroundClick(point) {
+    if (spellCast?.data) {
+      const cell = worldToGrid(point, map.gridSize);
+      setSpellCast((current) => ({
+        ...current,
+        aim: { x: cell.col, y: cell.row },
+        target: null,
+        targetTokenId: null,
+      }));
+      setSpellError('');
+      return;
+    }
     if (!selectedToken) return;
     const cell = worldToGrid(point, map.gridSize);
     const walkableTarget = boardWalkable.has(cellKey(cell.col, cell.row));
@@ -302,6 +395,27 @@ export default function TacticalMap({
   // interactuar (Fase 8.7); cualquier otro caso simplemente selecciona el token.
   function handleSelectToken(tokenId) {
     setFallTarget(null);
+    const clicked = map.tokens.find((t) => t.id === tokenId);
+    if (spellCast?.data && clicked) {
+      const creature = Boolean(
+        clicked.characterId || (clicked.serverId && ['enemigo', 'aliado'].includes(clicked.kind))
+      );
+      if (!spellCast.area && !creature) {
+        setSpellError('Ese conjuro necesita una criatura como objetivo.');
+        return;
+      }
+      const cell = worldToGrid(clicked.position, map.gridSize);
+      setSpellCast((current) => ({
+        ...current,
+        aim: { x: cell.col, y: cell.row },
+        target: clicked.characterId
+          ? { kind: 'personaje', id: clicked.characterId }
+          : { kind: 'marcador', id: clicked.serverId },
+        targetTokenId: clicked.id,
+      }));
+      setSpellError('');
+      return;
+    }
     // Re-pulsar el token ya seleccionado lo deselecciona (toggle)
     if (tokenId === selectedTokenId) {
       setSelectedTokenId(null);
@@ -311,7 +425,6 @@ export default function TacticalMap({
       setInteractTarget(null);
       return;
     }
-    const clicked = map.tokens.find((t) => t.id === tokenId);
     // El DM también puede atacar CON un enemigo/aliado que controla (no solo
     // con su propio PJ): sin ficha de personaje, sus ataques salen de la
     // ficha de monstruo del SRD (o de un ataque manual si no tiene ninguna).
@@ -426,10 +539,74 @@ export default function TacticalMap({
           terrainCells={terrainCells}
           pathCells={movePreview?.path ?? []}
           visionCells={visionCells}
+          spellCells={spellPreview.cells}
         />
       </CanvasErrorBoundary>
 
       <CombatAlert />
+      {combat.opportunities?.[0] && (
+        <OpportunityPrompt
+          key={combat.opportunities[0].id}
+          opportunity={combat.opportunities[0]}
+        />
+      )}
+
+      {spellOpen && hudCharacterId && hudToken && (
+        <SpellPanel
+          characterId={hudCharacterId}
+          campaignId={campaignId}
+          selection={spellCast}
+          validation={spellPreview.validation}
+          affectedNames={spellPreview.affectedNames}
+          busy={spellBusy}
+          error={spellError}
+          onSelect={(next) => {
+            setSpellError('');
+            if (!next) {
+              setSpellCast(null);
+              return;
+            }
+            const area = spellArea(next.data);
+            const range = spellRangeSquares(next.data);
+            const centeredSelf =
+              range === 0 && area && !['cone', 'line', 'cube'].includes(area.type);
+            setSpellCast({
+              ...next,
+              area,
+              aim: centeredSelf && spellOrigin ? { x: spellOrigin.col, y: spellOrigin.row } : null,
+              target: null,
+              targetTokenId: null,
+            });
+            setMovePreview(null);
+            setCombatTarget(null);
+          }}
+          onSlotLevel={(slotLevel) => setSpellCast((current) => ({ ...current, slotLevel }))}
+          onCast={async () => {
+            if (!spellCast) return;
+            setSpellBusy(true);
+            setSpellError('');
+            const response = await castBoardSpell({
+              characterId: hudCharacterId,
+              spellIndex: spellCast.spell.index,
+              aim: spellCast.aim,
+              target: spellCast.target,
+              slotLevel: spellCast.slotLevel,
+            });
+            setSpellBusy(false);
+            if (response?.error) {
+              setSpellError(response.error);
+              return;
+            }
+            setSpellCast(null);
+            setSpellOpen(false);
+          }}
+          onClose={() => {
+            setSpellOpen(false);
+            setSpellCast(null);
+            setSpellError('');
+          }}
+        />
+      )}
 
       <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-1.5rem)] rounded-sm border border-gold/20 bg-night-900/90 p-3 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="font-display text-sm tracking-wide text-gold">{map.name}</p>
@@ -646,22 +823,26 @@ export default function TacticalMap({
         <AttackPanel
           attacker={selectedToken}
           target={combatTarget}
-          highGround={(() => {
-            // Cota alta: atacante en una casilla más elevada que el objetivo
-            // → ventaja en ataques a distancia (regla de altura). La compara
-            // con el mapa de elevación del tablero.
-            const a = worldToGrid(selectedToken.position, map.gridSize);
-            const t = worldToGrid(combatTarget.position, map.gridSize);
-            const aLvl = boardElevation.get(cellKey(a.col, a.row)) ?? 0;
-            const tLvl = boardElevation.get(cellKey(t.col, t.row)) ?? 0;
-            return aLvl > tLvl;
-          })()}
+          attackerCombatant={selectedCombatant}
+          targetCombatant={targetCombatant}
+          distance={attackDistance}
+          highGround={selectedHasHighGround}
+          lineOfSight={attackLineOfSight}
           onClose={() => setCombatTarget(null)}
         />
       )}
 
       {combatTarget && !selectedToken?.characterId && selectedToken?.serverId && (
-        <MonsterAttackPanel attacker={selectedToken} target={combatTarget} onClose={() => setCombatTarget(null)} />
+        <MonsterAttackPanel
+          attacker={selectedToken}
+          target={combatTarget}
+          attackerCombatant={selectedCombatant}
+          targetCombatant={targetCombatant}
+          distance={attackDistance}
+          highGround={selectedHasHighGround}
+          lineOfSight={attackLineOfSight}
+          onClose={() => setCombatTarget(null)}
+        />
       )}
 
       {interactTarget && ownCharacterId && (
@@ -790,6 +971,12 @@ export default function TacticalMap({
               canSeeNotes={canSeeHudNotes}
               onOpenSheet={() => setSheetOpen(true)}
               onOpenInventory={() => setInventoryOpen((v) => !v)}
+              onOpenSpells={() => {
+                setSpellOpen((open) => !open);
+                setSpellCast(null);
+                setSpellError('');
+                if (hudToken) setSelectedTokenId(hudToken.id);
+              }}
               onOpenNotes={() => setNotesOpen((v) => !v)}
             />
           )}

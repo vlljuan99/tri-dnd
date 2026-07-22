@@ -1,4 +1,4 @@
-import { ABILITIES } from '../../lib/dnd.js';
+import { ABILITIES, SKILLS } from '../../lib/dnd.js';
 import { parseProficiencyChoices, classAutoProficiencies } from '../../lib/wizard.js';
 import HelpBlock from './HelpBlock.jsx';
 
@@ -6,14 +6,16 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
   const { skillChoice, otherChoices } = classDetail ? parseProficiencyChoices(classDetail) : {};
   const autoProf = classDetail ? classAutoProficiencies(classDetail) : [];
   const wd = char.wizard_data;
+  const raceSkills = wd.appliedRaceSkillProficiencies ?? [];
+  const chosenSkills = char.skill_proficiencies.filter((key) => !raceSkills.includes(key));
 
   function toggleSkill(key) {
-    const current = char.skill_proficiencies;
+    const current = chosenSkills;
     let next;
     if (current.includes(key)) next = current.filter((k) => k !== key);
     else if (current.length < (skillChoice?.choose ?? 0)) next = [...current, key];
     else return;
-    patch({ skill_proficiencies: next });
+    patch({ skill_proficiencies: [...new Set([...next, ...raceSkills])] });
   }
 
   function toggleOther(group, key) {
@@ -34,7 +36,7 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
     return <p className="text-sm text-bone/50">Elige antes una clase en el paso anterior.</p>;
   }
 
-  const skillsLeft = (skillChoice?.choose ?? 0) - char.skill_proficiencies.length;
+  const skillsLeft = (skillChoice?.choose ?? 0) - chosenSkills.length;
 
   return (
     <div className="space-y-4">
@@ -65,6 +67,19 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
         </div>
       )}
 
+      {raceSkills.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-xs uppercase tracking-wider text-bone/50">Habilidades de la raza (automáticas)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {raceSkills.map((key) => (
+              <span key={key} className="rounded-sm border border-moss bg-moss/10 px-2 py-1 text-xs text-bone/80">
+                {SKILLS.find((skill) => skill.index === key)?.name ?? key}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {skillChoice && (
         <div>
           <div className="mb-1.5 flex items-baseline justify-between">
@@ -77,8 +92,9 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
           </div>
           <div className="grid gap-1.5 sm:grid-cols-2">
             {skillChoice.options.map((o) => {
-              const checked = char.skill_proficiencies.includes(o.key);
-              const disabled = !checked && skillsLeft <= 0;
+              const automatic = raceSkills.includes(o.key);
+              const checked = chosenSkills.includes(o.key);
+              const disabled = automatic || (!checked && skillsLeft <= 0);
               return (
                 <label
                   key={o.key}
@@ -86,8 +102,8 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
                     checked ? 'border-gold/50 bg-gold/10' : 'border-bone/10'
                   } ${disabled ? 'opacity-40' : 'cursor-pointer hover:bg-bone/5'}`}
                 >
-                  <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleSkill(o.key)} className="accent-gold" />
-                  {o.name}
+                  <input type="checkbox" checked={checked || automatic} disabled={disabled} onChange={() => toggleSkill(o.key)} className="accent-gold" />
+                  {o.name}{automatic ? ' (ya concedida por la raza)' : ''}
                 </label>
               );
             })}
@@ -143,8 +159,10 @@ export function validateCompetencias(char, classDetail) {
   const errors = {};
   if (!classDetail) return errors;
   const { skillChoice, otherChoices } = parseProficiencyChoices(classDetail);
-  if (skillChoice && char.skill_proficiencies.length < skillChoice.choose) {
-    errors.skills = `Te faltan ${skillChoice.choose - char.skill_proficiencies.length} habilidades por elegir.`;
+  const raceSkills = char.wizard_data.appliedRaceSkillProficiencies ?? [];
+  const chosenCount = char.skill_proficiencies.filter((key) => !raceSkills.includes(key)).length;
+  if (skillChoice && chosenCount < skillChoice.choose) {
+    errors.skills = `Te faltan ${skillChoice.choose - chosenCount} habilidades por elegir.`;
   }
   for (const group of otherChoices ?? []) {
     const chosen = char.wizard_data.otherProficiencyChoices?.[group.groupKey] ?? [];

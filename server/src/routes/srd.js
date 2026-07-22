@@ -8,14 +8,16 @@ import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
 import { notifyCampaignMap } from '../services/liveMap.js';
 import { buildMeta, SRD_CATEGORIES, SRD_CATEGORY_KEYS } from '../services/srdShape.js';
+import { searchSrdRows } from '../services/srdSearch.js';
 import {
   customCategorySupported,
   isCustomIndex,
   customIdFromIndex,
-  listCustomRows,
-  getCustomRow,
+  listCustomRowsForOwners,
+  getCustomRowForOwners,
   serializeCustomEntry,
 } from '../services/customLibrary.js';
+import { campaignDmForMember, visibleCustomOwnerIds } from '../services/customLibraryAccess.js';
 
 export const srdRouter = Router();
 srdRouter.use(requireAuth);
@@ -29,8 +31,132 @@ function integerQueryParam(value, fallback, maximum) {
   return Math.min(parsed, maximum);
 }
 
+function numberQueryParam(value, { min = 0, max = 100 } = {}) {
+  if (value === undefined || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
+}
+
+function textQueryParam(value, maximum = 80) {
+  return typeof value === 'string' ? value.trim().slice(0, maximum) : '';
+}
+
+function searchFacetFilters(query) {
+  return {
+    spellLevelMin: numberQueryParam(query.nivelMin, { min: 0, max: 9 }),
+    spellLevelMax: numberQueryParam(query.nivelMax, { min: 0, max: 9 }),
+    spellSchool: textQueryParam(query.escuela),
+    spellClass: textQueryParam(query.clase),
+    monsterCrMin: numberQueryParam(query.vdMin, { min: 0, max: 30 }),
+    monsterCrMax: numberQueryParam(query.vdMax, { min: 0, max: 30 }),
+    monsterType: textQueryParam(query.tipoMonstruo),
+    magicItemRarity: textQueryParam(query.rareza),
+  };
+}
+
+function matchesSearchFacets(entry, filters) {
+  const families = [];
+  const spellActive = filters.spellLevelMin != null
+    || filters.spellLevelMax != null
+    || filters.spellSchool
+    || filters.spellClass;
+  if (spellActive) {
+    const meta = entry.meta ?? {};
+    families.push(entry.category === 'spells'
+      && (filters.spellLevelMin == null || Number(meta.level) >= filters.spellLevelMin)
+      && (filters.spellLevelMax == null || Number(meta.level) <= filters.spellLevelMax)
+      && (!filters.spellSchool || meta.school === filters.spellSchool)
+      && (!filters.spellClass || meta.classes?.includes(filters.spellClass)));
+  }
+
+  const monsterActive = filters.monsterCrMin != null
+    || filters.monsterCrMax != null
+    || filters.monsterType;
+  if (monsterActive) {
+    const meta = entry.meta ?? {};
+    families.push(entry.category === 'monsters'
+      && (filters.monsterCrMin == null || Number(meta.cr) >= filters.monsterCrMin)
+      && (filters.monsterCrMax == null || Number(meta.cr) <= filters.monsterCrMax)
+      && (!filters.monsterType || String(meta.type).toLowerCase() === filters.monsterType.toLowerCase()));
+  }
+
+  if (filters.magicItemRarity) {
+    families.push(entry.category === 'magic-items'
+      && String(entry.meta?.rarity).toLowerCase() === filters.magicItemRarity.toLowerCase());
+  }
+  return families.length === 0 || families.some(Boolean);
+}
+
+function facetOptions() {
+  const spellSchools = db.prepare(
+    `SELECT DISTINCT json_extract(spell.data, '$.school.index') AS value,
+            COALESCE(reference.name_es, reference.name_en, json_extract(spell.data, '$.school.name')) AS label
+       FROM srd_entries spell
+       LEFT JOIN srd_entries reference
+         ON reference.category = 'magic-schools'
+        AND reference.idx = json_extract(spell.data, '$.school.index')
+      WHERE spell.category = 'spells' AND value IS NOT NULL
+      ORDER BY label`
+  ).all();
+  const spellClasses = db.prepare(
+    `SELECT DISTINCT json_extract(item.value, '$.index') AS value,
+            COALESCE(reference.name_es, reference.name_en, json_extract(item.value, '$.name')) AS label
+       FROM srd_entries spell
+       JOIN json_each(spell.data, '$.classes') item
+       LEFT JOIN srd_entries reference
+         ON reference.category = 'classes'
+        AND reference.idx = json_extract(item.value, '$.index')
+      WHERE spell.category = 'spells' AND value IS NOT NULL
+      ORDER BY label`
+  ).all();
+  const monsterTypes = db.prepare(
+    `SELECT DISTINCT json_extract(data, '$.type') AS value
+       FROM srd_entries
+      WHERE category = 'monsters' AND value IS NOT NULL
+      ORDER BY value`
+  ).all().map(({ value }) => ({ value, label: value }));
+  const magicItemRarities = db.prepare(
+    `SELECT DISTINCT json_extract(data, '$.rarity.name') AS value
+       FROM srd_entries
+      WHERE category = 'magic-items' AND value IS NOT NULL
+      ORDER BY value`
+  ).all().map(({ value }) => ({ value, label: value }));
+  return { spellSchools, spellClasses, monsterTypes, magicItemRarities };
+}
+
 function sortEntries(entries) {
   return entries.sort((a, b) => SPANISH_COLLATOR.compare(a.name, b.name));
+}
+
+function campaignLibraryContext(req, res) {
+  if (req.query.campaignId === undefined) return { ok: true, dmUserId: null };
+  if (typeof req.query.campaignId !== 'string') {
+    res.status(400).json({ error: 'La campaña no es válida' });
+    return { ok: false, dmUserId: null };
+  }
+  const campaignId = Number(req.query.campaignId);
+  if (!Number.isInteger(campaignId) || campaignId <= 0) {
+    res.status(400).json({ error: 'La campaña no es válida' });
+    return { ok: false, dmUserId: null };
+  }
+  const dmUserId = campaignDmForMember(db, campaignId, req.user.id);
+  if (dmUserId == null) {
+    res.status(403).json({ error: 'No perteneces a esta campaña' });
+    return { ok: false, dmUserId: null };
+  }
+  return { ok: true, dmUserId };
+}
+
+function visibleOwnerIds(req, category, campaignContext) {
+  return visibleCustomOwnerIds(req.user.id, category, campaignContext.dmUserId);
+}
+
+function serializeVisibleCustomEntry(row, category, viewerUserId, options = {}) {
+  return serializeCustomEntry(row, category, {
+    ...options,
+    sharedFromDm: row.user_id !== viewerUserId,
+  });
 }
 
 function toEntry(row, { full = false } = {}) {
@@ -98,6 +224,7 @@ srdRouter.get('/status', (req, res) => {
     total: Object.values(counts).reduce((sum, count) => sum + count, 0),
     counts,
     categories: SRD_CATEGORIES,
+    facets: facetOptions(),
   });
 });
 
@@ -228,34 +355,44 @@ srdRouter.get('/buscar', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
   const limit = Math.max(1, integerQueryParam(req.query.limit, 60, 120));
   const offset = integerQueryParam(req.query.offset, 0, 100_000);
-  const placeholders = categories.map(() => '?').join(', ');
-  const where = [`category IN (${placeholders})`];
-  const params = [...categories];
+  const source = req.query.fuente === 'srd' || req.query.fuente === 'propios' ? req.query.fuente : null;
+  const filters = searchFacetFilters(req.query);
+  const campaignContext = campaignLibraryContext(req, res);
+  if (!campaignContext.ok) return;
+
+  // Con texto, el índice FTS aplana toda la prosa de cada entrada y ordena por
+  // relevancia (bm25); sin texto, se listan las categorías pedidas y se ordena
+  // alfabéticamente más abajo. Las categorías se empujan a la consulta para
+  // que un término muy común no desplace resultados válidos antes de paginar.
+  const srdRows = source === 'propios'
+    ? []
+    : q
+      ? searchSrdRows(q, { categories })
+      : db
+          .prepare(`SELECT * FROM srd_entries WHERE category IN (${categories.map(() => '?').join(', ')})`)
+          .all(...categories);
+  let allResults = srdRows.map((row) => toEntry(row));
+
+  const customResults = [];
+  if (source !== 'srd') {
+    for (const category of categories.filter(customCategorySupported)) {
+      const ownerIds = visibleOwnerIds(req, category, campaignContext);
+      customResults.push(
+        ...listCustomRowsForOwners(ownerIds, category, { q }).map((row) =>
+          serializeVisibleCustomEntry(row, category, req.user.id)
+        )
+      );
+    }
+  }
+
   if (q) {
-    // Las descripciones viven en distintas ramas según el recurso. Se buscan
-    // sus valores concretos (no el JSON entero, cuyos nombres de campo darían
-    // falsos positivos) sin consultar la API externa.
-    where.push(`(
-      name_es LIKE ? OR name_en LIKE ? OR desc_es LIKE ?
-      OR json_extract(data, '$.desc') LIKE ?
-      OR json_extract(data, '$.feature.desc') LIKE ?
-      OR json_extract(data, '$.higher_level') LIKE ?
-      OR json_extract(data, '$.special') LIKE ?
-    )`);
-    params.push(...Array.from({ length: 7 }, () => `%${q}%`));
+    // Relevancia del SRD ya viene del FTS; el contenido propio del DM (pocas
+    // entradas) se añade ordenado por nombre al final.
+    allResults = [...allResults, ...sortEntries(customResults)];
+  } else {
+    allResults = sortEntries([...allResults, ...customResults]);
   }
-
-  let allResults = db
-    .prepare(
-      `SELECT * FROM srd_entries WHERE ${where.join(' AND ')}`
-    )
-    .all(...params)
-    .map((row) => toEntry(row));
-
-  for (const category of categories.filter(customCategorySupported)) {
-    allResults.push(...listCustomRows(req.user.id, category, { q }).map((row) => serializeCustomEntry(row, category)));
-  }
-  sortEntries(allResults);
+  allResults = allResults.filter((entry) => matchesSearchFacets(entry, filters));
   const counts = allResults.reduce((result, entry) => {
     result[entry.category] = (result[entry.category] ?? 0) + 1;
     return result;
@@ -273,6 +410,8 @@ srdRouter.get('/buscar', (req, res) => {
 srdRouter.get('/:category', (req, res) => {
   const { category } = req.params;
   if (!CATEGORIES.has(category)) return res.status(404).json({ error: 'Categoría desconocida' });
+  const campaignContext = campaignLibraryContext(req, res);
+  if (!campaignContext.ok) return;
 
   const where = ['category = ?'];
   const params = [category];
@@ -310,11 +449,12 @@ srdRouter.get('/:category', (req, res) => {
   const fuente = req.query.fuente;
   if (customCategorySupported(category) && fuente !== 'srd') {
     const maxLevel = Number(req.query.maxLevel);
-    const custom = listCustomRows(req.user.id, category, {
+    const ownerIds = visibleOwnerIds(req, category, campaignContext);
+    const custom = listCustomRowsForOwners(ownerIds, category, {
       q,
       cat: category === 'equipment' && typeof req.query.cat === 'string' ? req.query.cat : null,
       maxLevel: Number.isInteger(maxLevel) ? maxLevel : null,
-    }).map((row) => serializeCustomEntry(row, category));
+    }).map((row) => serializeVisibleCustomEntry(row, category, req.user.id));
     if (fuente === 'propios') results = custom;
     else results = [...custom, ...results];
   }
@@ -334,10 +474,13 @@ srdRouter.get('/:category/:idx', (req, res) => {
     if (!customCategorySupported(category)) {
       return res.status(404).json({ error: 'Entrada no encontrada' });
     }
+    const campaignContext = campaignLibraryContext(req, res);
+    if (!campaignContext.ok) return;
     const id = customIdFromIndex(idx);
-    const row = id != null && getCustomRow(req.user.id, category, id);
+    const ownerIds = visibleOwnerIds(req, category, campaignContext);
+    const row = id != null && getCustomRowForOwners(ownerIds, category, id);
     if (!row) return res.status(404).json({ error: 'Entrada no encontrada' });
-    return res.json(serializeCustomEntry(row, category, { full: true }));
+    return res.json(serializeVisibleCustomEntry(row, category, req.user.id, { full: true }));
   }
 
   const row = db

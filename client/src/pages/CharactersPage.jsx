@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { CLASS_NAMES } from '../lib/dnd.js';
+import { srdCampaignPath } from '../lib/srdCampaign.js';
 
 const DM_CATEGORY_LABELS = {
   enemigo: 'Enemigo',
@@ -57,15 +58,46 @@ export default function CharactersPage() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [classifyingId, setClassifyingId] = useState(null);
+  const [classNames, setClassNames] = useState({});
   const [raceNames, setRaceNames] = useState({});
   const navigate = useNavigate();
 
   useEffect(() => {
-    api('/characters').then(({ characters }) => setCharacters(characters)).catch((e) => setError(e.message));
-    // Traducciones de raza del compendio, igual que en la ficha completa
-    api('/srd/races')
-      .then(({ results }) => setRaceNames(Object.fromEntries(results.map((r) => [r.index, r.name]))))
-      .catch(() => {});
+    api('/characters')
+      .then(({ characters: loadedCharacters }) => {
+        setCharacters(loadedCharacters);
+        const campaignIds = [
+          null,
+          ...new Set(
+            loadedCharacters
+              .map((character) => character.campaign_id)
+              .filter((campaignId) => Number.isInteger(campaignId))
+          ),
+        ];
+        return Promise.all(
+          campaignIds.map(async (campaignId) => {
+            try {
+              const [classResponse, raceResponse] = await Promise.all([
+                api(srdCampaignPath('classes', campaignId)),
+                api(srdCampaignPath('races', campaignId)),
+              ]);
+              return { classes: classResponse.results, races: raceResponse.results };
+            } catch {
+              return { classes: [], races: [] };
+            }
+          })
+        );
+      })
+      .then((responses) => {
+        if (!responses) return;
+        setClassNames(
+          Object.fromEntries(responses.flatMap((response) => response.classes.map((entry) => [entry.index, entry.name])))
+        );
+        setRaceNames(
+          Object.fromEntries(responses.flatMap((response) => response.races.map((entry) => [entry.index, entry.name])))
+        );
+      })
+      .catch((e) => setError(e.message));
   }, []);
 
   async function createCharacter(kind = 'pj', dmCategoryValue = null) {
@@ -149,7 +181,7 @@ export default function CharactersPage() {
             ) : (
               <>
                 <p className="mt-0.5 truncate text-sm text-ink/70">
-                  {dm ? 'Ficha completa del DM' : CLASS_NAMES[c.class_index] ?? 'Sin clase'}
+                  {dm ? 'Ficha completa del DM' : classNames[c.class_index] ?? CLASS_NAMES[c.class_index] ?? 'Sin clase'}
                   {!dm && raceNames[c.race_index] ? ` · ${raceNames[c.race_index]}` : ''}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">

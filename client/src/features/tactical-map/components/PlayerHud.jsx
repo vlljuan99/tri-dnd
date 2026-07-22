@@ -17,12 +17,14 @@ export default function PlayerHud({
   onDeathSave,
   onOpenSheet,
   onOpenInventory,
+  onOpenSpells,
   onOpenNotes,
 }) {
   if (!token) return null;
 
   const hp = combatant?.hpCurrent ?? token.hp;
   const hpMax = combatant?.hpMax ?? token.hpMax;
+  const hpTemp = combatant?.hpTemp ?? 0;
   const ac = combatant?.ac;
   const speed = combatant?.speed ?? token.speed;
   // Correr (Dash) dobla el presupuesto de movimiento del turno
@@ -60,6 +62,7 @@ export default function PlayerHud({
           <span className="font-mono text-xs text-bone/70">
             {hp}/{hpMax}
           </span>
+          {hpTemp > 0 && <span className="font-mono text-xs text-moss">+{hpTemp} temp.</span>}
         </StatTooltip>
       )}
 
@@ -130,9 +133,9 @@ export default function PlayerHud({
         </div>
       )}
 
-      {/* Acciones especiales del turno (gastan la acción): Correr, Esquivar,
-          Destrabarse. Correr dobla el movimiento; las otras son posturas que
-          el DM narra (sin autodetección de disparadores). */}
+      {/* Acciones especiales del turno (gastan la acción): Correr dobla el
+          movimiento, Esquivar altera ataques y Destrabarse evita que el
+          camino confirmado genere ataques de oportunidad. */}
       {canAct && onSpecialAction && (
         <div className="flex items-center gap-1 border-l border-bone/10 pl-3">
           {[
@@ -164,6 +167,14 @@ export default function PlayerHud({
             className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
           >
             Ficha
+          </button>
+        )}
+        {characterId && onOpenSpells && (
+          <button
+            onClick={onOpenSpells}
+            className="inline-flex min-h-9 items-center rounded-sm border border-violet-300/30 px-2.5 text-xs text-violet-100 hover:border-violet-300"
+          >
+            Conjuros
           </button>
         )}
         {characterId && (

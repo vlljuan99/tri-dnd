@@ -279,6 +279,7 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                     <StatTooltip stat="hp">
                       {c.hpCurrent}/{c.hpMax}
                     </StatTooltip>
+                    {c.hpTemp > 0 && <span className="text-moss">+{c.hpTemp} temp.</span>}
                     {c.ac != null && (
                       <>
                         ·<StatTooltip stat="ca">CA {c.ac}</StatTooltip>
@@ -422,7 +423,13 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                 </div>
               )}
               {isDm && conditionsFor === c.id && (
-                <ConditionEditor conditions={c.conditions} onToggle={(key) => room.toggleCondition(c.id, key)} />
+                <ConditionEditor
+                  conditions={c.conditions}
+                  onToggle={async (key) => {
+                    const resp = await room.toggleCondition(c.id, key);
+                    if (resp?.error) toastError(resp.error);
+                  }}
+                />
               )}
               {isDm && editingId === c.id && (
                 <EditCombatantForm
@@ -685,6 +692,7 @@ function EditCombatantForm({ combatant, onSave, onCancel }) {
   const [initiative, setInitiative] = useState(String(combatant.initiative));
   const [hp, setHp] = useState(combatant.hpCurrent ?? '');
   const [hpMax, setHpMax] = useState(combatant.hpMax ?? '');
+  const [hpTemp, setHpTemp] = useState(combatant.hpTemp ?? 0);
   const [ac, setAc] = useState(combatant.ac ?? '');
 
   function save() {
@@ -693,6 +701,7 @@ function EditCombatantForm({ combatant, onSave, onCancel }) {
         name,
         hpCurrent: hp === '' ? undefined : Number(hp),
         hpMax: hpMax === '' ? undefined : Number(hpMax),
+        hpTemp: hpTemp === '' ? undefined : Number(hpTemp),
         ac: ac === '' ? undefined : Number(ac),
       },
       Number(initiative)
@@ -727,6 +736,14 @@ function EditCombatantForm({ combatant, onSave, onCancel }) {
           value={hpMax}
           onChange={(e) => setHpMax(e.target.value)}
           placeholder="PG máx."
+          className="w-20 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-sm focus:border-gold focus:outline-none"
+        />
+        <input
+          type="number"
+          min="0"
+          value={hpTemp}
+          onChange={(e) => setHpTemp(e.target.value)}
+          placeholder="PG temp."
           className="w-20 rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-sm focus:border-gold focus:outline-none"
         />
         {combatant.kind === 'enemigo' && (

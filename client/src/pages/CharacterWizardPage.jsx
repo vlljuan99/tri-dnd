@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { abilityModifier, estimateHitPoints } from '../lib/dnd.js';
-import { applyRacialBonuses } from '../lib/wizard.js';
+import { applyRacialBonuses, mergeAutomaticSkills, raceAutomaticSkills } from '../lib/wizard.js';
+import { srdCampaignPath } from '../lib/srdCampaign.js';
 import WizardProgress from '../components/wizard/WizardProgress.jsx';
 import WizardPreview from '../components/wizard/WizardPreview.jsx';
 import StepIdentidad, { validateIdentidad } from '../components/wizard/StepIdentidad.jsx';
@@ -54,7 +55,8 @@ export default function CharacterWizardPage() {
   const timerRef = useRef(null);
   const stepHeadingRef = useRef(null);
 
-  // Carga inicial: el personaje (con su progreso guardado) + el compendio
+  // Carga inicial: el personaje (con su progreso guardado) y sus campañas.
+  // El compendio se carga después con el contexto de la campaña seleccionada.
   useEffect(() => {
     api(`/characters/${id}`)
       .then(({ character, editable }) => {
@@ -72,18 +74,40 @@ export default function CharacterWizardPage() {
       })
       .catch((e) => setError(e.message));
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch(() => {});
-    api('/srd/classes').then(async ({ results }) => {
-      setClasses(results);
-      const details = await Promise.all(results.map((c) => api(`/srd/classes/${c.index}`)));
-      setClassDetails(Object.fromEntries(details.map((d) => [d.index, d.data])));
-    });
-    api('/srd/races').then(async ({ results }) => {
-      setRaces(results);
-      const details = await Promise.all(results.map((r) => api(`/srd/races/${r.index}`)));
-      setRaceDetails(Object.fromEntries(details.map((d) => [d.index, d.data])));
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Las clases y razas del DM solo se comparten dentro de una campaña de la
+  // que el jugador sea miembro. Al cambiar la campaña en Identidad se recarga
+  // el selector; sin campaña, el usuario conserva su propia Biblioteca.
+  useEffect(() => {
+    if (!char) return undefined;
+    let cancelled = false;
+    const campaignId = char.campaign_id;
+
+    async function loadChoices(category, setEntries, setDetails) {
+      const { results } = await api(srdCampaignPath(category, campaignId));
+      const details = await Promise.all(
+        results.map((entry) => api(srdCampaignPath(category, campaignId, entry.index)))
+      );
+      if (cancelled) return;
+      setEntries(results);
+      setDetails(Object.fromEntries(details.map((detail) => [detail.index, detail.data])));
+    }
+
+    setClasses([]);
+    setRaces([]);
+    Promise.all([
+      loadChoices('classes', setClasses, setClassDetails),
+      loadChoices('races', setRaces, setRaceDetails),
+    ]).catch((e) => {
+      if (!cancelled) setError(e.message);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [char?.campaign_id]);
 
   const flush = useCallback(async () => {
     const body = pendingRef.current;
@@ -151,7 +175,8 @@ export default function CharacterWizardPage() {
   useEffect(() => {
     if (!char?.race_index) return;
     const detail = raceDetails[char.race_index];
-    if (detail && char.speed !== detail.speed) patch({ speed: detail.speed });
+    const speed = detail?.speed ?? 30;
+    if (detail && char.speed !== speed) patch({ speed });
   }, [char?.race_index, char?.speed, raceDetails, patch]);
 
   // Características finales = base elegida en el paso 4 + bonificadores raciales
@@ -166,6 +191,22 @@ export default function CharacterWizardPage() {
       patch({ abilities: computed });
     }
   }, [char?.wizard_data?.baseAbilities, char?.wizard_data?.raceAbilityChoice, char?.race_index, raceDetails, patch]);
+
+  useEffect(() => {
+    if (!char?.race_index) return;
+    const detail = raceDetails[char.race_index];
+    if (!detail) return;
+    const previous = char.wizard_data.appliedRaceSkillProficiencies ?? [];
+    const next = raceAutomaticSkills(detail);
+    const merged = mergeAutomaticSkills(char.skill_proficiencies, previous, next);
+    if (JSON.stringify(merged) === JSON.stringify(char.skill_proficiencies) && JSON.stringify(previous) === JSON.stringify(next)) {
+      return;
+    }
+    patch({
+      skill_proficiencies: merged,
+      wizard_data: { ...char.wizard_data, appliedRaceSkillProficiencies: next },
+    });
+  }, [char?.race_index, char?.skill_proficiencies, char?.wizard_data, raceDetails, patch]);
 
   const classDetail = char?.class_index ? classDetails[char.class_index] : null;
   const raceDetail = char?.race_index ? raceDetails[char.race_index] : null;
@@ -286,6 +327,7 @@ export default function CharacterWizardPage() {
             classes={classes}
             classDetails={classDetails}
             classDetail={classDetail}
+            classDisplayName={classDisplayName}
             races={races}
             raceDetails={raceDetails}
             raceDetail={raceDetail}

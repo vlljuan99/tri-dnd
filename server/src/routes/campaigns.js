@@ -21,7 +21,8 @@ import {
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
 import { lootMarkerInto } from '../services/loot.js';
-import { buildWalkableGrid, findPathCost, buildElevationMap } from '../services/pathfinding.js';
+import { buildWalkableGrid, findPath, buildElevationMap } from '../services/pathfinding.js';
+import { queueOpportunityAttacks } from '../services/opportunityAttacks.js';
 import { buildWallSet } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 import { serializeEvent } from './events.js';
@@ -753,6 +754,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   // separadas se cruza pisando el umbral de una puerta, como siempre. Con el
   // modo por turnos activo, ese coste se descuenta del presupuesto del
   // turno; el DM mueve sin restricción (reposiciona la escena a placer).
+  let movementPath = [{ x: token.x, y: token.y }, { x, y }];
   if (!isDm) {
     const traversable = db
       .prepare('SELECT * FROM map_rooms WHERE floor_id = ? AND (revealed = 1 OR id = ?)')
@@ -767,7 +769,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
           )
           .all(activeMapId, ...traversableIds, ...traversableIds)
       : [];
-    const cost = findPathCost(
+    const pathResult = findPath(
       buildWalkableGrid(traversable),
       { x: token.x, y: token.y },
       { x, y },
@@ -775,10 +777,11 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
       buildWallSet(traversable, traversableDoors),
       buildElevationMap(traversable)
     );
-    if (cost === null) {
+    if (!pathResult) {
       return res.status(400).json({ error: 'No hay camino hasta esa casilla' });
     }
-    const spend = trySpendMovement(req.params.id, character.id, cost);
+    movementPath = [{ x: token.x, y: token.y }, ...pathResult.path];
+    const spend = trySpendMovement(req.params.id, character.id, pathResult.cost);
     if (!spend.ok) return res.status(400).json({ error: spend.error });
   }
 
@@ -825,6 +828,21 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   );
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
+  if (!isDm) {
+    const moverCombatant = db
+      .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
+      .get(req.params.id, character.id);
+    const queued = queueOpportunityAttacks({
+      campaignId: req.params.id,
+      moverKind: 'personaje',
+      moverCharacterId: character.id,
+      moverName: character.name,
+      moverCombatant,
+      floorId: currentRoom.floor_id,
+      path: movementPath,
+    });
+    if (queued.length) notifyCombat(req.params.id);
+  }
   if (newlyRevealed.length) {
     const spawned = spawnRoomEnemies(req.params.id, newlyRevealed);
     if (spawned.added > 0) notifyCombat(req.params.id);

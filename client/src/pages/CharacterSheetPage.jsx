@@ -5,6 +5,7 @@ import {
   ABILITIES,
   SKILLS,
   SCHOOL_NAMES,
+  DAMAGE_TYPE_NAMES,
   abilityModifier,
   proficiencyBonus,
   formatModifier,
@@ -12,6 +13,7 @@ import {
   skillBonus,
   spellAttackBonus,
   spellSaveDC,
+  spellcastingAbility,
 } from '../lib/dnd.js';
 import { rollAttack } from '../lib/dice.js';
 import { castSpellRoll } from '../lib/spellcasting.js';
@@ -28,9 +30,61 @@ import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.js
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 import CustomSections from '../components/CustomSections.jsx';
 import { resolveCharacterReturn } from '../lib/characterReturn.js';
+import { srdCampaignPath } from '../lib/srdCampaign.js';
+import {
+  applyRacialBonuses,
+  mergeAutomaticSkills,
+  raceAutomaticSkills,
+  racialAbilityBonuses,
+} from '../lib/wizard.js';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
+
+// Selector de clase/raza que mezcla el compendio SRD con el contenido propio
+// del DM (Fase 26): las entradas propias llegan con `custom: true` e índice
+// `custom:<id>`, y se agrupan aparte para distinguirlas de un vistazo. Si el
+// personaje tiene guardada una entrada propia que ya no existe (borrada), se
+// muestra igualmente para no perder el valor guardado sin que el DM lo sepa.
+function SrdCustomSelect({ value, options, disabled, onChange }) {
+  const ownCustom = options.filter((o) => o.custom && !o.sharedFromDm);
+  const dmCustom = options.filter((o) => o.custom && o.sharedFromDm);
+  const srd = options.filter((o) => !o.custom);
+  const known = options.some((o) => o.index === value);
+
+  return (
+    <select
+      value={value ?? ''}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value || null)}
+      className={inputClass}
+    >
+      <option value="">—</option>
+      {value && !known && (
+        <option value={value}>Personalizada (ya no disponible)</option>
+      )}
+      {dmCustom.length > 0 && (
+        <optgroup label="Del DM de la campaña">
+          {dmCustom.map((o) => (
+            <option key={o.index} value={o.index}>{o.name}</option>
+          ))}
+        </optgroup>
+      )}
+      {ownCustom.length > 0 && (
+        <optgroup label="De tu biblioteca">
+          {ownCustom.map((o) => (
+            <option key={o.index} value={o.index}>{o.name}</option>
+          ))}
+        </optgroup>
+      )}
+      <optgroup label="Compendio SRD">
+        {srd.map((o) => (
+          <option key={o.index} value={o.index}>{o.name}</option>
+        ))}
+      </optgroup>
+    </select>
+  );
+}
 
 function Card({ title, action, children }) {
   return (
@@ -67,6 +121,8 @@ export default function CharacterSheetPage() {
   const { char, editable, saveState, error, patch } = useCharacter(id);
   const [classes, setClasses] = useState([]);
   const [races, setRaces] = useState([]);
+  const [classDetails, setClassDetails] = useState({});
+  const [raceDetails, setRaceDetails] = useState({});
   const [campaigns, setCampaigns] = useState([]);
   const [picker, setPicker] = useState(null); // 'weapon' | 'gear' | 'spell'
   const [customItem, setCustomItem] = useState('');
@@ -82,10 +138,63 @@ export default function CharacterSheetPage() {
   const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
-    api('/srd/classes').then(({ results }) => setClasses(results));
-    api('/srd/races').then(({ results }) => setRaces(results));
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!char) return undefined;
+    let cancelled = false;
+    const campaignId = char.campaign_id;
+
+    async function loadCategory(category) {
+      const { results } = await api(srdCampaignPath(category, campaignId));
+      const details = await Promise.all(
+        results.map((entry) => api(srdCampaignPath(category, campaignId, entry.index)))
+      );
+      return {
+        entries: results,
+        details: Object.fromEntries(details.map((detail) => [detail.index, detail.data])),
+      };
+    }
+
+    Promise.all([loadCategory('classes'), loadCategory('races')])
+      .then(([classResponse, raceResponse]) => {
+        if (cancelled) return;
+        setClasses(classResponse.entries);
+        setRaces(raceResponse.entries);
+        setClassDetails(classResponse.details);
+        setRaceDetails(raceResponse.details);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClasses([]);
+        setRaces([]);
+        setClassDetails({});
+        setRaceDetails({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [char?.campaign_id]);
+
+  const classDetail = char?.class_index ? classDetails[char.class_index] : null;
+  const raceDetail = char?.race_index ? raceDetails[char.race_index] : null;
+
+  // Repara fichas creadas antes de que las destrezas raciales se persistieran
+  // y mantiene la lista al cambiar de raza desde la ficha completa.
+  useEffect(() => {
+    if (!editable || !char || !raceDetail) return;
+    const previous = char.wizard_data.appliedRaceSkillProficiencies ?? [];
+    const next = raceAutomaticSkills(raceDetail);
+    const merged = mergeAutomaticSkills(char.skill_proficiencies, previous, next);
+    if (JSON.stringify(merged) === JSON.stringify(char.skill_proficiencies) && JSON.stringify(previous) === JSON.stringify(next)) {
+      return;
+    }
+    patch({
+      skill_proficiencies: merged,
+      wizard_data: { ...char.wizard_data, appliedRaceSkillProficiencies: next },
+    });
+  }, [editable, char?.race_index, char?.skill_proficiencies, char?.wizard_data, raceDetail]);
 
   // Tras finalizar el asistente llegamos con ?tutorial=1: mostramos la guía
   // contextual solo si el usuario no la ha visto antes en este navegador.
@@ -151,10 +260,84 @@ export default function CharacterSheetPage() {
     return <div className="min-h-full bg-night-950 p-6 text-bone/60">Cargando ficha…</div>;
   }
 
+  const automaticRaceSkills = raceAutomaticSkills(raceDetail);
+  const effectiveSkills = mergeAutomaticSkills(
+    char.skill_proficiencies,
+    char.wizard_data.appliedRaceSkillProficiencies ?? [],
+    automaticRaceSkills
+  );
+  const configuredSpellcastingAbility = classDetail?.spellcasting?.spellcasting_ability?.index ?? null;
+  const rulesChar = {
+    ...char,
+    skill_proficiencies: effectiveSkills,
+    spellcasting_ability: configuredSpellcastingAbility,
+  };
+  const canCastSpells = Boolean(classDetail?.spellcasting);
+  const abilityBonuses = racialAbilityBonuses(
+    raceDetail,
+    char.wizard_data.raceAbilityChoice ?? []
+  );
+  const baseAbilities = char.wizard_data.baseAbilities ?? null;
+  const customFeatures = [
+    ...(classDetail?.custom_features ?? []).map((feature) => ({ ...feature, source: 'Clase' })),
+    ...(raceDetail?.custom_features ?? []).map((feature) => ({ ...feature, source: 'Raza' })),
+  ];
+
   const prof = proficiencyBonus(char.level);
   const weapons = char.inventory.filter((i) => i.weapon && i.equipped);
   const preparedSet = new Set(char.spells.prepared ?? []);
   const ro = !editable;
+
+  function changeClass(classIndex) {
+    const detail = classIndex ? classDetails[classIndex] : null;
+    patch({
+      class_index: classIndex,
+      ...(detail ? { save_proficiencies: detail.saving_throws.map((savingThrow) => savingThrow.index) } : {}),
+    });
+  }
+
+  function changeRace(raceIndex) {
+    const detail = raceIndex ? raceDetails[raceIndex] : null;
+    const previousAutomatic = char.wizard_data.appliedRaceSkillProficiencies ?? [];
+    const nextAutomatic = raceAutomaticSkills(detail);
+    const raceAbilityChoice = raceIndex === char.race_index
+      ? char.wizard_data.raceAbilityChoice ?? []
+      : [];
+    patch({
+      race_index: raceIndex,
+      speed: detail?.speed ?? 30,
+      skill_proficiencies: mergeAutomaticSkills(
+        char.skill_proficiencies,
+        previousAutomatic,
+        nextAutomatic
+      ),
+      ...(baseAbilities
+        ? { abilities: applyRacialBonuses(baseAbilities, detail, raceAbilityChoice) }
+        : {}),
+      wizard_data: {
+        ...char.wizard_data,
+        raceAbilityChoice,
+        appliedRaceSkillProficiencies: nextAutomatic,
+      },
+    });
+  }
+
+  function changeAbility(abilityKey, requestedScore) {
+    const score = Math.max(1, Math.min(30, requestedScore));
+    if (!baseAbilities) {
+      patch({ abilities: { ...char.abilities, [abilityKey]: score } });
+      return;
+    }
+    const bonus = abilityBonuses[abilityKey] ?? 0;
+    const base = Math.max(1, Math.min(30, score - bonus));
+    patch({
+      abilities: { ...char.abilities, [abilityKey]: Math.max(1, Math.min(30, base + bonus)) },
+      wizard_data: {
+        ...char.wizard_data,
+        baseAbilities: { ...baseAbilities, [abilityKey]: base },
+      },
+    });
+  }
 
   function addItem(entry) {
     const meta = entry.meta ?? {};
@@ -171,6 +354,11 @@ export default function CharacterSheetPage() {
             versatileDice: meta.twoHandedDamage?.dice ?? null,
             properties: meta.properties ?? [],
             weaponRange: meta.weaponRange,
+            range: meta.range ?? null,
+            throwRange: meta.throwRange ?? null,
+            magical: false,
+            silvered: false,
+            adamantine: false,
           }
         : null,
     };
@@ -214,6 +402,9 @@ export default function CharacterSheetPage() {
         attackType: entry.meta?.attackType ?? null,
         hasDamage: Boolean(entry.meta?.hasDamage),
         dc: entry.meta?.dc ?? null,
+        range: entry.meta?.range ?? null,
+        area: entry.meta?.area ?? null,
+        castingTime: entry.meta?.castingTime ?? null,
       };
       patch({ spells: { ...char.spells, known: [...known, spell] } });
     }
@@ -238,7 +429,7 @@ export default function CharacterSheetPage() {
   }
 
   async function castSpell(spell, mode) {
-    const roll = await castSpellRoll(char, spell, mode);
+    const roll = await castSpellRoll(rulesChar, spell, mode);
     if (roll) onRoll(roll);
   }
 
@@ -300,31 +491,21 @@ export default function CharacterSheetPage() {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wider text-bone/50">Clase</span>
-            <select
-              value={char.class_index ?? ''}
+            <SrdCustomSelect
+              value={char.class_index}
+              options={classes}
               disabled={ro}
-              onChange={(e) => patch({ class_index: e.target.value || null })}
-              className={inputClass}
-            >
-              <option value="">—</option>
-              {classes.map((c) => (
-                <option key={c.index} value={c.index}>{c.name}</option>
-              ))}
-            </select>
+              onChange={changeClass}
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wider text-bone/50">Raza</span>
-            <select
-              value={char.race_index ?? ''}
+            <SrdCustomSelect
+              value={char.race_index}
+              options={races}
               disabled={ro}
-              onChange={(e) => patch({ race_index: e.target.value || null })}
-              className={inputClass}
-            >
-              <option value="">—</option>
-              {races.map((r) => (
-                <option key={r.index} value={r.index}>{r.name}</option>
-              ))}
-            </select>
+              onChange={changeRace}
+            />
           </label>
           <NumberField label="Nivel" value={char.level} min={1} max={20} disabled={ro} onChange={(v) => patch({ level: v })} />
           <div className="flex flex-col gap-1">
@@ -430,16 +611,14 @@ export default function CharacterSheetPage() {
                   max={30}
                   value={score}
                   disabled={ro}
-                  onChange={(e) =>
-                    patch({
-                      abilities: {
-                        ...char.abilities,
-                        [a.key]: Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 10)),
-                      },
-                    })
-                  }
+                  onChange={(e) => changeAbility(a.key, parseInt(e.target.value, 10) || 10)}
                   className="w-full border-none bg-transparent text-center font-mono text-xl text-bone focus:outline-none"
                 />
+                {baseAbilities && (abilityBonuses[a.key] ?? 0) !== 0 && (
+                  <p className="whitespace-nowrap text-[10px] text-gold/65">
+                    {baseAbilities[a.key]} base {(abilityBonuses[a.key] ?? 0) > 0 ? '+' : '−'} {Math.abs(abilityBonuses[a.key])} raza
+                  </p>
+                )}
                 <StatTooltip stat={a.key} as="div" className="font-mono text-sm text-bone/60">
                   {formatModifier(mod)}
                 </StatTooltip>
@@ -448,6 +627,39 @@ export default function CharacterSheetPage() {
           })}
         </div>
       </Card>
+
+      {(automaticRaceSkills.length > 0 ||
+        (raceDetail?.damage_resistances ?? []).length > 0 ||
+        (raceDetail?.senses ?? []).length > 0 ||
+        raceDetail?.speed != null) && (
+        <Card title="Efectos de raza">
+          <div className="flex flex-wrap gap-1.5">
+            {raceDetail?.speed != null && (
+              <span className="rounded-sm border border-gold/25 bg-gold/5 px-2 py-1 text-xs text-bone/75">
+                Velocidad {raceDetail.speed} pies
+              </span>
+            )}
+            {automaticRaceSkills.map((skillIndex) => (
+              <span key={`skill-${skillIndex}`} className="rounded-sm border border-moss/40 bg-moss/10 px-2 py-1 text-xs text-bone/75">
+                Competencia: {SKILLS.find((skill) => skill.index === skillIndex)?.name ?? skillIndex}
+              </span>
+            ))}
+            {(raceDetail?.damage_resistances ?? []).map((damageType) => (
+              <span key={`resistance-${damageType}`} className="rounded-sm border border-ember/30 bg-ember/5 px-2 py-1 text-xs text-bone/75">
+                Resistencia: {DAMAGE_TYPE_NAMES[damageType] ?? damageType}
+              </span>
+            ))}
+            {(raceDetail?.senses ?? []).map((sense) => (
+              <span key={`sense-${sense}`} className="rounded-sm border border-bone/20 px-2 py-1 text-xs text-bone/70">
+                Sentido: {sense}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-bone/45">
+            Estos efectos proceden de la raza seleccionada; las resistencias también se aplican al resolver daño en la mesa.
+          </p>
+        </Card>
+      )}
 
       {/* Salvaciones y habilidades */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -488,13 +700,14 @@ export default function CharacterSheetPage() {
         <Card title="Habilidades">
           <ul className="space-y-1">
             {SKILLS.map((sk) => {
-              const bonus = skillBonus(char, sk);
+              const bonus = skillBonus(rulesChar, sk);
+              const automatic = automaticRaceSkills.includes(sk.index);
               return (
                 <li key={sk.index} className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={char.skill_proficiencies.includes(sk.index)}
-                    disabled={ro}
+                    checked={rulesChar.skill_proficiencies.includes(sk.index)}
+                    disabled={ro || automatic}
                     onChange={(e) =>
                       patch({
                         skill_proficiencies: e.target.checked
@@ -503,6 +716,7 @@ export default function CharacterSheetPage() {
                       })
                     }
                     className="accent-gold"
+                    title={automatic ? 'Competencia concedida por la raza' : undefined}
                   />
                   <button
                     onClick={() => rollCheck(sk.name, bonus)}
@@ -514,6 +728,7 @@ export default function CharacterSheetPage() {
                       className="text-sm"
                     >
                       {sk.name} <span className="text-xs text-bone/40">({ABILITIES.find((a) => a.key === sk.ability).short})</span>
+                      {automatic && <span className="ml-1 text-[10px] text-moss">Raza</span>}
                     </StatTooltip>
                     <span className="font-mono text-sm text-bone/80">{formatModifier(bonus)}</span>
                   </button>
@@ -607,9 +822,33 @@ export default function CharacterSheetPage() {
                   className="accent-gold"
                 />
               )}
-              <span className="flex-1 text-sm">
+              <span className="min-w-0 flex-1 text-sm">
                 {item.name}
                 {item.weapon && <span className="ml-2 font-mono text-xs text-bone/50">{item.weapon.damageDice}</span>}
+                {item.weapon && (
+                  <span className="mt-1 flex flex-wrap gap-2 text-[0.65rem] text-bone/50">
+                    {[
+                      ['magical', 'Mágica'],
+                      ['silvered', 'Plateada'],
+                      ['adamantine', 'Adamantina'],
+                    ].map(([property, label]) => (
+                      <label key={property} className="flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(item.weapon[property])}
+                          disabled={ro}
+                          onChange={(event) =>
+                            updateItem(item.id, {
+                              weapon: { ...item.weapon, [property]: event.target.checked },
+                            })
+                          }
+                          className="accent-gold"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </span>
+                )}
               </span>
               <input
                 type="number"
@@ -659,10 +898,11 @@ export default function CharacterSheetPage() {
           )
         }
       >
-        {char.class_index && (
+        {canCastSpells && (
           <p className="mb-2 text-xs text-bone/50">
-            <StatTooltip stat="ataque-conjuro">Ataque de conjuro</StatTooltip> {formatModifier(spellAttackBonus(char))} ·{' '}
-            <StatTooltip stat="cd-conjuro">CD de salvación</StatTooltip> {spellSaveDC(char)}
+            <StatTooltip stat="ataque-conjuro">Ataque de conjuro</StatTooltip> {formatModifier(spellAttackBonus(rulesChar))} ·{' '}
+            <StatTooltip stat="cd-conjuro">CD de salvación</StatTooltip> {spellSaveDC(rulesChar)} ·{' '}
+            {ABILITIES.find((ability) => ability.key === spellcastingAbility(rulesChar))?.name}
           </p>
         )}
         {(char.spells.known ?? []).length === 0 ? (
@@ -701,7 +941,7 @@ export default function CharacterSheetPage() {
                     )}
                     {spell.dc && !spell.hasDamage && (
                       <span className="font-mono text-xs text-bone/50">
-                        CD {spellSaveDC(char)} {ABILITIES.find((a) => a.key === spell.dc)?.short ?? ''}
+                        CD {spellSaveDC(rulesChar)} {ABILITIES.find((a) => a.key === spell.dc)?.short ?? ''}
                       </span>
                     )}
                     {!ro && (
@@ -719,6 +959,19 @@ export default function CharacterSheetPage() {
       {/* Rasgos y notas */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Card title="Rasgos y aptitudes">
+          {customFeatures.length > 0 && (
+            <div className="mb-3 space-y-2">
+              {customFeatures.map((feature, index) => (
+                <div key={`${feature.source}-${feature.name}-${index}`} className="rounded-sm border border-gold/15 bg-gold/5 p-2">
+                  <p className="text-xs font-semibold text-gold/85">
+                    {feature.name || 'Rasgo sin nombre'} <span className="font-normal text-bone/40">· {feature.source}</span>
+                  </p>
+                  {feature.text && <p className="mt-0.5 whitespace-pre-wrap text-xs text-bone/65">{feature.text}</p>}
+                </div>
+              ))}
+              <p className="text-[11px] text-bone/40">Son rasgos narrativos: la mesa decide cuándo y cómo se aplican.</p>
+            </div>
+          )}
           <textarea
             value={char.features}
             disabled={ro}
@@ -771,7 +1024,7 @@ export default function CharacterSheetPage() {
         <SrdPicker
           title="Añadir hechizo"
           category="spells"
-          filters={char.class_index ? { class: char.class_index } : {}}
+          filters={char.class_index && !char.class_index.startsWith('custom:') ? { class: char.class_index } : {}}
           onPick={addSpell}
           onClose={() => setPicker(null)}
           renderMeta={(e) => (e.meta?.level === 0 ? 'truco' : `nv. ${e.meta?.level}`)}

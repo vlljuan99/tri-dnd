@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test \"src/features/tactical-map/__tests__/*.test.js\" \"src/features/map-editor/__tests__/*.test.js\" \"src/features/campaign-archive/__tests__/*.test.js\" \"src/features/taller/__tests__/*.test.js\""
+    "test": "node --test \"src/features/tactical-map/__tests__/*.test.js\" \"src/features/map-editor/__tests__/*.test.js\" \"src/features/world-map/__tests__/*.test.js\" \"src/features/campaign-archive/__tests__/*.test.js\" \"src/features/taller/__tests__/*.test.js\" \"src/lib/__tests__/*.test.js\""
   },
   "dependencies": {
     "@react-three/fiber": "^9.6.1",

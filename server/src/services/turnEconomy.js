@@ -1,5 +1,11 @@
 import { db } from '../db.js';
 import { fireRoundEvents } from './events.js';
+import {
+  conditionsPreventActions,
+  conditionsPreventMovement,
+  isConditionImmune,
+} from './combatRules.js';
+import { consumeMonsterAttack, parseMultiattackState } from './monsterActions.js';
 
 // Economía de turno de verdad (Fase 8.5): con el modo por turnos activo
 // (game_tables.combat_active), moverse y actuar en el tablero solo es
@@ -115,7 +121,8 @@ export function resetCombatantResources(combatantId) {
   // al empezar el siguiente, igual que el movimiento/acción. Las condiciones
   // y las salvaciones de muerte NO se tocan aquí (persisten entre turnos).
   db.prepare(
-    'UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0, dashed = 0, stance = NULL WHERE id = ?'
+    `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
+     dashed = 0, stance = NULL, multiattack_state = '{}' WHERE id = ?`
   ).run(combatantId);
 }
 
@@ -133,6 +140,9 @@ export function startTurnFor(campaignId, combatantId, round) {
     campaignId
   );
   resetCombatantResources(combatantId);
+  // Una reacción pendiente solo existe mientras sigue abierta la ventana
+  // que provocó el movimiento. Al empezar otro turno no puede conservarse.
+  db.prepare('DELETE FROM opportunity_attacks WHERE campaign_id = ?').run(campaignId);
   if (Number.isInteger(previousRound) && round > previousRound) {
     fireRoundEvents(campaignId, round);
   }
@@ -163,10 +173,12 @@ export function ensureTurnStarted(campaignId) {
 // En ambos casos se devuelve el desglose de lo tirado para narrarlo: la
 // automatización no vale nada si la mesa no puede ver de dónde sale.
 export function activateTurnMode(campaignId, { rerollAll = true } = {}) {
+  db.prepare('DELETE FROM opportunity_attacks WHERE campaign_id = ?').run(campaignId);
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
-     dashed = 0, stance = NULL, reaction_used_round = NULL WHERE campaign_id = ?`
+     dashed = 0, stance = NULL, reaction_used_round = NULL,
+     multiattack_state = '{}' WHERE campaign_id = ?`
   ).run(campaignId);
 
   const rolls = [];
@@ -196,6 +208,7 @@ export function initiativeSummary(campaignId) {
 // Modo libre: se desactiva el bloqueo de movimiento/acción sin borrar el
 // tracker (a diferencia de terminar el combate del todo, que sí lo vacía).
 export function deactivateTurnMode(campaignId) {
+  db.prepare('DELETE FROM opportunity_attacks WHERE campaign_id = ?').run(campaignId);
   db.prepare('UPDATE game_tables SET combat_active = 0, combat_turn_id = NULL WHERE campaign_id = ?').run(
     campaignId
   );
@@ -263,11 +276,10 @@ function checkTurn(campaignId, characterId) {
   const table = db
     .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
-  if (!table?.combat_active) return { ok: true, combatant: null, gated: false };
-
   const combatant = db
     .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
     .get(campaignId, characterId);
+  if (!table?.combat_active) return { ok: true, combatant: combatant ?? null, gated: false };
   if (!combatant) return { ok: true, combatant: null, gated: false };
 
   if (table.combat_turn_id !== combatant.id) {
@@ -282,6 +294,9 @@ function checkTurn(campaignId, characterId) {
 export function trySpendMovement(campaignId, characterId, squares) {
   const check = checkTurn(campaignId, characterId);
   if (!check.ok) return check;
+  if (check.combatant && conditionsPreventMovement(check.combatant.conditions)) {
+    return { ok: false, error: 'Tus condiciones actuales reducen tu velocidad a 0' };
+  }
   if (!check.gated || squares <= 0) return { ok: true };
 
   const character = db.prepare('SELECT speed FROM characters WHERE id = ?').get(characterId);
@@ -302,6 +317,9 @@ export function trySpendMovement(campaignId, characterId, squares) {
 export function trySpendAction(campaignId, characterId) {
   const check = checkTurn(campaignId, characterId);
   if (!check.ok) return check;
+  if (check.combatant && conditionsPreventActions(check.combatant.conditions)) {
+    return { ok: false, error: 'Tus condiciones actuales te impiden realizar acciones' };
+  }
   if (!check.gated) return { ok: true };
   if (check.combatant.action_used) return { ok: false, error: 'Ya has usado tu acción este turno' };
   db.prepare('UPDATE combatants SET action_used = 1 WHERE id = ?').run(check.combatant.id);
@@ -319,6 +337,9 @@ export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
     .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ? AND kind = 'enemigo'")
     .get(campaignId, mapTokenId);
   if (!combatant) return { ok: true };
+  if (conditionsPreventMovement(combatant.conditions)) {
+    return { ok: false, error: 'Las condiciones de este enemigo reducen su velocidad a 0' };
+  }
 
   const table = db
     .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
@@ -345,9 +366,10 @@ export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
   return { ok: true };
 }
 
-// Condiciones de combate reconocidas (5e básicas + inconsciente/muerto). El
-// cliente muestra su icono/etiqueta; la app no aplica ningún efecto mecánico
-// automático (la mesa las narra), solo las lleva como estado del combatiente.
+// Condiciones de combate reconocidas (5e básicas + inconsciente). Sus efectos
+// representables se aplican en servidor a ataques, críticos, acciones y
+// movimiento; los que dependen de una criatura origen siguen bajo control del
+// DM, que decide cuándo poner o quitar el chip.
 export const COMBAT_CONDITIONS = [
   'envenenado',
   'derribado',
@@ -367,8 +389,8 @@ export const COMBAT_CONDITIONS = [
 // Acciones especiales del turno que gastan la acción (Correr, Esquivar,
 // Destrabarse). Solo el combatiente activo, y solo si aún no ha actuado.
 // - 'correr' dobla el presupuesto de movimiento (marca dashed).
-// - 'esquivar'/'destrabarse' fijan la postura (informativa; el DM narra su
-//   efecto sobre reacciones y ataques de oportunidad, sin autodetección).
+// - 'esquivar' aplica desventaja automática mientras pueda ver y moverse.
+// - 'destrabarse' evita que el camino confirmado genere ataques de oportunidad.
 export function trySpecialAction(campaignId, combatantId, kind) {
   const valid = { correr: 'dash', esquivar: 'esquivar', destrabarse: 'destrabarse' };
   if (!valid[kind]) return { ok: false, error: 'Acción no válida' };
@@ -378,11 +400,14 @@ export function trySpecialAction(campaignId, combatantId, kind) {
   if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
   if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es tu turno' };
   const row = db
-    .prepare('SELECT action_used, kind, character_id FROM combatants WHERE id = ? AND campaign_id = ?')
+    .prepare('SELECT action_used, kind, character_id, conditions FROM combatants WHERE id = ? AND campaign_id = ?')
     .get(combatantId, campaignId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
   if (row.kind === 'pj' && isPjDowned(row.character_id)) {
     return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
+  if (conditionsPreventActions(row.conditions)) {
+    return { ok: false, error: 'Las condiciones actuales impiden realizar acciones' };
   }
   if (row.action_used) return { ok: false, error: 'Ya has usado tu acción este turno' };
 
@@ -399,7 +424,7 @@ export function trySpecialAction(campaignId, combatantId, kind) {
 export function toggleCondition(campaignId, combatantId, condition) {
   if (!COMBAT_CONDITIONS.includes(condition)) return { ok: false, error: 'Condición no válida' };
   const row = db
-    .prepare('SELECT conditions FROM combatants WHERE id = ? AND campaign_id = ?')
+    .prepare('SELECT conditions, monster_index FROM combatants WHERE id = ? AND campaign_id = ?')
     .get(combatantId, campaignId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
   let list;
@@ -409,6 +434,20 @@ export function toggleCondition(campaignId, combatantId, condition) {
     list = [];
   }
   const has = list.includes(condition);
+  if (!has && row.monster_index) {
+    const entry = db
+      .prepare("SELECT data FROM srd_entries WHERE category = 'monsters' AND idx = ?")
+      .get(row.monster_index);
+    if (entry) {
+      try {
+        if (isConditionImmune(JSON.parse(entry.data), condition)) {
+          return { ok: false, error: `La criatura es inmune a la condición «${condition}»` };
+        }
+      } catch {
+        // Una entrada SRD dañada no bloquea la gestión manual del DM.
+      }
+    }
+  }
   const next = has ? list.filter((c) => c !== condition) : [...list, condition];
   db.prepare('UPDATE combatants SET conditions = ? WHERE id = ?').run(JSON.stringify(next), combatantId);
   return { ok: true, conditions: next, added: !has };
@@ -495,11 +534,57 @@ export function trySpendActionForCombatant(campaignId, combatantId) {
     .get(campaignId);
   if (!table?.combat_active) return { ok: true };
   if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es el turno de este combatiente' };
-  const row = db.prepare('SELECT action_used FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
+  const row = db
+    .prepare('SELECT action_used, conditions FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
   if (!row) return { ok: true };
+  if (conditionsPreventActions(row.conditions)) {
+    return { ok: false, error: 'Las condiciones actuales impiden realizar acciones' };
+  }
   if (row.action_used) return { ok: false, error: 'Ya se ha usado la acción de este combatiente este turno' };
   db.prepare('UPDATE combatants SET action_used = 1 WHERE id = ?').run(combatantId);
   return { ok: true };
+}
+
+// Gasta un ataque de monstruo, normal o como parte de un Multiataque SRD.
+// El resto de la secuencia persiste para poder cambiar de objetivo entre
+// golpes sin convertir la acción en ataques ilimitados.
+export function trySpendMonsterAttack(
+  campaignId,
+  combatantId,
+  { actionName, planId = null, plans = [], countOverrides = {} } = {}
+) {
+  const table = db
+    .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  if (!table?.combat_active) return { ok: true, multiattackState: {} };
+  if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es el turno de este combatiente' };
+  const row = db
+    .prepare('SELECT action_used, conditions, multiattack_state FROM combatants WHERE id = ? AND campaign_id = ?')
+    .get(combatantId, campaignId);
+  if (!row) return { ok: true, multiattackState: {} };
+  if (conditionsPreventActions(row.conditions)) {
+    return { ok: false, error: 'Las condiciones actuales impiden realizar acciones' };
+  }
+  const consumed = consumeMonsterAttack({
+    actionUsed: Boolean(row.action_used),
+    state: parseMultiattackState(row.multiattack_state),
+    actionName,
+    planId,
+    plans,
+    countOverrides,
+  });
+  if (!consumed.ok) return consumed;
+  db.prepare('UPDATE combatants SET action_used = 1, multiattack_state = ? WHERE id = ?').run(
+    JSON.stringify(consumed.state),
+    combatantId
+  );
+  return {
+    ok: true,
+    multiattackState: consumed.state,
+    multiattackCompleted: consumed.completed,
+    multiattackResolved: consumed.resolvedCounts ?? null,
+  };
 }
 
 // Gasta la acción adicional del turno: solo el combatiente activo. Como las
@@ -511,10 +596,13 @@ export function tryUseBonusAction(campaignId, combatantId) {
     .get(campaignId);
   if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
   if (table.combat_turn_id !== combatantId) return { ok: false, error: 'No es tu turno' };
-  const row = db.prepare('SELECT bonus_used, kind, character_id FROM combatants WHERE id = ?').get(combatantId);
+  const row = db.prepare('SELECT bonus_used, kind, character_id, conditions FROM combatants WHERE id = ?').get(combatantId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
   if (row.kind === 'pj' && isPjDowned(row.character_id)) {
     return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
+  if (conditionsPreventActions(row.conditions)) {
+    return { ok: false, error: 'Las condiciones actuales impiden realizar acciones' };
   }
   if (row.bonus_used) return { ok: false, error: 'Ya has usado tu acción adicional este turno' };
   db.prepare('UPDATE combatants SET bonus_used = 1 WHERE id = ?').run(combatantId);
@@ -522,18 +610,21 @@ export function tryUseBonusAction(campaignId, combatantId) {
 }
 
 // Gasta la reacción: una por RONDA y utilizable fuera de tu turno (ataques
-// de oportunidad y similares, narrados por el DM — sin detección automática).
+// de oportunidad automáticos, conjuros de reacción o usos narrados por el DM).
 export function tryUseReaction(campaignId, combatantId) {
   const table = db
     .prepare('SELECT combat_active, combat_round FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
   if (!table?.combat_active) return { ok: false, error: 'La mesa está en modo libre' };
   const row = db
-    .prepare('SELECT reaction_used_round, kind, character_id FROM combatants WHERE id = ?')
+    .prepare('SELECT reaction_used_round, kind, character_id, conditions FROM combatants WHERE id = ?')
     .get(combatantId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
   if (row.kind === 'pj' && isPjDowned(row.character_id)) {
     return { ok: false, error: 'Estás inconsciente y no puedes actuar' };
+  }
+  if (conditionsPreventActions(row.conditions)) {
+    return { ok: false, error: 'Las condiciones actuales impiden usar reacciones' };
   }
   if (row.reaction_used_round === table.combat_round) {
     return { ok: false, error: 'Ya has usado tu reacción esta ronda' };

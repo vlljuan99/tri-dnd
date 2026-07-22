@@ -15,7 +15,7 @@ export const useRoom = create((set, get) => ({
   online: [],
   joinError: null,
   removedCampaignId: null,
-  combat: { active: false, round: 1, turnId: null, combatants: [] },
+  combat: { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
   // Sube cada vez que el servidor avisa de que ACABA de empezar el combate
   // (arranque manual del DM o automático al descubrir enemigos): la mesa lo
   // observa para mostrar el cartel de aviso a pantalla unos segundos.
@@ -28,6 +28,10 @@ export const useRoom = create((set, get) => ({
   worldVersion: 0,
   // Pings efímeros sobre el tablero (se autodescartan a los pocos segundos)
   pings: [],
+  // Pings efímeros sobre el mapa de mundo (la voz del jugador en la exploración)
+  worldPings: [],
+  // Trayecto efímero emitido por el servidor antes de confirmar el viaje.
+  worldTravel: null,
 
   ensureSocket() {
     if (socket) return socket;
@@ -83,6 +87,20 @@ export const useRoom = create((set, get) => ({
         set((s) => ({ pings: s.pings.filter((p) => p.id !== id) }));
       }, 4000);
     });
+    socket.on('mundo:ping', (ping) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const entry = { id, createdAt: Date.now(), ...ping };
+      set((s) => ({ worldPings: [...s.worldPings.slice(-11), entry] }));
+      setTimeout(() => {
+        set((s) => ({ worldPings: s.worldPings.filter((p) => p.id !== id) }));
+      }, 4000);
+    });
+    socket.on('mundo:viaje', (travel) => {
+      set({ worldTravel: travel });
+      setTimeout(() => {
+        set((state) => ({ worldTravel: state.worldTravel?.id === travel.id ? null : state.worldTravel }));
+      }, Math.max(400, Number(travel.durationMs) || 900) + 250);
+    });
     return socket;
   },
 
@@ -90,7 +108,7 @@ export const useRoom = create((set, get) => ({
     const s = get().ensureSocket();
     if (get().campaignId === campaignId) return;
     if (get().campaignId) s.emit('room:leave', { campaignId: get().campaignId });
-    set({ campaignId, messages: [], online: [], joinError: null, removedCampaignId: null });
+    set({ campaignId, messages: [], online: [], joinError: null, removedCampaignId: null, worldTravel: null });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
         set({ joinError: resp.error, campaignId: null });
@@ -102,7 +120,7 @@ export const useRoom = create((set, get) => ({
         campaignName: resp.campaignName,
         messages: resp.messages,
         online: resp.members,
-        combat: resp.combat ?? { active: false, round: 1, turnId: null, combatants: [] },
+        combat: resp.combat ?? { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
       });
     });
   },
@@ -117,13 +135,26 @@ export const useRoom = create((set, get) => ({
       isLive: false,
       messages: [],
       online: [],
-      combat: { active: false, round: 1, turnId: null, combatants: [] },
+      combat: { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
+      worldTravel: null,
     });
   },
 
-  sendChat(text) {
+  sendChat(text, references = []) {
     const { campaignId } = get();
-    if (socket && campaignId) socket.emit('chat:send', { campaignId, text });
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references }, resolve));
+  },
+
+  /** Comparte una entrada SRD en una mesa en vivo sin cambiar la sala actual. */
+  shareCompendiumReference(campaignId, entry) {
+    const activeSocket = get().ensureSocket();
+    if (!activeSocket || !campaignId) return Promise.resolve({ error: 'No hay una mesa en vivo' });
+    return new Promise((resolve) => activeSocket.emit('srd:share', {
+      campaignId,
+      category: entry?.category,
+      index: entry?.index,
+    }, resolve));
   },
 
   /** Comparte una tirada en la sala actual. Devuelve true si se envió. */
@@ -143,6 +174,16 @@ export const useRoom = create((set, get) => ({
   sendPing({ floorId, x, y }) {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('mapa:ping', { campaignId, floorId, x, y });
+  },
+
+  /**
+   * Señala un punto del mapa de mundo (x/y en % sobre la imagen de la capa).
+   * `locationId` opcional: el servidor le pone nombre al ping si es un pin
+   * visible. Es la agencia del jugador en la exploración; el DM sigue viajando.
+   */
+  sendWorldPing({ worldMapId, x, y, locationId = null }) {
+    const { campaignId } = get();
+    if (socket && campaignId) socket.emit('mundo:ping', { campaignId, worldMapId, x, y, locationId });
   },
 
   // --- Combate en el tablero ---------------------------------------
@@ -257,6 +298,28 @@ export const useRoom = create((set, get) => ({
   endCombat() {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('combat:end', { campaignId });
+  },
+
+  /** Acepta o deja pasar una reacción provocada por un movimiento. */
+  resolveOpportunity(opportunityId, attackId = null, accept = true) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit(
+        'combat:opportunity',
+        { campaignId, opportunityId, attackId, accept },
+        resolve
+      )
+    );
+  },
+
+  /** Lanza un conjuro contra una criatura o una plantilla elegida en el mapa. */
+  castBoardSpell(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combate:lanzar-conjuro', { campaignId, ...payload }, resolve)
+    );
   },
 
   // --- Economía de turno (Fase 8.5) ---------------------------------

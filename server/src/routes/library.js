@@ -9,17 +9,29 @@ import {
   deleteCustomRow,
   serializeCustomEntry,
 } from '../services/customLibrary.js';
+import { validateContentData } from '../services/classRaceShape.js';
 import { notifyCampaignMap } from '../services/liveMap.js';
 
-// Biblioteca del DM (Fase 15): CRUD de objetos y hechizos propios, por
-// usuario y reutilizables en cualquier campaña. El `data` que llega del
-// cliente ya viene con forma de entrada del SRD (equipment/spells); aquí solo
-// se valida por encima (es una herramienta del propio DM) y se acota tamaño.
+// Biblioteca del DM: CRUD de contenido propio por usuario, reutilizable en
+// cualquier campaña. Objetos y hechizos (Fase 15) llegan con `data` con forma
+// del SRD y se validan por encima. Clases y razas (Fase 26) llevan validación
+// estructurada por servidor, porque su `data` alimentará el cálculo de la
+// ficha y un valor basura ahí saldría como un número mal en la hoja de alguien.
 export const libraryRouter = Router();
 libraryRouter.use(requireAuth);
 
 // Segmento de ruta en español → categoría del SRD equivalente
-const CATEGORY_BY_SEGMENT = { objetos: 'equipment', hechizos: 'spells' };
+const CATEGORY_BY_SEGMENT = {
+  objetos: 'equipment',
+  hechizos: 'spells',
+  clases: 'classes',
+  razas: 'races',
+};
+
+// content_type de campaign_library por categoría (solo el contenido que se
+// asigna a campañas). Clases y razas no se asignan: son del personaje, no de
+// la campaña, así que no tienen entrada aquí.
+const CAMPAIGN_CONTENT_TYPE = { equipment: 'objeto', spells: 'hechizo' };
 
 function resolveCategory(req, res) {
   const category = CATEGORY_BY_SEGMENT[req.params.tipo];
@@ -34,14 +46,19 @@ function cleanName(name) {
   return typeof name === 'string' ? name.trim().slice(0, 80) : '';
 }
 
-// Acepta el data con forma SRD tal cual, acotando tamaño. Devuelve null si no
-// es un objeto serializable razonable.
-function cleanData(data) {
-  if (data == null) return {};
-  if (typeof data !== 'object' || Array.isArray(data)) return null;
-  const json = JSON.stringify(data);
-  if (json.length > 20000) return null;
-  return data;
+// Normaliza el `data` según la categoría. Clases y razas pasan por la
+// validación estructurada (que además recorta y descarta lo que sobra);
+// objetos y hechizos aceptan su forma SRD tal cual, acotando tamaño. Devuelve
+// { data } con la forma a guardar, o { error } con el motivo del rechazo.
+function normalizeData(category, raw) {
+  const structured = validateContentData(category, raw);
+  if (structured) {
+    return structured.ok ? { data: structured.data } : { error: structured.error };
+  }
+  if (raw == null) return { data: {} };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'Datos no válidos' };
+  if (JSON.stringify(raw).length > 20000) return { error: 'Datos demasiado grandes' };
+  return { data: raw };
 }
 
 libraryRouter.get('/:tipo', (req, res) => {
@@ -65,9 +82,9 @@ libraryRouter.post('/:tipo', (req, res) => {
   if (!category) return;
   const name = cleanName(req.body?.name);
   if (!name) return res.status(400).json({ error: 'El nombre es obligatorio' });
-  const data = cleanData(req.body?.data);
-  if (data === null) return res.status(400).json({ error: 'Datos no válidos' });
-  const row = createCustomRow(req.user.id, category, name, data);
+  const result = normalizeData(category, req.body?.data);
+  if (result.error) return res.status(400).json({ error: result.error });
+  const row = createCustomRow(req.user.id, category, name, result.data);
   res.status(201).json(serializeCustomEntry(row, category, { full: true }));
 });
 
@@ -78,9 +95,9 @@ libraryRouter.put('/:tipo/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Entrada no encontrada' });
   const name = cleanName(req.body?.name);
   if (!name) return res.status(400).json({ error: 'El nombre es obligatorio' });
-  const data = cleanData(req.body?.data);
-  if (data === null) return res.status(400).json({ error: 'Datos no válidos' });
-  const row = updateCustomRow(req.user.id, category, existing.id, name, data);
+  const result = normalizeData(category, req.body?.data);
+  if (result.error) return res.status(400).json({ error: result.error });
+  const row = updateCustomRow(req.user.id, category, existing.id, name, result.data);
   res.json(serializeCustomEntry(row, category, { full: true }));
 });
 
@@ -88,15 +105,20 @@ libraryRouter.delete('/:tipo/:id', (req, res) => {
   const category = resolveCategory(req, res);
   if (!category) return;
   const id = Number(req.params.id);
-  // Al borrar, se limpian sus asignaciones a campañas y se avisa a los
-  // tableros de esas campañas por si mostraban el contenido
-  const contentType = category === 'equipment' ? 'objeto' : 'hechizo';
-  const campaigns = db
-    .prepare('SELECT campaign_id FROM campaign_library WHERE content_type = ? AND content_id = ?')
-    .all(contentType, id);
+  // Objetos y hechizos se asignan a campañas: al borrarlos hay que limpiar esas
+  // asignaciones y avisar a sus tableros. Clases y razas no se asignan (son del
+  // personaje, no de la campaña), así que ese paso se salta.
+  const contentType = CAMPAIGN_CONTENT_TYPE[category] ?? null;
+  const campaigns = contentType
+    ? db
+        .prepare('SELECT campaign_id FROM campaign_library WHERE content_type = ? AND content_id = ?')
+        .all(contentType, id)
+    : [];
   const ok = deleteCustomRow(req.user.id, category, id);
   if (!ok) return res.status(404).json({ error: 'Entrada no encontrada' });
-  db.prepare('DELETE FROM campaign_library WHERE content_type = ? AND content_id = ?').run(contentType, id);
-  for (const { campaign_id } of campaigns) notifyCampaignMap(campaign_id);
+  if (contentType) {
+    db.prepare('DELETE FROM campaign_library WHERE content_type = ? AND content_id = ?').run(contentType, id);
+    for (const { campaign_id } of campaigns) notifyCampaignMap(campaign_id);
+  }
   res.json({ ok: true });
 });

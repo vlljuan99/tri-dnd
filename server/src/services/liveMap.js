@@ -72,3 +72,9 @@ export function notifyIfActive(campaignId, mapId) {
 export function notifyCampaignWorld(campaignId) {
   ioRef?.to(`campaign:${campaignId}`).emit('mundo:actualizado');
 }
+
+// Animación efímera de un trayecto por una arista. La actualización persistida
+// llega después por `mundo:actualizado` y vuelve a pasar por el filtro por rol.
+export function notifyWorldTravel(campaignId, travel) {
+  ioRef?.to(`campaign:${campaignId}`).emit('mundo:viaje', travel);
+}

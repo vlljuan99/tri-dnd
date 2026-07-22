@@ -41,6 +41,36 @@ export function applyRacialBonuses(base, raceDetail, abilityChoice = []) {
   return result;
 }
 
+export function racialAbilityBonuses(raceDetail, abilityChoice = []) {
+  const bonuses = {};
+  for (const bonus of raceDetail?.ability_bonuses ?? []) {
+    const key = bonus.ability_score?.index;
+    if (key) bonuses[key] = (bonuses[key] ?? 0) + bonus.bonus;
+  }
+  const options = raceDetail?.ability_bonus_options;
+  if (options) {
+    for (const key of abilityChoice) {
+      const option = options.from?.options?.find((candidate) => candidate.ability_score?.index === key);
+      if (option) bonuses[key] = (bonuses[key] ?? 0) + option.bonus;
+    }
+  }
+  return bonuses;
+}
+
+export function raceAutomaticSkills(raceDetail) {
+  const custom = Array.isArray(raceDetail?.skill_proficiencies) ? raceDetail.skill_proficiencies : [];
+  const srd = (raceDetail?.proficiencies ?? [])
+    .map((proficiency) => proficiency?.index)
+    .filter((index) => typeof index === 'string' && index.startsWith('skill-'))
+    .map((index) => index.replace(/^skill-/, ''));
+  return [...new Set([...custom, ...srd])].filter((index) => SKILLS.some((skill) => skill.index === index));
+}
+
+export function mergeAutomaticSkills(current, previousAutomatic = [], nextAutomatic = []) {
+  const previous = new Set(previousAutomatic);
+  return [...new Set([...(current ?? []).filter((index) => !previous.has(index)), ...nextAutomatic])];
+}
+
 /**
  * Extrae de una clase del SRD:
  * - skillChoice: el grupo de "elige N habilidades" (si existe), con nombres en español
@@ -50,6 +80,22 @@ export function applyRacialBonuses(base, raceDetail, abilityChoice = []) {
  *   si no hay traducción, igual que el resto de la app).
  */
 export function parseProficiencyChoices(classDetail) {
+  if (classDetail?.skill_choices) {
+    const allowed = classDetail.skill_choices.from?.length
+      ? classDetail.skill_choices.from
+      : SKILLS.map((skill) => skill.index);
+    return {
+      skillChoice: {
+        choose: classDetail.skill_choices.choose ?? 0,
+        desc: 'Elige las habilidades de tu clase personalizada.',
+        options: allowed
+          .map((index) => SKILLS.find((skill) => skill.index === index))
+          .filter(Boolean)
+          .map((skill) => ({ key: skill.index, name: skill.name })),
+      },
+      otherChoices: [],
+    };
+  }
   const groups = classDetail?.proficiency_choices ?? [];
   let skillChoice = null;
   const otherChoices = [];

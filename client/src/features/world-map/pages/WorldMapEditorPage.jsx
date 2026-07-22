@@ -3,8 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
 import { useWorldMap } from '../hooks/useWorldMap.js';
 import LocationPanel from '../components/LocationPanel.jsx';
+import RoutePanel from '../components/RoutePanel.jsx';
 import WorldMapSettings from '../components/WorldMapSettings.jsx';
 import { kindGlyph } from '../kinds.js';
+import { routeGeometry } from '../domain/routes.js';
 
 // Cadena de migas desde el raíz hasta el mapa en edición, siguiendo los pins
 // padre (el mundo es un árbol: cada submapa cuelga del pin que salta a él)
@@ -38,12 +40,14 @@ export default function WorldMapEditorPage() {
 
   const [editingMapId, setEditingMapId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedRouteId, setSelectedRouteId] = useState(null);
+  const [routeStartId, setRouteStartId] = useState(null);
   const [cityTemplates, setCityTemplates] = useState([]); // biblioteca de plantillas (v35)
   // El modo normal sirve para seleccionar y arrastrar. Colocar un pin exige
   // activar una herramienta explícita, para que navegar por el mapa no cree
   // ubicaciones por accidente.
   const [placementMode, setPlacementMode] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState('locations'); // locations | settings
+  const [workspaceView, setWorkspaceView] = useState('locations'); // locations | routes | settings
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const imageRef = useRef(null);
   const viewportRef = useRef(null);
@@ -76,18 +80,49 @@ export default function WorldMapEditorPage() {
 
   useEffect(() => {
     setSelectedId(null);
+    setSelectedRouteId(null);
+    setRouteStartId(null);
     setPlacementMode(false);
     setWorkspaceView('locations');
     setRightPanelOpen(false);
   }, [editingMap?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const locations = editingMap?.locations ?? [];
+  const routes = editingMap?.routes ?? [];
   const selected = locations.find((l) => l.id === selectedId) ?? null;
+  const selectedRoute = routes.find((route) => route.id === selectedRouteId) ?? null;
   const breadcrumb = world && editingMap ? breadcrumbFor(world, editingMap.id) : [];
 
   useEffect(() => {
-    if (selected) setRightPanelOpen(true);
-  }, [selected?.id]);
+    if (selected || selectedRoute) setRightPanelOpen(true);
+  }, [selected?.id, selectedRoute?.id]);
+
+  async function connectRouteAt(location) {
+    setSelectedId(null);
+    if (routeStartId == null) {
+      setRouteStartId(location.id);
+      setSelectedRouteId(null);
+      return;
+    }
+    if (routeStartId === location.id) {
+      setRouteStartId(null);
+      return;
+    }
+    const result = await editor.createRoute({
+      worldMapId: editingMap.id,
+      fromLocationId: routeStartId,
+      toLocationId: location.id,
+      cost: 1,
+      oneWay: false,
+    });
+    const updatedLayer = result?.world?.maps?.find((map) => map.id === editingMap.id);
+    const created = updatedLayer?.routes?.at(-1);
+    setRouteStartId(null);
+    if (created) {
+      setSelectedRouteId(created.id);
+      setRightPanelOpen(true);
+    }
+  }
 
   // Convierte un evento de puntero a coordenadas en % sobre la imagen
   function pointToPercent(e) {
@@ -112,6 +147,10 @@ export default function WorldMapEditorPage() {
 
   function onPinPointerDown(e, loc) {
     e.stopPropagation();
+    if (workspaceView === 'routes') {
+      connectRouteAt(loc).catch(() => {});
+      return;
+    }
     setSelectedId(loc.id);
     setPlacementMode(false);
     dragRef.current = { locId: loc.id, moved: false };
@@ -242,7 +281,11 @@ export default function WorldMapEditorPage() {
         <div className="ml-3 flex shrink-0 items-center gap-0.5 rounded-sm border border-bone/15 p-0.5">
           <button
             type="button"
-            onClick={() => setWorkspaceView('locations')}
+            onClick={() => {
+              setWorkspaceView('locations');
+              setSelectedRouteId(null);
+              setRouteStartId(null);
+            }}
             className={`rounded-sm px-2.5 py-1 text-xs transition-colors ${
               workspaceView === 'locations' ? 'bg-gold text-night-950' : 'text-bone/60 hover:bg-bone/10 hover:text-bone'
             }`}
@@ -252,8 +295,23 @@ export default function WorldMapEditorPage() {
           <button
             type="button"
             onClick={() => {
+              setWorkspaceView('routes');
+              setPlacementMode(false);
+              setSelectedId(null);
+            }}
+            className={`rounded-sm px-2.5 py-1 text-xs transition-colors ${
+              workspaceView === 'routes' ? 'bg-gold text-night-950' : 'text-bone/60 hover:bg-bone/10 hover:text-bone'
+            }`}
+          >
+            Rutas
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setWorkspaceView('settings');
               setPlacementMode(false);
+              setSelectedRouteId(null);
+              setRouteStartId(null);
               setRightPanelOpen(false);
             }}
             className={`rounded-sm px-2.5 py-1 text-xs transition-colors ${
@@ -284,6 +342,33 @@ export default function WorldMapEditorPage() {
               className="rounded-sm border border-bone/20 px-2.5 py-1 text-xs text-bone/65 hover:border-gold hover:text-gold"
             >
               {rightPanelOpen ? 'Ocultar ubicación' : 'Editar ubicación'}
+            </button>
+          )}
+          {workspaceView === 'routes' && routeStartId && (
+            <button
+              type="button"
+              onClick={() => {
+                setRouteStartId(null);
+                setSelectedRouteId(null);
+                setRightPanelOpen(false);
+              }}
+              className="rounded-sm border border-gold bg-gold px-2.5 py-1 text-xs text-night-950 transition-colors"
+            >
+              Cancelar conexión
+            </button>
+          )}
+          {workspaceView === 'routes' && !routeStartId && !selectedRoute && (
+            <span className="rounded-sm border border-gold/20 px-2.5 py-1 text-xs text-gold/65">
+              Pulsa el primer pin
+            </span>
+          )}
+          {workspaceView === 'routes' && selectedRoute && (
+            <button
+              type="button"
+              onClick={() => setRightPanelOpen((open) => !open)}
+              className="rounded-sm border border-bone/20 px-2.5 py-1 text-xs text-bone/65 hover:border-gold hover:text-gold"
+            >
+              {rightPanelOpen ? 'Ocultar ruta' : 'Editar ruta'}
             </button>
           )}
         </div>
@@ -334,6 +419,80 @@ export default function WorldMapEditorPage() {
                 }`}
                 draggable={false}
               />
+              <svg
+                className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker id="world-editor-route-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                    <path d="M0,0 L7,3.5 L0,7 Z" fill="#d6b45d" />
+                  </marker>
+                </defs>
+                {routes.map((route) => {
+                  const geometry = routeGeometry(route, locations);
+                  if (!geometry) return null;
+                  const selectedLine = route.id === selectedRouteId;
+                  return (
+                    <g key={route.id}>
+                      <line
+                        x1={geometry.from.x}
+                        y1={geometry.from.y}
+                        x2={geometry.to.x}
+                        y2={geometry.to.y}
+                        stroke="transparent"
+                        strokeWidth="12"
+                        style={{ pointerEvents: workspaceView === 'routes' ? 'stroke' : 'none', cursor: 'pointer' }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedRouteId(route.id);
+                          setRouteStartId(null);
+                          setRightPanelOpen(true);
+                        }}
+                      />
+                      <line
+                        x1={geometry.from.x}
+                        y1={geometry.from.y}
+                        x2={geometry.to.x}
+                        y2={geometry.to.y}
+                        stroke={selectedLine ? '#f2cf70' : '#b89b55'}
+                        strokeWidth={selectedLine ? 3 : 2}
+                        strokeDasharray={route.oneWay ? 'none' : '5 3'}
+                        markerEnd={route.oneWay ? 'url(#world-editor-route-arrow)' : undefined}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
+              {routes.map((route) => {
+                const geometry = routeGeometry(route, locations);
+                if (!geometry) return null;
+                return (
+                  <button
+                    key={`route-label-${route.id}`}
+                    type="button"
+                    onClick={() => {
+                      if (workspaceView !== 'routes') return;
+                      setSelectedRouteId(route.id);
+                      setRouteStartId(null);
+                      setRightPanelOpen(true);
+                    }}
+                    style={{ left: `${geometry.midX}%`, top: `${geometry.midY}%` }}
+                    className={`absolute z-[5] -translate-x-1/2 -translate-y-1/2 rounded-full border px-1.5 py-0.5 text-[0.6rem] shadow-md ${
+                      workspaceView === 'routes' ? 'cursor-pointer' : 'pointer-events-none'
+                    } ${
+                      route.id === selectedRouteId
+                        ? 'border-gold bg-gold text-night-950'
+                        : 'border-gold/35 bg-night-950/85 text-gold/80'
+                    }`}
+                    title={`${route.label || 'Ruta'} · ${route.cost} jornada${route.cost === 1 ? '' : 's'}`}
+                  >
+                    {route.oneWay ? '→ ' : '↔ '}{route.cost}j{route.label ? ` · ${route.label}` : ''}
+                  </button>
+                );
+              })}
               {locations.map((loc) => (
                 <button
                   key={loc.id}
@@ -341,11 +500,14 @@ export default function WorldMapEditorPage() {
                   type="button"
                   onPointerDown={(e) => onPinPointerDown(e, loc)}
                   onDoubleClick={() => {
+                    if (workspaceView === 'routes') return;
                     if (loc.targetMapId) setEditingMapId(loc.targetMapId);
                     else if (loc.mapId) navigate(`/campanas/${campaignId}/editor?mapa=${loc.mapId}`);
                   }}
                   style={{ left: `${loc.x}%`, top: `${loc.y}%` }}
-                  className={`absolute -translate-x-1/2 -translate-y-full cursor-grab active:cursor-grabbing ${
+                  className={`absolute z-10 -translate-x-1/2 -translate-y-full ${
+                    workspaceView === 'routes' ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+                  } ${
                     loc.hidden ? 'opacity-50' : ''
                   }`}
                   title={loc.hidden ? `${loc.name} (oculta para los jugadores)` : loc.name}
@@ -353,7 +515,7 @@ export default function WorldMapEditorPage() {
                   <span className="flex flex-col items-center">
                     <span
                       className={`whitespace-nowrap rounded-sm px-1.5 py-0.5 text-[0.65rem] font-display tracking-wide ${
-                        loc.id === selectedId
+                        loc.id === selectedId || loc.id === routeStartId
                           ? 'bg-gold text-night-950'
                           : 'bg-night-900/90 text-gold border border-gold/40'
                       }`}
@@ -363,7 +525,9 @@ export default function WorldMapEditorPage() {
                     </span>
                     <span
                       className={`h-3 w-3 rotate-45 border ${
-                        loc.id === selectedId ? 'border-gold bg-gold' : 'border-gold/60 bg-blood'
+                        loc.id === selectedId || loc.id === routeStartId
+                          ? 'border-gold bg-gold'
+                          : 'border-gold/60 bg-blood'
                       }`}
                     />
                   </span>
@@ -387,8 +551,12 @@ export default function WorldMapEditorPage() {
           )}
           {editingMap.imageUrl && (
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
-              <span className={placementMode ? 'font-medium text-gold' : 'text-bone/45'}>
-                {placementMode
+              <span className={placementMode || routeStartId ? 'font-medium text-gold' : 'text-bone/45'}>
+                {workspaceView === 'routes'
+                  ? routeStartId
+                    ? `Ahora elige el destino desde ${locations.find((loc) => loc.id === routeStartId)?.name ?? 'el origen'}.`
+                    : 'Pulsa dos pins para conectarlos; pulsa una línea para editar su coste y sentido.'
+                  : placementMode
                   ? 'Haz clic una vez para colocar la nueva ubicación.'
                   : 'Arrastra el mapa para navegar o un pin para recolocarlo; ya no se crean pins por accidente.'}
               </span>
@@ -442,6 +610,41 @@ export default function WorldMapEditorPage() {
             />
           </div>
         </aside>}
+        {workspaceView === 'routes' && selectedRoute && rightPanelOpen && (
+          <aside className="absolute inset-y-0 right-0 z-20 w-[min(22rem,92vw)] shrink-0 overflow-y-auto border-l border-gold/20 bg-night-900 shadow-2xl shadow-black/20 lg:static lg:z-auto lg:w-[22rem]">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gold/15 bg-night-900/95 px-3 py-2 backdrop-blur">
+              <div>
+                <p className="font-display text-sm tracking-wide text-gold">Ruta del mundo</p>
+                <p className="text-[0.65rem] text-bone/40">Coste y sentido del trayecto</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRightPanelOpen(false)}
+                aria-label="Cerrar panel lateral"
+                className="rounded-sm px-2 py-1 text-bone/50 hover:bg-bone/5 hover:text-bone"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-3">
+              <RoutePanel
+                key={selectedRoute.id}
+                route={selectedRoute}
+                locations={locations}
+                busy={busy}
+                onSave={(fields) => editor.updateRoute(selectedRoute.id, fields)}
+                onReverse={() => editor.updateRoute(selectedRoute.id, { reverse: true })}
+                onDelete={() => {
+                  if (window.confirm('¿Borrar esta ruta?')) {
+                    editor.deleteRoute(selectedRoute.id);
+                    setSelectedRouteId(null);
+                    setRightPanelOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

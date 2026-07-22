@@ -1,4 +1,4 @@
-import { ABILITIES } from '../../lib/dnd.js';
+import { ABILITIES, DAMAGE_TYPE_NAMES, SKILLS } from '../../lib/dnd.js';
 import HelpBlock from './HelpBlock.jsx';
 
 function RaceCard({ entry, detail, selected, onSelect }) {
@@ -15,6 +15,11 @@ function RaceCard({ entry, detail, selected, onSelect }) {
         {entry.name}
         {!entry.translated && (
           <span className="ml-2 rounded-sm border border-bone/20 px-1 text-[10px] font-normal text-bone/40">EN</span>
+        )}
+        {entry.custom && (
+          <span className="ml-2 rounded-sm border border-gold/25 px-1 text-[10px] font-normal text-gold/70">
+            {entry.sharedFromDm ? 'Del DM' : 'Propia'}
+          </span>
         )}
       </span>
       {detail && (
@@ -38,7 +43,7 @@ export default function StepRaza({ char, patch, races, raceDetails, errors }) {
     const raceDetail = raceDetails[idx];
     patch({
       race_index: idx,
-      speed: raceDetail?.speed ?? char.speed,
+      speed: raceDetail?.speed ?? 30,
       wizard_data: { ...wizardData, raceAbilityChoice: [], raceLanguageChoice: null },
     });
   }
@@ -98,6 +103,19 @@ export default function StepRaza({ char, patch, races, raceDetails, errors }) {
             {detail.traits?.length > 0 && (
               <li>Rasgos: {detail.traits.map((t) => t.name).join(', ')}</li>
             )}
+            {detail.skill_proficiencies?.length > 0 && (
+              <li>
+                Habilidades automáticas:{' '}
+                {detail.skill_proficiencies.map((key) => SKILLS.find((skill) => skill.index === key)?.name ?? key).join(', ')}
+              </li>
+            )}
+            {detail.damage_resistances?.length > 0 && (
+              <li>
+                Resistencias:{' '}
+                {detail.damage_resistances.map((key) => DAMAGE_TYPE_NAMES[key] ?? key).join(', ')}
+              </li>
+            )}
+            {detail.senses?.length > 0 && <li>Sentidos: {detail.senses.join(', ')}</li>}
           </ul>
 
           {detail.ability_bonus_options && (

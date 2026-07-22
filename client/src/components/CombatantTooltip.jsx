@@ -24,6 +24,7 @@ export default function CombatantTooltip({ name, className, children }) {
       {knowsHp && (
         <span className="block font-mono text-xs text-bone/80">
           PG {combatant.hpCurrent}/{combatant.hpMax}
+          {combatant.hpTemp > 0 ? ` +${combatant.hpTemp} temp.` : ''}
           {combatant.ac != null ? ` · CA ${combatant.ac}` : ''}
         </span>
       )}

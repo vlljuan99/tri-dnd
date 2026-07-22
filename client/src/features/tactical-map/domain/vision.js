@@ -29,26 +29,38 @@ function lineBlocked(x0, y0, x1, y1, blocksSight, walls) {
   return false;
 }
 
-// Espejo visual de server/src/services/vision.js. No decide qué datos puede
-// ver un jugador: el alcance solo llega al DM y esta función únicamente pinta
-// la previsualización de una criatura ya recibida.
-export function computeBoardVision(map, viewer) {
-  if (!map || !viewer || !Number.isInteger(viewer.col) || !Number.isInteger(viewer.row)) return [];
+function boardSightContext(map) {
   const cols = Math.floor(map.width / map.gridSize);
   const rows = Math.floor(map.height / map.gridSize);
   const disabled = new Set((map.disabledCells ?? []).map(([x, y]) => key(x, y)));
   const existing = new Set();
   for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      if (!disabled.has(key(x, y))) existing.add(key(x, y));
-    }
+    for (let x = 0; x < cols; x += 1) if (!disabled.has(key(x, y))) existing.add(key(x, y));
   }
   const obstacles = new Set();
   for (const room of map.rooms ?? []) {
     for (const [x, y] of room.obstacleCells ?? []) obstacles.add(key(room.col + x, room.row + y));
   }
-  const blocksSight = (x, y) => obstacles.has(key(x, y)) || !existing.has(key(x, y));
-  const walls = buildBoardWalls(map);
+  return {
+    existing,
+    blocksSight: (x, y) => obstacles.has(key(x, y)) || !existing.has(key(x, y)),
+    walls: buildBoardWalls(map),
+  };
+}
+
+export function hasBoardLineOfSight(map, from, to) {
+  if (!map || !from || !to) return false;
+  const context = boardSightContext(map);
+  if (!context.existing.has(key(from.col, from.row)) || !context.existing.has(key(to.col, to.row))) return false;
+  return !lineBlocked(from.col, from.row, to.col, to.row, context.blocksSight, context.walls);
+}
+
+// Espejo visual de server/src/services/vision.js. No decide qué datos puede
+// ver un jugador: el alcance solo llega al DM y esta función únicamente pinta
+// la previsualización de una criatura ya recibida.
+export function computeBoardVision(map, viewer) {
+  if (!map || !viewer || !Number.isInteger(viewer.col) || !Number.isInteger(viewer.row)) return [];
+  const { existing, blocksSight, walls } = boardSightContext(map);
   const radius = Math.max(1, Math.min(30, viewer.radius ?? 6));
   const visible = [];
   for (let y = viewer.row - radius; y <= viewer.row + radius; y += 1) {

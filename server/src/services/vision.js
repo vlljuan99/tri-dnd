@@ -38,6 +38,32 @@ function sightBlocked(x0, y0, x1, y1, blocksSight, walls) {
   return false;
 }
 
+function sightContext(rooms, doors) {
+  const existing = new Set();
+  const obstacles = new Set();
+  for (const room of rooms) {
+    const disabled = new Set(JSON.parse(room.disabled_cells || '[]').map(([c, r]) => key(c, r)));
+    for (let r = 0; r < room.height; r += 1) {
+      for (let c = 0; c < room.width; c += 1) {
+        if (!disabled.has(key(c, r))) existing.add(key(room.x + c, room.y + r));
+      }
+    }
+    for (const [c, r] of JSON.parse(room.obstacle_cells || '[]')) obstacles.add(key(room.x + c, room.y + r));
+  }
+  return {
+    existing,
+    blocksSight: (x, y) => obstacles.has(key(x, y)) || !existing.has(key(x, y)),
+    walls: buildWallSet(rooms, doors),
+  };
+}
+
+export function hasLineOfSight({ rooms, doors = [], from, to }) {
+  if (!from || !to) return false;
+  const context = sightContext(rooms, doors);
+  if (!context.existing.has(key(from.x, from.y)) || !context.existing.has(key(to.x, to.y))) return false;
+  return !sightBlocked(from.x, from.y, to.x, to.y, context.blocksSight, context.walls);
+}
+
 /**
  * Calcula las casillas visibles de UNA planta.
  * - rooms: filas de map_rooms de esa planta (con disabled/obstacle_cells)
@@ -47,25 +73,7 @@ function sightBlocked(x0, y0, x1, y1, blocksSight, walls) {
  * Devuelve un Set de 'x,y' absolutas visibles.
  */
 export function computeFloorVision({ rooms, viewers, doors = [] }) {
-  const existing = new Set();
-  const obstacles = new Set();
-  for (const room of rooms) {
-    const disabled = new Set(
-      JSON.parse(room.disabled_cells || '[]').map(([c, r]) => key(c, r))
-    );
-    for (let r = 0; r < room.height; r += 1) {
-      for (let c = 0; c < room.width; c += 1) {
-        if (disabled.has(key(c, r))) continue;
-        existing.add(key(room.x + c, room.y + r));
-      }
-    }
-    for (const [c, r] of JSON.parse(room.obstacle_cells || '[]')) {
-      obstacles.add(key(room.x + c, room.y + r));
-    }
-  }
-
-  const blocksSight = (x, y) => obstacles.has(key(x, y)) || !existing.has(key(x, y));
-  const walls = buildWallSet(rooms, doors);
+  const { existing, blocksSight, walls } = sightContext(rooms, doors);
 
   const visible = new Set();
   for (const viewer of viewers) {

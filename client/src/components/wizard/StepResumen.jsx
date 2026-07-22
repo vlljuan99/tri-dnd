@@ -30,7 +30,7 @@ export function collectWarnings(char, classDetail) {
   return warnings;
 }
 
-export default function StepResumen({ char, classDetail, raceName, campaigns, onFinish, finishing, finishError }) {
+export default function StepResumen({ char, classDetail, classDisplayName, raceName, campaigns, onFinish, finishing, finishError }) {
   const warnings = collectWarnings(char, classDetail);
   // Solo bloquean el paso final las advertencias que vienen de datos
   // obligatorios incompletos (identidad, clase, raza, características,
@@ -60,7 +60,7 @@ export default function StepResumen({ char, classDetail, raceName, campaigns, on
       <div className="rounded-md border border-gold/20 bg-night-900 p-3">
         <p className="font-display text-lg text-gold">{char.name}</p>
         <p className="text-sm text-bone/60">
-          {CLASS_NAMES[char.class_index] ?? char.class_index ?? 'Sin clase'} · {raceName ?? char.race_index ?? 'Sin raza'} · nivel {char.level}
+          {classDisplayName ?? CLASS_NAMES[char.class_index] ?? char.class_index ?? 'Sin clase'} · {raceName ?? char.race_index ?? 'Sin raza'} · nivel {char.level}
         </p>
         {campaign && <p className="text-xs text-bone/50">Campaña: {campaign.name}</p>}
         {(char.background || char.alignment || char.pronouns) && (
@@ -87,7 +87,7 @@ export default function StepResumen({ char, classDetail, raceName, campaigns, on
         <StatTooltip stat="competencia" className="rounded-sm border border-bone/15 px-2.5 py-1.5">Competencia: {formatModifier(proficiencyBonus(char.level))}</StatTooltip>
       </div>
       <HelpBlock title="¿De dónde salen los puntos de golpe y la clase de armadura?">
-        Puntos de golpe = dado de golpe de {CLASS_NAMES[char.class_index] ?? 'tu clase'} + modificador
+        Puntos de golpe = dado de golpe de {classDisplayName ?? CLASS_NAMES[char.class_index] ?? 'tu clase'} + modificador
         de Constitución ({formatModifier(conMod)}), y un poco más por cada nivel adicional. Clase de
         armadura = 10 + modificador de Destreza ({formatModifier(dexMod)}); cambiará si luego
         equipas una armadura.

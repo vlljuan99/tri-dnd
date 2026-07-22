@@ -1,4 +1,5 @@
 import { db } from '../db.js';
+import { cleanRouteLabel, normalizeRouteCost } from './worldRoutes.js';
 
 // Biblioteca de plantillas del DM (migración v35): snapshot de salas, mapas
 // enteros, ciudades del mundo (paquete completo: imagen + pins + tableros
@@ -116,6 +117,10 @@ export function snapshotWorldMap(campaignId, worldMapId, seen = new Set()) {
   const locations = db
     .prepare('SELECT * FROM world_locations WHERE world_map_id = ? ORDER BY position, id')
     .all(worldMap.id);
+  const locationIndexById = new Map(locations.map((location, index) => [location.id, index]));
+  const routes = db
+    .prepare('SELECT * FROM world_routes WHERE world_map_id = ? ORDER BY id')
+    .all(worldMap.id);
   return {
     name: worldMap.name,
     imageUrl: worldMap.image_url ?? null,
@@ -136,6 +141,13 @@ export function snapshotWorldMap(campaignId, worldMapId, seen = new Set()) {
           : null,
       };
     }),
+    routes: routes.map((route) => ({
+      fromIndex: locationIndexById.get(route.from_location_id),
+      toIndex: locationIndexById.get(route.to_location_id),
+      cost: route.cost,
+      label: route.label ?? '',
+      oneWay: Boolean(route.one_way),
+    })),
   };
 }
 
@@ -280,10 +292,11 @@ function instantiateWorldMapLocations(campaignId, userId, worldMapId, data) {
     `INSERT INTO world_locations (campaign_id, world_map_id, name, x, y, lore, kind, hidden, map_id, target_world_map_id, position)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
+  const createdLocationIds = [];
   for (const loc of data.locations ?? []) {
     const mapId = loc.map ? instantiateMap(campaignId, userId, loc.map) : null;
     const targetId = loc.submap ? instantiateWorldMap(campaignId, userId, loc.submap) : null;
-    insertLocation.run(
+    const result = insertLocation.run(
       campaignId,
       worldMapId,
       String(loc.name ?? 'Ubicación sin nombre').slice(0, 120),
@@ -296,8 +309,30 @@ function instantiateWorldMapLocations(campaignId, userId, worldMapId, data) {
       targetId,
       position
     );
+    createdLocationIds.push(result.lastInsertRowid);
     position += 1;
   }
+
+  const insertRoute = db.prepare(
+    `INSERT INTO world_routes
+      (campaign_id, world_map_id, from_location_id, to_location_id, cost, label, one_way)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const route of data.routes ?? []) {
+    const fromId = createdLocationIds[Number(route.fromIndex)];
+    const toId = createdLocationIds[Number(route.toIndex)];
+    if (!fromId || !toId || fromId === toId) continue;
+    insertRoute.run(
+      campaignId,
+      worldMapId,
+      fromId,
+      toId,
+      normalizeRouteCost(route.cost) ?? 1,
+      cleanRouteLabel(route.label) ?? '',
+      route.oneWay ? 1 : 0
+    );
+  }
+  return createdLocationIds;
 }
 
 // Ciudad completa: crea el world_map con sus pins y, por pin, el tablero

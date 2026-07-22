@@ -104,5 +104,9 @@ export function useWorldMap(campaignId) {
     updateLocation: (locId, fields) =>
       mutate(() => api(`${base}/ubicaciones/${locId}`, { method: 'PATCH', body: fields })),
     deleteLocation: (locId) => mutate(() => api(`${base}/ubicaciones/${locId}`, { method: 'DELETE' })),
+    createRoute: (fields) => mutate(() => api(`${base}/rutas`, { method: 'POST', body: fields })),
+    updateRoute: (routeId, fields) =>
+      mutate(() => api(`${base}/rutas/${routeId}`, { method: 'PATCH', body: fields })),
+    deleteRoute: (routeId) => mutate(() => api(`${base}/rutas/${routeId}`, { method: 'DELETE' })),
   };
 }

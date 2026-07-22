@@ -74,6 +74,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
                 </span>
                 <span className="font-mono text-[0.6rem] text-bone/50">
                   {c.hpCurrent}/{c.hpMax}
+                  {c.hpTemp > 0 ? ` +${c.hpTemp} temp.` : ''}
                 </span>
               </div>
             )}
@@ -129,7 +130,13 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
             )}
 
             {isDm && conditionsFor === c.id && (
-              <ConditionEditor conditions={c.conditions} onToggle={(key) => room.toggleCondition(c.id, key)} />
+              <ConditionEditor
+                conditions={c.conditions}
+                onToggle={async (key) => {
+                  const resp = await room.toggleCondition(c.id, key);
+                  if (resp?.error) toastError(resp.error);
+                }}
+              />
             )}
           </div>
         );

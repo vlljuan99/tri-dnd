@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, runMigrations } from '../src/db.js';
 import { SRD_CATEGORY_KEYS } from '../src/services/srdShape.js';
+import { rebuildSrdFts } from '../src/services/srdSearch.js';
 
 runMigrations();
 
@@ -159,7 +160,8 @@ async function main() {
     ).run();
     db.prepare("DELETE FROM meta WHERE key = 'srd_last_sync_error'").run();
   })();
-  console.log(`Listo: ${total} entradas en ${counts.length} categorías del compendio.`);
+  rebuildSrdFts();
+  console.log(`Listo: ${total} entradas en ${counts.length} categorías del compendio (índice de búsqueda reconstruido).`);
 }
 
 main().catch((error) => {

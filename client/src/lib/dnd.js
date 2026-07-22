@@ -175,6 +175,9 @@ export function weaponDamageModifier(character, weapon) {
 }
 
 export function spellcastingAbility(character) {
+  if (ABILITIES.some((ability) => ability.key === character.spellcasting_ability)) {
+    return character.spellcasting_ability;
+  }
   return SPELLCASTING_ABILITY[character.class_index] ?? 'int';
 }
 
