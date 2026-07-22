@@ -7,7 +7,7 @@ import { AVATAR_UPLOADS_DIR } from '../config.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
 import { notifyCampaignMap } from '../services/liveMap.js';
-import { buildMeta } from '../services/srdShape.js';
+import { buildMeta, SRD_CATEGORIES, SRD_CATEGORY_KEYS } from '../services/srdShape.js';
 import {
   customCategorySupported,
   isCustomIndex,
@@ -20,19 +20,18 @@ import {
 export const srdRouter = Router();
 srdRouter.use(requireAuth);
 
-const CATEGORIES = new Set([
-  'ability-scores',
-  'classes',
-  'conditions',
-  'damage-types',
-  'equipment',
-  'magic-schools',
-  'monsters',
-  'races',
-  'skills',
-  'spells',
-  'weapon-properties',
-]);
+const CATEGORIES = new Set(SRD_CATEGORY_KEYS);
+const SPANISH_COLLATOR = new Intl.Collator('es', { sensitivity: 'base', numeric: true });
+
+function integerQueryParam(value, fallback, maximum) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, maximum);
+}
+
+function sortEntries(entries) {
+  return entries.sort((a, b) => SPANISH_COLLATOR.compare(a.name, b.name));
+}
 
 function toEntry(row, { full = false } = {}) {
   const data = JSON.parse(row.data);
@@ -87,12 +86,18 @@ function notifyDmCampaigns(userId) {
 // Estado de la sincronización del compendio
 srdRouter.get('/status', (req, res) => {
   const meta = db.prepare("SELECT value FROM meta WHERE key = 'srd_last_sync'").get();
-  const counts = db
+  const syncError = db.prepare("SELECT value FROM meta WHERE key = 'srd_last_sync_error'").get();
+  const rows = db
     .prepare('SELECT category, COUNT(*) AS n FROM srd_entries GROUP BY category')
     .all();
+  const storedCounts = Object.fromEntries(rows.map((row) => [row.category, row.n]));
+  const counts = Object.fromEntries(SRD_CATEGORY_KEYS.map((category) => [category, storedCounts[category] ?? 0]));
   res.json({
     lastSync: meta?.value ?? null,
-    counts: Object.fromEntries(counts.map((c) => [c.category, c.n])),
+    syncError: syncError?.value ?? null,
+    total: Object.values(counts).reduce((sum, count) => sum + count, 0),
+    counts,
+    categories: SRD_CATEGORIES,
   });
 });
 
@@ -213,37 +218,51 @@ srdRouter.delete('/monsters/:idx/imagen', (req, res) => {
 });
 
 // Buscador transversal del compendio (Fase 11). Se registra antes de
-// '/:category' para que "buscar" no se interprete como una categoria.
+// '/:category' para que "buscar" no se interprete como una categoría. Busca
+// las 24 categorías locales y pagina después de mezclar la biblioteca propia.
 srdRouter.get('/buscar', (req, res) => {
-  const searchable = ['spells', 'monsters', 'equipment', 'conditions'];
   const requested = typeof req.query.categorias === 'string'
-    ? req.query.categorias.split(',').filter((category) => searchable.includes(category))
-    : searchable;
-  const categories = requested.length ? [...new Set(requested)] : searchable;
+    ? req.query.categorias.split(',').filter((category) => CATEGORIES.has(category))
+    : SRD_CATEGORY_KEYS;
+  const categories = requested.length ? [...new Set(requested)] : SRD_CATEGORY_KEYS;
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+  const limit = Math.max(1, integerQueryParam(req.query.limit, 60, 120));
+  const offset = integerQueryParam(req.query.offset, 0, 100_000);
   const placeholders = categories.map(() => '?').join(', ');
   const where = [`category IN (${placeholders})`];
   const params = [...categories];
   if (q) {
-    where.push('(name_es LIKE ? OR name_en LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`);
+    // Las descripciones viven en distintas ramas según el recurso. Se buscan
+    // sus valores concretos (no el JSON entero, cuyos nombres de campo darían
+    // falsos positivos) sin consultar la API externa.
+    where.push(`(
+      name_es LIKE ? OR name_en LIKE ? OR desc_es LIKE ?
+      OR json_extract(data, '$.desc') LIKE ?
+      OR json_extract(data, '$.feature.desc') LIKE ?
+      OR json_extract(data, '$.higher_level') LIKE ?
+      OR json_extract(data, '$.special') LIKE ?
+    )`);
+    params.push(...Array.from({ length: 7 }, () => `%${q}%`));
   }
 
-  let results = db
+  let allResults = db
     .prepare(
-      `SELECT * FROM srd_entries WHERE ${where.join(' AND ')}
-       ORDER BY COALESCE(name_es, name_en) LIMIT 120`
+      `SELECT * FROM srd_entries WHERE ${where.join(' AND ')}`
     )
     .all(...params)
     .map((row) => toEntry(row));
 
   for (const category of categories.filter(customCategorySupported)) {
-    results.push(...listCustomRows(req.user.id, category, { q }).map((row) => serializeCustomEntry(row, category)));
+    allResults.push(...listCustomRows(req.user.id, category, { q }).map((row) => serializeCustomEntry(row, category)));
   }
-  results = attachMonsterUserData(results, req.user.id)
-    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
-    .slice(0, 120);
-  res.json({ results });
+  sortEntries(allResults);
+  const counts = allResults.reduce((result, entry) => {
+    result[entry.category] = (result[entry.category] ?? 0) + 1;
+    return result;
+  }, {});
+  const total = allResults.length;
+  const results = attachMonsterUserData(allResults.slice(offset, offset + limit), req.user.id);
+  res.json({ results, total, counts, offset, limit, hasMore: offset + results.length < total });
 });
 
 // Listado con filtros opcionales:
@@ -281,13 +300,8 @@ srdRouter.get('/:category', (req, res) => {
     }
   }
 
-  const rows = db
-    .prepare(
-      `SELECT * FROM srd_entries WHERE ${where.join(' AND ')}
-       ORDER BY COALESCE(name_es, name_en) LIMIT 400`
-    )
-    .all(...params);
-  let results = attachMonsterUserData(rows.map((r) => toEntry(r)), req.user.id);
+  const rows = db.prepare(`SELECT * FROM srd_entries WHERE ${where.join(' AND ')}`).all(...params);
+  let results = rows.map((row) => toEntry(row));
 
   // Biblioteca propia del DM (objetos/hechizos): se mezcla con el compendio
   // salvo que se pida explícitamente solo una de las dos fuentes con ?fuente.
@@ -304,7 +318,12 @@ srdRouter.get('/:category', (req, res) => {
     if (fuente === 'propios') results = custom;
     else results = [...custom, ...results];
   }
-  res.json({ results });
+  sortEntries(results);
+  const total = results.length;
+  const limit = Math.max(1, integerQueryParam(req.query.limit, 400, 1_000));
+  const offset = integerQueryParam(req.query.offset, 0, 100_000);
+  results = attachMonsterUserData(results.slice(offset, offset + limit), req.user.id);
+  res.json({ results, total, offset, limit, hasMore: offset + results.length < total });
 });
 
 // Detalle de una entrada, con datos completos del SRD o de la biblioteca propia
