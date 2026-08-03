@@ -197,6 +197,7 @@ export default function CampScene({
   playerCount,
   onTakePath,
   campaignId,
+  elapsedDays = 0,
 }) {
   const [panel, setPanel] = useState(null); // 'hoguera' | 'diario' | 'cofre'
   const scrollerRef = useRef(null);
@@ -340,6 +341,12 @@ export default function CampScene({
 
         {panel === 'diario' && (
           <CampPanel key="diario" title="Diario de campaña" onClose={() => setPanel(null)}>
+            <div className="mb-3 rounded-sm border border-gold/20 bg-night-950/60 px-3 py-2">
+              <p className="font-display text-xs uppercase tracking-widest text-gold/70">Reloj de campaña</p>
+              <p className="mt-0.5 text-sm text-bone/85">
+                Día {elapsedDays} · {elapsedDays} jornada{elapsedDays === 1 ? '' : 's'} transcurrida{elapsedDays === 1 ? '' : 's'}
+              </p>
+            </div>
             {campaign?.lore ? (
               <div className="mb-3">
                 <p className="mb-1 font-display text-xs uppercase tracking-widest text-gold/70">Lore</p>

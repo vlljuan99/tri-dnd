@@ -14,6 +14,7 @@ function formFromCampaign(campaign) {
   return {
     name: campaign.name ?? '',
     description: campaign.description ?? '',
+    artStyle: campaign.artStyle ?? '',
     maxPlayers: campaign.maxPlayers == null ? '' : String(campaign.maxPlayers),
   };
 }
@@ -22,6 +23,7 @@ function identitySnapshot(form) {
   return JSON.stringify({
     name: form.name.trim(),
     description: form.description,
+    artStyle: form.artStyle,
     maxPlayers: String(form.maxPlayers).trim(),
   });
 }
@@ -41,6 +43,7 @@ function payloadFor(form, isDraft) {
     body: {
       name,
       description: form.description,
+      artStyle: form.artStyle,
       maxPlayers,
       ...(isDraft ? { status: 'complete' } : {}),
     },
@@ -311,6 +314,26 @@ export default function IdentidadStep({ progress }) {
             {form.description.length}/2000
           </span>
         </label>
+
+        {isCampaign && (
+          <label className={labelClass}>
+            Estilo artístico para la IA
+            <textarea
+              value={form.artStyle}
+              onChange={(event) => change('artStyle', event.target.value)}
+              rows={3}
+              maxLength={1000}
+              placeholder="Fantasía oscura de tinta y acuarela, paleta fría, piedra húmeda y reflejos cobrizos…"
+              className={`${inputClass} resize-y normal-case tracking-normal`}
+            />
+            <span className="normal-case tracking-normal text-bone/40">
+              Se añade automáticamente a los suelos de sala y a los mapas de mundo o ciudad. Las reglas de vista cenital, sin texto ni cuadrícula, se conservan.
+            </span>
+            <span className="text-right font-mono text-[0.65rem] normal-case tracking-normal text-bone/35">
+              {form.artStyle.length}/1000
+            </span>
+          </label>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-bone/10 pt-3">
           <div>

@@ -56,7 +56,9 @@ export default function RoutePanel({ route, locations, busy, onSave, onReverse, 
           value={cost}
           onChange={(event) => setCost(event.target.value)}
         />
-        <p className="mt-1 text-[0.7rem] text-bone/40">El reloj de campaña se conectará en el Corte C.</p>
+        <p className="mt-1 text-[0.7rem] text-bone/40">
+          Se sumará al reloj de campaña cada vez que el grupo recorra esta ruta.
+        </p>
       </div>
 
       <label className="flex items-start gap-2 text-sm text-bone/80">

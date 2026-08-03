@@ -5,7 +5,33 @@ import {
   conditionsPreventMovement,
   isConditionImmune,
 } from './combatRules.js';
+import {
+  CONDITION_TIMINGS,
+  DEATH_STATES,
+  conditionTimer,
+  damageAtZeroTransition,
+  normalizeConditionTimers,
+  resolveDeathSave,
+  tickConditionTimers,
+} from './combatLifecycle.js';
 import { consumeMonsterAttack, parseMultiattackState } from './monsterActions.js';
+import { syncBossResources } from './bossActions.js';
+
+let conditionExpirationNotifier = null;
+let turnStartEffectsNotifier = null;
+
+// Socket.io vive fuera de este servicio. Se inyecta un avisador para que las
+// expiraciones al inicio de turno también generen toast cuando el combate se
+// arranca desde una ruta HTTP (por ejemplo, al revelar una sala).
+export function bindConditionExpirationNotifier(fn) {
+  conditionExpirationNotifier = typeof fn === 'function' ? fn : null;
+}
+
+// Efectos de casilla que se disparan al inicio de turno viven en otro
+// servicio para no mezclar geometría de mapas con la economía de acciones.
+export function bindTurnStartEffectsNotifier(fn) {
+  turnStartEffectsNotifier = typeof fn === 'function' ? fn : null;
+}
 
 // Economía de turno de verdad (Fase 8.5): con el modo por turnos activo
 // (game_tables.combat_active), moverse y actuar en el tablero solo es
@@ -116,13 +142,25 @@ export function orderedCombatants(campaignId) {
     .all(campaignId);
 }
 
+export function combatantTakesTurn(row) {
+  if (row.kind === 'enemigo') return !Number.isInteger(row.hp_current) || row.hp_current > 0;
+  if (!row.character_id) return true;
+  const character = db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(row.character_id);
+  if (!character || character.hp_current > 0) return true;
+  // Un PJ agonizante conserva su turno para hacer una salvación de muerte.
+  // Los estabilizados y muertos permanecen visibles en iniciativa, pero se
+  // saltan hasta que recuperen PG o intervenga el DM.
+  return row.death_state === DEATH_STATES.DYING;
+}
+
 export function resetCombatantResources(combatantId) {
   // Correr (dashed) y la postura (stance) son recursos del turno: se olvidan
   // al empezar el siguiente, igual que el movimiento/acción. Las condiciones
   // y las salvaciones de muerte NO se tocan aquí (persisten entre turnos).
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
-     dashed = 0, stance = NULL, multiattack_state = '{}' WHERE id = ?`
+     dashed = 0, stance = NULL, multiattack_state = '{}',
+     legendary_points = legendary_points_max WHERE id = ?`
   ).run(combatantId);
 }
 
@@ -140,12 +178,16 @@ export function startTurnFor(campaignId, combatantId, round) {
     campaignId
   );
   resetCombatantResources(combatantId);
+  const expiredConditions = tickConditionsForTurn(campaignId, combatantId, 'start');
+  if (expiredConditions.length) conditionExpirationNotifier?.(campaignId, expiredConditions);
+  turnStartEffectsNotifier?.(campaignId, combatantId, round);
   // Una reacción pendiente solo existe mientras sigue abierta la ventana
   // que provocó el movimiento. Al empezar otro turno no puede conservarse.
   db.prepare('DELETE FROM opportunity_attacks WHERE campaign_id = ?').run(campaignId);
   if (Number.isInteger(previousRound) && round > previousRound) {
     fireRoundEvents(campaignId, round);
   }
+  return { expiredConditions };
 }
 
 // Si el modo por turnos está activo y no hay nadie actuando (mesa recién
@@ -156,9 +198,9 @@ export function ensureTurnStarted(campaignId) {
     .prepare('SELECT combat_active, combat_turn_id, combat_round FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
   if (!table?.combat_active || table.combat_turn_id) return;
-  const list = orderedCombatants(campaignId);
+  const list = orderedCombatants(campaignId).filter(combatantTakesTurn);
   if (!list.length) return;
-  startTurnFor(campaignId, list[0].id, table.combat_round ?? 1);
+  return startTurnFor(campaignId, list[0].id, table.combat_round ?? 1);
 }
 
 // Activa el modo por turnos como arranque fresco de encuentro: resetea los
@@ -177,11 +219,12 @@ export function activateTurnMode(campaignId, { rerollAll = true } = {}) {
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
-     dashed = 0, stance = NULL, reaction_used_round = NULL,
+     dashed = 0, stance = NULL, reaction_used_round = NULL, death_save_round = NULL,
      multiattack_state = '{}' WHERE campaign_id = ?`
   ).run(campaignId);
 
   const rolls = [];
+  for (const combatant of orderedCombatants(campaignId)) syncBossResources(combatant.id);
   for (const c of orderedCombatants(campaignId)) {
     if (!rerollAll && c.initiative_source !== null) continue;
     const detail = rollInitiativeDetailed(c);
@@ -190,9 +233,12 @@ export function activateTurnMode(campaignId, { rerollAll = true } = {}) {
   }
 
   const fresh = orderedCombatants(campaignId);
-  if (fresh.length) startTurnFor(campaignId, fresh[0].id, 1);
-  else db.prepare('UPDATE game_tables SET combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
-  return { order: fresh, rolls };
+  const firstConscious = fresh.find(combatantTakesTurn);
+  const started = firstConscious ? startTurnFor(campaignId, firstConscious.id, 1) : null;
+  if (!firstConscious) {
+    db.prepare('UPDATE game_tables SET combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+  }
+  return { order: fresh, rolls, expiredConditions: started?.expiredConditions ?? [] };
 }
 
 // ¿Hay iniciativas que "respetar las tiradas existentes" conservaría? El DM
@@ -223,7 +269,7 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
     .get(campaignId, characterId);
   if (existing) return false;
 
-  const character = db.prepare('SELECT id, name FROM characters WHERE id = ?').get(characterId);
+  const character = db.prepare('SELECT id, name, hp_current FROM characters WHERE id = ?').get(characterId);
   if (!character) return false;
 
   // Entrar a un combate ya en marcha tira iniciativa sola (y guarda el
@@ -235,8 +281,8 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
     : null;
   db.prepare(
     `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative,
-     initiative_source, initiative_d20, initiative_mod)
-     VALUES (?, ?, 'pj', ?, ?, ?, ?, ?)`
+     initiative_source, initiative_d20, initiative_mod, death_state)
+     VALUES (?, ?, 'pj', ?, ?, ?, ?, ?, ?)`
   ).run(
     campaignId,
     characterId,
@@ -244,7 +290,8 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
     detail?.total ?? 0,
     detail ? 'auto' : null,
     detail?.d20 ?? null,
-    detail?.modifier ?? null
+    detail?.modifier ?? null,
+    character.hp_current <= 0 ? DEATH_STATES.DYING : DEATH_STATES.NORMAL
   );
   ensureTurnStarted(campaignId);
   return detail ? { inserted: true, name: character.name, ...detail } : { inserted: true };
@@ -337,6 +384,9 @@ export function trySpendEnemyMovement(campaignId, mapTokenId, squares) {
     .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND map_token_id = ? AND kind = 'enemigo'")
     .get(campaignId, mapTokenId);
   if (!combatant) return { ok: true };
+  if (Number.isInteger(combatant.hp_current) && combatant.hp_current <= 0) {
+    return { ok: false, error: 'Este enemigo está inconsciente y no puede moverse' };
+  }
   if (conditionsPreventMovement(combatant.conditions)) {
     return { ok: false, error: 'Las condiciones de este enemigo reducen su velocidad a 0' };
   }
@@ -419,20 +469,36 @@ export function trySpecialAction(campaignId, combatantId, kind) {
   return { ok: true };
 }
 
+function jsonList(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // Alterna una condición del combatiente (la pone si no está, la quita si sí).
-// Persiste entre turnos: la gestiona el DM a mano. Devuelve la lista resultante.
-export function toggleCondition(campaignId, combatantId, condition) {
+// Sin duración persiste hasta que el DM la retire. Con duración, el contador
+// baja al inicio o final del turno del propio afectado.
+export function toggleCondition(campaignId, combatantId, condition, options = {}) {
   if (!COMBAT_CONDITIONS.includes(condition)) return { ok: false, error: 'Condición no válida' };
+  if (options.duration != null) {
+    const duration = Math.round(Number(options.duration));
+    if (!Number.isInteger(duration) || duration < 1 || duration > 99) {
+      return { ok: false, error: 'La duración debe estar entre 1 y 99 rondas' };
+    }
+    if (!CONDITION_TIMINGS.includes(options.timing)) {
+      return { ok: false, error: 'El momento de expiración no es válido' };
+    }
+  }
   const row = db
-    .prepare('SELECT conditions, monster_index FROM combatants WHERE id = ? AND campaign_id = ?')
+    .prepare(
+      'SELECT conditions, condition_timers, fluid_conditions, monster_index FROM combatants WHERE id = ? AND campaign_id = ?'
+    )
     .get(combatantId, campaignId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
-  let list;
-  try {
-    list = JSON.parse(row.conditions || '[]');
-  } catch {
-    list = [];
-  }
+  const list = jsonList(row.conditions);
   const has = list.includes(condition);
   if (!has && row.monster_index) {
     const entry = db
@@ -449,8 +515,45 @@ export function toggleCondition(campaignId, combatantId, condition) {
     }
   }
   const next = has ? list.filter((c) => c !== condition) : [...list, condition];
-  db.prepare('UPDATE combatants SET conditions = ? WHERE id = ?').run(JSON.stringify(next), combatantId);
-  return { ok: true, conditions: next, added: !has };
+  const existingTimers = normalizeConditionTimers(row.condition_timers).filter(
+    (entry) => entry.condition !== condition
+  );
+  const timer = has ? null : conditionTimer(condition, options);
+  const nextTimers = timer ? [...existingTimers, timer] : existingTimers;
+  // Si el DM toca una condición automática, deja de pertenecer al fluido:
+  // su decisión manual no se borrará al salir de la casilla.
+  const fluidConditions = jsonList(row.fluid_conditions).filter((entry) => entry !== condition);
+  db.prepare(
+    'UPDATE combatants SET conditions = ?, condition_timers = ?, fluid_conditions = ? WHERE id = ?'
+  ).run(
+    JSON.stringify(next),
+    JSON.stringify(nextTimers),
+    JSON.stringify(fluidConditions),
+    combatantId
+  );
+  return { ok: true, conditions: next, timedConditions: nextTimers, added: !has };
+}
+
+export function tickConditionsForTurn(campaignId, combatantId, timing) {
+  const row = db
+    .prepare(
+      'SELECT id, name, conditions, condition_timers, fluid_conditions FROM combatants WHERE id = ? AND campaign_id = ?'
+    )
+    .get(combatantId, campaignId);
+  if (!row) return [];
+
+  const result = tickConditionTimers({
+    conditions: jsonList(row.conditions),
+    timers: row.condition_timers,
+    fluidConditions: jsonList(row.fluid_conditions),
+    timing,
+  });
+  db.prepare('UPDATE combatants SET conditions = ?, condition_timers = ? WHERE id = ?').run(
+    JSON.stringify(result.conditions),
+    JSON.stringify(result.timers),
+    row.id
+  );
+  return result.expired.map((condition) => ({ combatantId: row.id, name: row.name, condition }));
 }
 
 // --- Concentración ---------------------------------------------------------
@@ -471,11 +574,31 @@ export function setConcentration(campaignId, combatantId, spell) {
 // Pone a un combatiente PJ "agonizando": 0 salvaciones de muerte pendientes.
 // Se llama al caer a 0 PG. Idempotente si ya estaba agonizando con marcas.
 export function startDeathSaves(combatantId) {
-  db.prepare('UPDATE combatants SET death_successes = 0, death_failures = 0 WHERE id = ?').run(combatantId);
+  db.prepare(
+    "UPDATE combatants SET death_state = 'dying', death_successes = 0, death_failures = 0, death_save_round = NULL WHERE id = ?"
+  ).run(combatantId);
 }
 
 export function resetDeathSaves(combatantId) {
-  startDeathSaves(combatantId);
+  db.prepare(
+    "UPDATE combatants SET death_state = 'normal', death_successes = 0, death_failures = 0, death_save_round = NULL WHERE id = ?"
+  ).run(combatantId);
+}
+
+export function recordDamageAtZero(combatantId, { critical = false, massive = false } = {}) {
+  const row = db.prepare('SELECT death_state, death_successes, death_failures FROM combatants WHERE id = ?').get(combatantId);
+  if (!row) return null;
+  const next = damageAtZeroTransition({
+    state: row.death_state,
+    successes: row.death_successes,
+    failures: row.death_failures,
+    critical,
+    massive,
+  });
+  db.prepare(
+    'UPDATE combatants SET death_state = ?, death_successes = ?, death_failures = ? WHERE id = ?'
+  ).run(next.state, next.successes, next.failures, combatantId);
+  return next;
 }
 
 // Registra una salvación de muerte a partir de un d20 ya tirado por el cliente
@@ -489,37 +612,20 @@ export function recordDeathSave(campaignId, combatantId, d20) {
     .prepare("SELECT * FROM combatants WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
     .get(combatantId, campaignId);
   if (!row) return { ok: false, error: 'Combatiente no encontrado' };
-  const natural = Math.max(1, Math.min(20, Math.round(Number(d20)) || 1));
-
-  let successes = row.death_successes;
-  let failures = row.death_failures;
-  let outcome;
-
-  if (natural === 20) {
-    successes = 0;
-    failures = 0;
-    outcome = 'revive'; // recupera 1 PG (lo aplica el llamador sobre la ficha)
-  } else if (natural === 1) {
-    failures = Math.min(3, failures + 2);
-    outcome = failures >= 3 ? 'muere' : 'fallo';
-  } else if (natural >= 10) {
-    successes = Math.min(3, successes + 1);
-    outcome = successes >= 3 ? 'estable' : 'exito';
-  } else {
-    failures = Math.min(3, failures + 1);
-    outcome = failures >= 3 ? 'muere' : 'fallo';
-  }
-
-  if (outcome === 'estable') {
-    successes = 0;
-    failures = 0;
-  }
-  db.prepare('UPDATE combatants SET death_successes = ?, death_failures = ? WHERE id = ?').run(
-    successes,
-    failures,
-    combatantId
+  const result = resolveDeathSave(
+    {
+      state: row.death_state,
+      successes: row.death_successes,
+      failures: row.death_failures,
+    },
+    d20
   );
-  return { ok: true, outcome, successes, failures, natural, characterId: row.character_id };
+  if (!result.ok) return result;
+  const round = db.prepare('SELECT combat_round FROM game_tables WHERE campaign_id = ?').get(campaignId)?.combat_round;
+  db.prepare(
+    'UPDATE combatants SET death_state = ?, death_successes = ?, death_failures = ?, death_save_round = ? WHERE id = ?'
+  ).run(result.state, result.successes, result.failures, round ?? null, combatantId);
+  return { ...result, characterId: row.character_id };
 }
 
 // Gasta la acción del turno de un combatiente por su id directo (a
@@ -641,7 +747,7 @@ export function tryUseReaction(campaignId, combatantId) {
 // (para que quien llame decida si avisar por el chat).
 export function endCombatIfNoEnemiesLeft(campaignId) {
   const remaining = db
-    .prepare("SELECT COUNT(*) AS n FROM combatants WHERE campaign_id = ? AND kind = 'enemigo'")
+    .prepare("SELECT COUNT(*) AS n FROM combatants WHERE campaign_id = ? AND kind = 'enemigo' AND (hp_current IS NULL OR hp_current > 0)")
     .get(campaignId).n;
   if (remaining > 0) return false;
 

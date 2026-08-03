@@ -1,6 +1,9 @@
 import { db } from '../db.js';
 import { computeFloorVision } from './vision.js';
 import { rollInitiativeDetailed, ensureTurnStarted, activateTurnMode } from './turnEconomy.js';
+import { fluidTypeAtRoomPosition, normalizeFluidEffects } from './fluidRules.js';
+import { syncBossResources } from './bossActions.js';
+import { discoverCreatures } from './bestiary.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -33,6 +36,9 @@ export function serializeRoom(row, { forPlayer = false } = {}) {
     // Fuentes de luz manuales ([col, fila]): braseros/velas del DM, visibles
     // para todos (son decorado; la niebla por luz llegará en la fase 12)
     lightCells: JSON.parse(row.light_cells || '[]'),
+    // Fluidos ([col, fila, tipo]): sus casillas y reglas son visibles para
+    // todos; las tiradas, el daño y los estados se resuelven en servidor.
+    fluidCells: JSON.parse(row.fluid_cells || '[]'),
     notes: forPlayer ? '' : row.notes,
     // Para el jugador, toda sala que recibe es visible (aunque el DM la
     // tenga sin revelar y solo la vea él por tener ahí su personaje)
@@ -281,6 +287,7 @@ export function spawnRoomEnemies(campaignId, roomIds) {
   );
 
   let added = 0;
+  const discovered = [];
   for (const enemy of enemies) {
     if (already.has(enemy.id)) continue;
     let hp = null;
@@ -325,7 +332,7 @@ export function spawnRoomEnemies(campaignId, roomIds) {
     // enemigos como «sin tirar» pese a tener iniciativa, y «respetar las
     // existentes» al abrir el combate volvería a tirar por ellos.
     const roll = rollInitiativeDetailed({ kind: 'enemigo', monster_index: enemy.monster_index });
-    insert.run(
+    const inserted = insert.run(
       campaignId,
       enemy.name,
       roll.total,
@@ -338,8 +345,11 @@ export function spawnRoomEnemies(campaignId, roomIds) {
       roll.d20,
       roll.modifier
     );
+    syncBossResources(Number(inserted.lastInsertRowid));
+    discovered.push(enemy);
     added += 1;
   }
+  if (discovered.length) discoverCreatures(campaignId, discovered);
   let startedCombat = false;
   if (added > 0) {
     // Encuentro nuevo: si la mesa había vuelto a modo libre (p. ej. tras
@@ -394,6 +404,24 @@ function loadMapContents(map) {
 // Vista completa del DM: todas las salas, notas, puertas y marcadores
 export function serializeFullMap(map, campaignId) {
   const { floors, rooms, doors, tokens } = loadMapContents(map);
+  const round = db.prepare('SELECT combat_round FROM game_tables WHERE campaign_id = ?').get(campaignId)?.combat_round ?? 1;
+  const zones = db
+    .prepare('SELECT * FROM combat_zones WHERE map_id = ? AND expires_round >= ? ORDER BY id')
+    .all(map.id, round)
+    .map((zone) => ({
+      id: zone.id,
+      name: zone.name,
+      visualType: zone.visual_type,
+      cells: JSON.parse(zone.cells || '[]'),
+      triggerTiming: zone.trigger_timing,
+      saveAbility: zone.save_ability,
+      saveDc: zone.save_dc,
+      damageDice: zone.damage_dice,
+      damageType: zone.damage_type,
+      halfOnSave: Boolean(zone.half_on_save),
+      condition: zone.condition,
+      expiresRound: zone.expires_round,
+    }));
   return {
     id: map.id,
     name: map.name,
@@ -402,6 +430,11 @@ export function serializeFullMap(map, campaignId) {
     visionRadius: map.vision_radius,
     wallColor: map.wall_color,
     wallLightEvery: map.wall_light_every,
+    fluidEffects: normalizeFluidEffects(map.fluid_effects),
+    weather: map.weather ?? 'despejado',
+    timeOfDay: map.time_of_day ?? 'dia',
+    weatherIntensity: map.weather_intensity ?? 0.55,
+    hazardZones: zones,
     isActive: getActiveMapId(campaignId) === map.id,
     floors: floors.map((f) => ({
       id: f.id,
@@ -428,6 +461,18 @@ export function serializeMapForPlayer(map, userId) {
     if (t.user_id === userId) visible.add(t.room_id);
   }
   const roomById = new Map(rooms.map((r) => [r.id, r]));
+  const fluidEffects = normalizeFluidEffects(map.fluid_effects);
+  const round = db.prepare('SELECT combat_round FROM game_tables WHERE campaign_id = ?').get(map.campaign_id)?.combat_round ?? 1;
+  const hazardZones = db
+    .prepare('SELECT id, name, visual_type, cells, expires_round FROM combat_zones WHERE map_id = ? AND expires_round >= ? ORDER BY id')
+    .all(map.id, round)
+    .map((zone) => ({
+      id: zone.id,
+      name: zone.name,
+      visualType: zone.visual_type,
+      cells: JSON.parse(zone.cells || '[]'),
+      expiresRound: zone.expires_round,
+    }));
 
   // Niebla fina: con visión 'compartida' o 'individual', dentro de las
   // salas visibles solo se ve lo que alcanzan los tokens (la del grupo o
@@ -466,11 +511,17 @@ export function serializeMapForPlayer(map, userId) {
         computeFloorVision({
           rooms: floorRooms,
           doors: floorDoors,
-          viewers: floorViewers.map((t) => ({
-            x: t.x,
-            y: t.y,
-            radius: Math.max(map.vision_radius, t.darkvision || 0),
-          })),
+          viewers: floorViewers.map((t) => {
+            const room = roomById.get(t.room_id);
+            const fluidType = room ? fluidTypeAtRoomPosition(room, t.x, t.y) : null;
+            const fluidRadius = fluidType ? fluidEffects[fluidType]?.visionRadius : null;
+            const normalRadius = Math.max(map.vision_radius, t.darkvision || 0);
+            return {
+              x: t.x,
+              y: t.y,
+              radius: fluidRadius ? Math.min(normalRadius, fluidRadius) : normalRadius,
+            };
+          }),
         })
       );
     }
@@ -511,6 +562,11 @@ export function serializeMapForPlayer(map, userId) {
     gridSize: map.grid_size,
     wallColor: map.wall_color,
     wallLightEvery: map.wall_light_every,
+    fluidEffects,
+    weather: map.weather ?? 'despejado',
+    timeOfDay: map.time_of_day ?? 'dia',
+    weatherIntensity: map.weather_intensity ?? 0.55,
+    hazardZones,
     floors: floors.map((f) => ({
       id: f.id,
       name: f.name,

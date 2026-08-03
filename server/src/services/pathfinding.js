@@ -7,13 +7,15 @@
 // previa; la validación de verdad es esta.
 
 import { wallBlocksStep } from './walls.js';
+import { fluidMovementCost, normalizeFluidEffects } from './fluidRules.js';
 
 // Construye el mapa de casillas pisables de un conjunto de salas (filas
 // crudas de map_rooms): clave "x,y" absoluta → coste de entrar. Quedan
 // fuera las casillas desactivadas y los obstáculos; si dos salas se
 // solapan en una casilla, gana el coste más barato.
-export function buildWalkableGrid(rooms) {
+export function buildWalkableGrid(rooms, fluidEffects = null) {
   const walkable = new Map();
+  const effects = normalizeFluidEffects(fluidEffects);
   for (const room of rooms) {
     const disabled = new Set(
       [...JSON.parse(room.disabled_cells || '[]'), ...JSON.parse(room.obstacle_cells || '[]')].map(
@@ -26,11 +28,15 @@ export function buildWalkableGrid(rooms) {
         Math.max(1, Math.min(10, Number(cost) || 2)),
       ])
     );
+    const fluids = new Map(
+      JSON.parse(room.fluid_cells || '[]').map(([c, r, type]) => [`${c},${r}`, type])
+    );
     for (let r = 0; r < room.height; r += 1) {
       for (let c = 0; c < room.width; c += 1) {
         if (disabled.has(`${c},${r}`)) continue;
         const key = `${room.x + c},${room.y + r}`;
-        const cost = terrain.get(`${c},${r}`) ?? 1;
+        const terrainCost = terrain.get(`${c},${r}`) ?? 1;
+        const cost = Math.max(terrainCost, fluidMovementCost(effects, fluids.get(`${c},${r}`)));
         walkable.set(key, Math.min(walkable.get(key) ?? Infinity, cost));
       }
     }
@@ -84,25 +90,20 @@ export function findPath(walkable, from, to, maxCost = 100, walls = null, elevat
   // casilla luego editada): se permite salir de él igualmente.
 
   const dist = new Map([[fromKey, 0]]);
+  const turns = new Map([[fromKey, 0]]);
+  const direction = new Map();
   const previous = new Map();
   const buckets = [[fromKey]];
+  let targetCost = null;
   for (let cost = 0; cost < buckets.length && cost <= maxCost; cost += 1) {
+    if (targetCost !== null && cost > targetCost) break;
     const bucket = buckets[cost];
     if (!bucket) continue;
     for (const key of bucket) {
       if (dist.get(key) !== cost) continue; // entrada obsoleta
-      if (key === toKey) {
-        const path = [];
-        let cursor = toKey;
-        while (cursor !== fromKey) {
-          const [x, y] = cursor.split(',').map(Number);
-          path.unshift({ x, y });
-          cursor = previous.get(cursor);
-          if (!cursor) return null;
-        }
-        return { cost, path };
-      }
       const [x, y] = key.split(',').map(Number);
+      const fromDirection = direction.get(key);
+      const baseTurns = turns.get(key);
       for (const [dx, dy] of NEIGHBORS) {
         const nKey = `${x + dx},${y + dy}`;
         const enterCost = walkable.get(nKey);
@@ -110,15 +111,30 @@ export function findPath(walkable, from, to, maxCost = 100, walls = null, elevat
         if (wallBlocksStep(walls, x, y, x + dx, y + dy)) continue;
         const next = cost + enterCost + climbCost(elevation, key, nKey);
         if (next > maxCost) continue;
-        if (next < (dist.get(nKey) ?? Infinity)) {
+        const turned = fromDirection && (fromDirection[0] !== dx || fromDirection[1] !== dy) ? 1 : 0;
+        const nextTurns = baseTurns + turned;
+        const known = dist.get(nKey);
+        const cheaper = known === undefined || next < known;
+        const straighter = next === known && nextTurns < turns.get(nKey);
+        if (cheaper || straighter) {
           dist.set(nKey, next);
+          turns.set(nKey, nextTurns);
+          direction.set(nKey, [dx, dy]);
           previous.set(nKey, key);
+          if (nKey === toKey && targetCost === null) targetCost = next;
           (buckets[next] ??= []).push(nKey);
         }
       }
     }
   }
-  return null;
+  if (!dist.has(toKey)) return null;
+  const path = [];
+  for (let cursor = toKey; cursor !== fromKey; cursor = previous.get(cursor)) {
+    if (!cursor) return null;
+    const [x, y] = cursor.split(',').map(Number);
+    path.unshift({ x, y });
+  }
+  return { cost: dist.get(toKey), path };
 }
 
 export function findPathCost(walkable, from, to, maxCost = 100, walls = null, elevation = null) {

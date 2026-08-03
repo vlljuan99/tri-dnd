@@ -141,6 +141,7 @@ function attackerRows(campaignId, moverKind, floorId, mapId) {
         .get(mapId, combatant.character_id);
       if (!character || Number(character.hp_current) <= 0) continue;
     } else {
+      if (Number.isInteger(combatant.hp_current) && combatant.hp_current <= 0) continue;
       token = db
         .prepare('SELECT t.*, r.floor_id FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id WHERE t.id = ?')
         .get(combatant.map_token_id);
@@ -165,6 +166,12 @@ export function queueOpportunityAttacks({
     .prepare('SELECT combat_active, combat_round FROM game_tables WHERE campaign_id = ?')
     .get(campaignId);
   if (!table?.combat_active || path.length < 2 || moverCombatant?.stance === 'destrabarse') return [];
+  if (Number.isInteger(moverCombatant?.hp_current) && moverCombatant.hp_current <= 0) return [];
+  if (
+    moverKind === 'personaje' &&
+    moverCharacterId &&
+    (db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(moverCharacterId)?.hp_current ?? 1) <= 0
+  ) return [];
   const moverConditions = parseConditions(moverCombatant?.conditions);
   if (moverConditions.includes('invisible')) return [];
   const mapId = db.prepare('SELECT active_map_id FROM game_tables WHERE campaign_id = ?').get(campaignId)?.active_map_id;

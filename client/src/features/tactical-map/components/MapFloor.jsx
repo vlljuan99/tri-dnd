@@ -1,7 +1,8 @@
-import { Suspense, useMemo } from 'react';
-import { useLoader } from '@react-three/fiber';
+import { Suspense, useEffect, useMemo } from 'react';
+import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { disabledCellsToSet, cellKey } from '../domain/cells.js';
+import { FLUID_TYPE_KEYS } from '../domain/fluids.js';
 
 // Construye la geometría del suelo de una sala: un cuadrado por casilla
 // activa (las desactivadas se omiten, quedando como vacío/oscuro). Las UV de
@@ -184,6 +185,186 @@ function RoomElevation({ room, gridSize }) {
   );
 }
 
+// Los fluidos comparten un único shader barato. Cada tipo presente construye
+// una sola geometría fusionada para todo el tablero: cuatro vértices por
+// casilla, pero solo un draw-call por tipo y sin texturas, luces ni ruido.
+const FLUID_LAYER_Y = 0.045;
+const FLUID_CONFIG = {
+  agua: { kind: 0, colorA: '#0d4f78', colorB: '#62c7e8', opacity: 0.58 },
+  lava: { kind: 1, colorA: '#5e0e08', colorB: '#ff7a18', opacity: 0.82 },
+  niebla: { kind: 2, colorA: '#315b32', colorB: '#a4cf68', opacity: 0.3 },
+  veneno: { kind: 3, colorA: '#26351d', colorB: '#71823b', opacity: 0.64 },
+  arcana: { kind: 4, colorA: '#155da0', colorB: '#d5f8ff', opacity: 0.68 },
+};
+
+const fluidVertexShader = `
+  attribute float aOpacity;
+  varying vec2 vCoord;
+  varying float vOpacity;
+
+  void main() {
+    vCoord = uv;
+    vOpacity = aOpacity;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const fluidFragmentShader = `
+  precision highp float;
+
+  uniform float uTime;
+  uniform float uKind;
+  uniform float uOpacity;
+  uniform vec3 uColorA;
+  uniform vec3 uColorB;
+  varying vec2 vCoord;
+  varying float vOpacity;
+
+  void main() {
+    float waveA = sin(vCoord.x * 3.7 + uTime * 0.75);
+    float waveB = sin(vCoord.y * 4.3 - uTime * 0.58);
+    float waveC = sin((vCoord.x + vCoord.y) * 2.8 + uTime * 0.34);
+    float crossed = (waveA + waveB + waveC) / 3.0;
+    float mixValue = 0.5 + crossed * 0.24;
+    float alphaFactor = 1.0;
+    vec3 color = mix(uColorA, uColorB, mixValue);
+
+    if (uKind < 0.5) {
+      // Agua: ondulación suave y una cresta especular que se desplaza.
+      float glint = pow(max(0.0, sin(vCoord.x * 7.0 - vCoord.y * 5.0 + uTime * 1.25)), 12.0);
+      color += vec3(0.32, 0.42, 0.48) * glint;
+      alphaFactor = 0.9 + crossed * 0.08;
+    } else if (uKind < 1.5) {
+      // Lava: base naranja-roja con vetas oscuras de flujo lento.
+      float vein = abs(sin(vCoord.x * 3.2 + vCoord.y * 5.4 - uTime * 0.28) + waveC * 0.38);
+      float darkVein = 1.0 - smoothstep(0.08, 0.42, vein);
+      color = mix(color, vec3(0.12, 0.015, 0.005), darkVein * 0.82);
+      color += vec3(0.2, 0.035, 0.0) * (1.0 - darkVein);
+    } else if (uKind < 2.5) {
+      // Niebla tóxica: humo lento, difuso y deliberadamente tenue.
+      float smoke = 0.5 + 0.5 * sin(vCoord.x * 2.1 - vCoord.y * 2.7 + uTime * 0.2 + waveB * 0.7);
+      color = mix(uColorA, uColorB, 0.2 + smoke * 0.5);
+      alphaFactor = 0.55 + smoke * 0.35;
+    } else if (uKind < 3.5) {
+      // Veneno/cieno: desplazamiento viscoso con burbujas que ascienden.
+      float bubbleBand = sin(vCoord.x * 8.0 + sin(vCoord.y * 3.0) - uTime * 0.38);
+      float bubbles = smoothstep(0.92, 1.0, bubbleBand) * (0.5 + 0.5 * sin(vCoord.y * 7.0 - uTime * 0.55));
+      color = mix(color, uColorB * 1.25, bubbles * 0.75);
+      alphaFactor = 0.88 + bubbles * 0.12;
+    } else {
+      // Agua arcana: pulso azul-blanco emisivo sin consumir luces reales.
+      float pulse = 0.5 + 0.5 * sin(uTime * 1.15 + (vCoord.x + vCoord.y) * 1.7);
+      color = mix(color, uColorB * 1.35, pulse * 0.35);
+      alphaFactor = 0.85 + pulse * 0.15;
+    }
+
+    gl_FragColor = vec4(color, uOpacity * vOpacity * alphaFactor);
+  }
+`;
+
+function buildFluidGeometries(rooms, gridSize) {
+  const buffers = new Map();
+  for (const type of FLUID_TYPE_KEYS) {
+    buffers.set(type, { positions: [], uvs: [], opacities: [], indices: [], vertex: 0, seen: new Set() });
+  }
+
+  for (const room of rooms) {
+    const disabled = disabledCellsToSet(room.disabledCells);
+    const opacity = room.revealed === false ? 0.4 : 1;
+    for (const [c, r, type] of room.fluidCells ?? []) {
+      if (!FLUID_TYPE_KEYS.has(type) || c < 0 || r < 0 || c >= room.width || r >= room.height) continue;
+      if (disabled.has(cellKey(c, r))) continue;
+      const buffer = buffers.get(type);
+      const worldCellKey = cellKey(room.col + c, room.row + r);
+      if (buffer.seen.has(worldCellKey)) continue;
+      buffer.seen.add(worldCellKey);
+
+      const x0 = (room.col + c) * gridSize;
+      const x1 = (room.col + c + 1) * gridSize;
+      const z0 = (room.row + r) * gridSize;
+      const z1 = (room.row + r + 1) * gridSize;
+      buffer.positions.push(
+        x0, FLUID_LAYER_Y, z0,
+        x1, FLUID_LAYER_Y, z0,
+        x1, FLUID_LAYER_Y, z1,
+        x0, FLUID_LAYER_Y, z1
+      );
+      // Coordenadas en unidades de casilla: el patrón cruza sus bordes sin
+      // costuras y conserva la misma escala aunque cambie gridSize.
+      buffer.uvs.push(
+        room.col + c, room.row + r,
+        room.col + c + 1, room.row + r,
+        room.col + c + 1, room.row + r + 1,
+        room.col + c, room.row + r + 1
+      );
+      buffer.opacities.push(opacity, opacity, opacity, opacity);
+      buffer.indices.push(
+        buffer.vertex,
+        buffer.vertex + 2,
+        buffer.vertex + 1,
+        buffer.vertex,
+        buffer.vertex + 3,
+        buffer.vertex + 2
+      );
+      buffer.vertex += 4;
+    }
+  }
+
+  const geometries = [];
+  for (const [type, buffer] of buffers) {
+    if (!buffer.vertex) continue;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(buffer.positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(buffer.uvs, 2));
+    geometry.setAttribute('aOpacity', new THREE.Float32BufferAttribute(buffer.opacities, 1));
+    geometry.setIndex(buffer.indices);
+    geometry.computeBoundingSphere();
+    geometries.push({ type, geometry });
+  }
+  return geometries;
+}
+
+function FluidMesh({ type, geometry }) {
+  const material = useMemo(() => {
+    const config = FLUID_CONFIG[type];
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uKind: { value: config.kind },
+        uOpacity: { value: config.opacity },
+        uColorA: { value: new THREE.Color(config.colorA) },
+        uColorB: { value: new THREE.Color(config.colorB) },
+      },
+      vertexShader: fluidVertexShader,
+      fragmentShader: fluidFragmentShader,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+  }, [type]);
+
+  useEffect(() => () => material.dispose(), [material]);
+  useFrame(({ clock }) => {
+    material.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  return <mesh geometry={geometry} material={material} raycast={() => null} renderOrder={1} />;
+}
+
+function BoardFluids({ rooms, gridSize }) {
+  const geometries = useMemo(() => buildFluidGeometries(rooms, gridSize), [rooms, gridSize]);
+  useEffect(
+    () => () => {
+      for (const { geometry } of geometries) geometry.dispose();
+    },
+    [geometries]
+  );
+  if (!geometries.length) return null;
+  return geometries.map(({ type, geometry }) => (
+    <FluidMesh key={type} type={type} geometry={geometry} />
+  ));
+}
+
 // Luces del tablero: antorchas automáticas en las paredes (una cada
 // `wallLightEvery` casillas, determinista por posición) más las fuentes
 // manuales del DM (braseros/velas en lightCells). Cada luz es una brasa
@@ -284,6 +465,7 @@ export default function MapFloor({ map }) {
           <RoomElevation room={room} gridSize={map.gridSize} />
         </group>
       ))}
+      <BoardFluids rooms={rooms} gridSize={map.gridSize} />
       <BoardLights map={map} />
     </group>
   );

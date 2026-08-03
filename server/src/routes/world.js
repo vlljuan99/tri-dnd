@@ -8,7 +8,7 @@ import { MAP_UPLOADS_DIR } from '../config.js';
 import { generateWorldMapImage } from '../services/mapImageGeneration.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { notifyCampaignMap, notifyCampaignWorld, notifyWorldTravel } from '../services/liveMap.js';
-import { fireTravelEvents } from '../services/events.js';
+import { fireRouteEvents, fireTravelEvents } from '../services/events.js';
 import {
   cleanRouteLabel,
   filterRoutesByVisibleLocations,
@@ -178,6 +178,7 @@ function serializeWorld(campaign, role) {
   return {
     hasWorldMap: Boolean(campaign.has_world_map),
     lore: campaign.lore ?? '',
+    elapsedDays: campaign.elapsed_days ?? 0,
     rootMapId: rootId,
     currentMapId,
     currentLocationId,
@@ -386,7 +387,8 @@ worldRouter.post('/mapas/:mapId/imagen/generar', requireDm, async (req, res) => 
   const cleanStyle = IMAGE_STYLES.has(estilo) ? estilo : 'region';
 
   try {
-    const generated = await generateWorldMapImage(provider, cleanPrompt, cleanStyle);
+    const artStyle = getCampaign(req.params.campaignId)?.art_style ?? '';
+    const generated = await generateWorldMapImage(provider, cleanPrompt, cleanStyle, artStyle);
     saveWorldImage(req, res, worldMap, generated.buffer, '.png');
   } catch (error) {
     res.status(502).json({ error: error.message || 'No se pudo generar la imagen' });
@@ -690,6 +692,24 @@ worldRouter.post('/viajar', requireDm, async (req, res) => {
       durationMs,
     });
     await new Promise((resolve) => setTimeout(resolve, durationMs));
+
+    // Dos peticiones casi simultáneas pueden superar la validación previa
+    // antes de que termine la animación. Solo la primera consume la ruta.
+    const latestTable = gameTable(campaign.id);
+    if (latestTable?.current_location_id !== currentLocation.id) {
+      return res.status(409).json({
+        error: 'El grupo ya se ha movido desde el origen de esta ruta.',
+        code: 'TRAVEL_ALREADY_RESOLVED',
+      });
+    }
+    const latestRoute = getRoute(campaign.id, travelRoute.id);
+    if (!latestRoute || !findTravelRoute([latestRoute], currentLocation.id, location.id)) {
+      return res.status(409).json({
+        error: 'La ruta ha cambiado mientras el grupo se preparaba para viajar.',
+        code: 'ROUTE_CHANGED',
+      });
+    }
+    travelRoute = latestRoute;
   }
 
   db.transaction(() => {
@@ -709,10 +729,20 @@ worldRouter.post('/viajar', requireDm, async (req, res) => {
       location.map_id ?? null,
       campaign.id
     );
+    if (travelRoute) {
+      db.prepare('UPDATE campaigns SET elapsed_days = elapsed_days + ? WHERE id = ?').run(
+        travelRoute.cost,
+        campaign.id
+      );
+    }
   })();
-  // El escape hatch recoloca al grupo al improvisar: no dispara consecuencias
-  // automáticas y, cuando exista el reloj (Corte C), tampoco consumirá jornadas.
-  if (!skipRoute) fireTravelEvents(campaign.id, location.id);
+  // El escape hatch recoloca al grupo al improvisar: no consume jornadas ni
+  // dispara consecuencias. En un viaje normal, la ruta sucede antes que la
+  // llegada para que el registro conserve el orden narrativo.
+  if (travelRoute) {
+    fireRouteEvents(campaign.id, travelRoute.id);
+    fireTravelEvents(campaign.id, location.id);
+  }
 
   // El tablero se refresca (nuevo mapa activo) y la mesa muestra el lore de destino
   notifyCampaignMap(campaign.id);

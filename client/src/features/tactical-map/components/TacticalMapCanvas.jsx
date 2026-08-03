@@ -2,6 +2,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { canMoveToken } from '../domain/permissions.js';
+import AimOverlay from './AimOverlay.jsx';
 import MapDoor from './MapDoor.jsx';
 import MapFloor from './MapFloor.jsx';
 import MapGrid from './MapGrid.jsx';
@@ -9,7 +10,16 @@ import MapToken from './MapToken.jsx';
 import MeasureOverlay from './MeasureOverlay.jsx';
 import MovementRange from './MovementRange.jsx';
 import PingMarker from './PingMarker.jsx';
+import SpellFx from './SpellFx.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
+import WeatherLayer, { sceneLighting } from './WeatherLayer.jsx';
+
+const HAZARD_COLORS = {
+  fuego: '#ff6a2a',
+  telarana: '#d8d4c8',
+  nube: '#8eb064',
+  arcana: '#9a74ff',
+};
 
 // Doble clic en el suelo = ping para toda la mesa
 function DoubleClickPing({ onPing }) {
@@ -86,7 +96,12 @@ export default function TacticalMapCanvas({
   terrainCells = [],
   pathCells = [],
   visionCells = [],
-  spellCells = [],
+  // Miras de conjuro (la propia y las de la mesa) y destellos de los ya
+  // lanzados, todo en coordenadas del tablero
+  aims = [],
+  spellFx = [],
+  activeTokenId = null,
+  combatVisuals = [],
 }) {
   const missedHandlerRef = useRef(null);
 
@@ -95,6 +110,7 @@ export default function TacticalMapCanvas({
   const hasLights =
     (map.rooms ?? []).some((room) => room.lightCells?.length) ||
     ((map.wallLightEvery ?? 0) > 0 && (map.rooms ?? []).some((room) => room.wallEdges?.length));
+  const lighting = sceneLighting(map, hasLights);
 
   return (
     <Canvas
@@ -104,12 +120,13 @@ export default function TacticalMapCanvas({
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       onPointerMissed={(event) => missedHandlerRef.current?.(event)}
     >
-      <color attach="background" args={['#14110f']} />
+      <color attach="background" args={[lighting.background]} />
       {/* Ambiente + una direccional en ángulo: las caras superiores de las
           plataformas (elevación) y muros reciben más luz que las laterales,
           dando relieve incluso en vista cenital */}
-      <ambientLight intensity={hasLights ? 0.6 : 0.95} />
-      <directionalLight position={[-6, 12, -4]} intensity={hasLights ? 0.45 : 0.7} />
+      <ambientLight intensity={lighting.ambient} />
+      <directionalLight position={[-6, 12, -4]} intensity={lighting.directional} />
+      <WeatherLayer map={map} />
       <TacticalCamera map={map} command={cameraCommand} />
       <PointerMissedMovement
         measureMode={measureMode}
@@ -127,7 +144,23 @@ export default function TacticalMapCanvas({
       <MovementRange cells={visionCells} gridSize={map.gridSize} color="#6cb7d9" opacity={0.24} y={0.018} />
       <MovementRange cells={reachableCells} gridSize={map.gridSize} />
       <MovementRange cells={pathCells} gridSize={map.gridSize} color="#e8c368" opacity={0.4} y={0.024} />
-      <MovementRange cells={spellCells} gridSize={map.gridSize} color="#b78cff" opacity={0.42} y={0.03} />
+      {(map.hazardZones ?? []).map((zone, index) => (
+        <MovementRange
+          key={zone.id}
+          cells={zone.cells}
+          gridSize={map.gridSize}
+          color={HAZARD_COLORS[zone.visualType] ?? HAZARD_COLORS.arcana}
+          opacity={0.28}
+          y={0.027 + index * 0.0001}
+          animated
+        />
+      ))}
+      {aims.map((aim) => (
+        <AimOverlay key={aim.id} aim={aim} gridSize={map.gridSize} />
+      ))}
+      {spellFx.map((fx) => (
+        <SpellFx key={fx.id} fx={fx} gridSize={map.gridSize} />
+      ))}
       {(map.doors ?? []).map((door, index) => (
         <MapDoor key={`${door.id}-${index}`} door={door} gridSize={map.gridSize} onOpen={onOpenDoor} />
       ))}
@@ -145,6 +178,12 @@ export default function TacticalMapCanvas({
             key={token.id}
             token={token}
             selected={token.id === selectedTokenId}
+            active={token.id === activeTokenId}
+            visuals={combatVisuals.filter((visual) =>
+              token.characterId
+                ? visual.characterId === token.characterId
+                : visual.mapTokenId === token.serverId
+            )}
             movable={canMoveToken({ token, user, role })}
             saving={token.id === savingTokenId}
             onSelect={onSelectToken}

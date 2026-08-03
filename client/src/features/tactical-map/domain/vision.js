@@ -1,4 +1,5 @@
 import { buildBoardWalls, wallBlocksStep } from './walls.js';
+import { fluidTypeAtBoardCell, normalizeFluidEffects } from './fluids.js';
 
 const key = (x, y) => `${x},${y}`;
 
@@ -61,7 +62,12 @@ export function hasBoardLineOfSight(map, from, to) {
 export function computeBoardVision(map, viewer) {
   if (!map || !viewer || !Number.isInteger(viewer.col) || !Number.isInteger(viewer.row)) return [];
   const { existing, blocksSight, walls } = boardSightContext(map);
-  const radius = Math.max(1, Math.min(30, viewer.radius ?? 6));
+  const normalRadius = Math.max(1, Math.min(30, viewer.radius ?? 6));
+  const fluidType = fluidTypeAtBoardCell(map, viewer.col, viewer.row);
+  const fluidRadius = fluidType
+    ? normalizeFluidEffects(map.fluidEffects)[fluidType]?.visionRadius
+    : null;
+  const radius = fluidRadius ? Math.min(normalRadius, fluidRadius) : normalRadius;
   const visible = [];
   for (let y = viewer.row - radius; y <= viewer.row + radius; y += 1) {
     for (let x = viewer.col - radius; x <= viewer.col + radius; x += 1) {

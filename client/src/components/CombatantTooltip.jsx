@@ -30,13 +30,17 @@ export default function CombatantTooltip({ name, className, children }) {
       )}
       {combatant.dead ? (
         <span className="block text-xs text-blood">☠ Muerto</span>
-      ) : combatant.downed ? (
+      ) : combatant.stable ? (
+        <span className="block text-xs text-moss">✚ Estable</span>
+      ) : combatant.dying ? (
         <span className="flex items-center gap-1.5">
           <span className="text-xs text-blood">Agonizando</span>
           <DeathSaveDots saves={combatant.deathSaves} />
         </span>
       ) : null}
-      {hasConditions && <ConditionChips conditions={combatant.conditions} />}
+      {hasConditions && (
+        <ConditionChips conditions={combatant.conditions} timedConditions={combatant.timedConditions} />
+      )}
       {!knowsHp && !combatant.downed && !hasConditions && (
         <span className="block text-xs italic text-bone/50">Sin más datos ahora mismo</span>
       )}

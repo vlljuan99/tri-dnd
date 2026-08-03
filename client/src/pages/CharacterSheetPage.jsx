@@ -542,7 +542,7 @@ export default function CharacterSheetPage() {
             </StatTooltip>
             <div className="flex items-center justify-center gap-2">
               <button
-                onClick={() => patch({ hp_current: Math.max(-99, char.hp_current - 1) })}
+                onClick={() => patch({ hp_current: Math.max(0, char.hp_current - 1) })}
                 disabled={ro}
                 className="h-8 w-8 rounded-sm border border-blood/50 text-blood hover:bg-blood/15 disabled:opacity-40"
                 aria-label="Restar HP"
@@ -554,7 +554,8 @@ export default function CharacterSheetPage() {
                   type="number"
                   value={char.hp_current}
                   disabled={ro}
-                  onChange={(e) => patch({ hp_current: parseInt(e.target.value, 10) || 0 })}
+                  min="0"
+                  onChange={(e) => patch({ hp_current: Math.max(0, parseInt(e.target.value, 10) || 0) })}
                   className="w-16 border-none bg-transparent text-center font-mono text-2xl text-bone focus:outline-none"
                 />
                 <span className="text-bone/40">/</span>

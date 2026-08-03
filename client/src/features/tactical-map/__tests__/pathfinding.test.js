@@ -35,6 +35,23 @@ test('entrar en terreno difícil cuesta su coste, no 1', () => {
   assert.equal(result.cost, 4); // (1,0)=1 + (2,0)=3
 });
 
+test('los fluidos usan sus costes recomendados o los que configure el DM', () => {
+  const fluidBoard = {
+    rooms: [{
+      col: 0, row: 0, width: 3, height: 1,
+      disabledCells: [], obstacleCells: [], terrainCells: [],
+      fluidCells: [[1, 0, 'agua'], [2, 0, 'lava']],
+    }],
+    fluidEffects: { lava: { movementCost: 5 } },
+  };
+  const result = findBoardPath(
+    buildBoardWalkable(fluidBoard),
+    { col: 0, row: 0 },
+    { col: 2, row: 0 }
+  );
+  assert.equal(result.cost, 7); // agua recomendada 2 + lava personalizada 5
+});
+
 test('sin camino hacia obstáculos o fuera del tablero', () => {
   const walkable = buildBoardWalkable(board);
   assert.equal(findBoardPath(walkable, { col: 0, row: 0 }, { col: 2, row: 1 }), null);

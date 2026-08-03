@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 
 const DEFAULT_ZOOM = 52;
 const MIN_ZOOM = 24;
@@ -28,6 +28,8 @@ export default function TacticalCamera({ map, command }) {
   const lastPointerRef = useRef(null);
   const lastPinchDistanceRef = useRef(null);
   const targetRef = useRef({ x: map.width / 2, z: map.height / 2 });
+  const focusRef = useRef(null);
+  const shakeUntilRef = useRef(0);
   // Orientación de la vista: inclinada por defecto (se ve el relieve); el DM
   // gradúa la inclinación por escalones o rota el tablero en pasos de 45°
   const viewRef = useRef({ tilt: TILT_INITIAL, azimuth: 0 });
@@ -110,6 +112,12 @@ export default function TacticalCamera({ map, command }) {
     }
     if (command.type === 'zoom-in' && cameraRef.current) setZoom(cameraRef.current.zoom * 1.2);
     if (command.type === 'zoom-out' && cameraRef.current) setZoom(cameraRef.current.zoom / 1.2);
+    if (command.type === 'focus' && Number.isFinite(command.x) && Number.isFinite(command.z)) {
+      focusRef.current = { x: command.x, z: command.z };
+    }
+    if (command.type === 'shake') {
+      shakeUntilRef.current = performance.now() + (command.strong ? 420 : 240);
+    }
     // Rotar el tablero 45° por pulsación (dir +1 = horario en pantalla)
     if (command.type === 'rotate') {
       viewRef.current.azimuth += AZIMUTH_STEP * (command.dir === -1 ? -1 : 1);
@@ -122,6 +130,27 @@ export default function TacticalCamera({ map, command }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, command]);
+
+  useFrame(() => {
+    let changed = false;
+    if (focusRef.current) {
+      targetRef.current.x += (focusRef.current.x - targetRef.current.x) * 0.085;
+      targetRef.current.z += (focusRef.current.z - targetRef.current.z) * 0.085;
+      changed = true;
+      if (Math.hypot(focusRef.current.x - targetRef.current.x, focusRef.current.z - targetRef.current.z) < 0.015) {
+        targetRef.current = { ...focusRef.current };
+        focusRef.current = null;
+      }
+    }
+    const shaking = shakeUntilRef.current > performance.now();
+    if (changed || shaking) applyCamera();
+    if (shaking && cameraRef.current) {
+      const remaining = shakeUntilRef.current - performance.now();
+      const strength = Math.min(0.16, remaining / 1700);
+      cameraRef.current.position.x += (Math.random() - 0.5) * strength;
+      cameraRef.current.position.z += (Math.random() - 0.5) * strength;
+    }
+  });
 
   useEffect(() => {
     const element = gl.domElement;

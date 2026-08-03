@@ -1,9 +1,22 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
+import { toastInfo } from './toast.js';
+import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
 
 // Conexión única de Socket.io por pestaña. Se une a la sala de una campaña
 // (mesa de juego o ficha vinculada) y mantiene chat, presencia y estado en vivo.
 let socket = null;
+
+// Una mira por lanzador: si quien apunta se desconecta sin cerrar el panel, su
+// entrada caducaría para siempre en el tablero de los demás, así que cada
+// actualización reprograma su propia limpieza.
+const AIM_TTL_MS = 45000;
+const aimTimers = new Map();
+
+function clearAimTimers() {
+  for (const timer of aimTimers.values()) clearTimeout(timer);
+  aimTimers.clear();
+}
 
 export const useRoom = create((set, get) => ({
   connected: false,
@@ -32,6 +45,12 @@ export const useRoom = create((set, get) => ({
   worldPings: [],
   // Trayecto efímero emitido por el servidor antes de confirmar el viaje.
   worldTravel: null,
+  combatVisuals: [],
+  // Apuntado de conjuro de los DEMÁS lanzadores (el propio se pinta en local
+  // sin pasar por el servidor) y destellos efímeros de los ya lanzados
+  spellAims: [],
+  spellFx: [],
+  bestiaryVersion: 0,
 
   ensureSocket() {
     if (socket) return socket;
@@ -76,6 +95,46 @@ export const useRoom = create((set, get) => ({
     });
     socket.on('table:live', ({ isLive }) => set({ isLive }));
     socket.on('combat:state', (combat) => set({ combat }));
+    socket.on('combat:condition-expired', ({ name, condition }) => {
+      toastInfo(`${name}: termina ${conditionLabel(condition)}.`);
+    });
+    socket.on('combat:visual', (visual) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const entry = { id, createdAt: Date.now(), ...visual };
+      set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
+      setTimeout(() => {
+        set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
+      }, 1800);
+    });
+    // Alguien de la mesa está apuntando un conjuro: se guarda una sola mira
+    // por lanzador y se sustituye con cada movimiento de la plantilla.
+    socket.on('combate:apuntando', (aim) => {
+      const casterId = Number(aim?.casterId);
+      if (!Number.isInteger(casterId)) return;
+      const previous = aimTimers.get(casterId);
+      if (previous) clearTimeout(previous);
+      aimTimers.delete(casterId);
+      set((state) => {
+        const rest = state.spellAims.filter((entry) => entry.casterId !== casterId);
+        return { spellAims: aim.clear ? rest : [...rest, { ...aim, casterId }] };
+      });
+      if (aim.clear) return;
+      aimTimers.set(
+        casterId,
+        setTimeout(() => {
+          aimTimers.delete(casterId);
+          set((state) => ({ spellAims: state.spellAims.filter((entry) => entry.casterId !== casterId) }));
+        }, AIM_TTL_MS)
+      );
+    });
+    socket.on('combate:efecto', (fx) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      set((state) => ({ spellFx: [...state.spellFx.slice(-5), { id, createdAt: Date.now(), ...fx }] }));
+      setTimeout(() => {
+        set((state) => ({ spellFx: state.spellFx.filter((entry) => entry.id !== id) }));
+      }, 1700);
+    });
+    socket.on('bestiario:actualizado', () => set((state) => ({ bestiaryVersion: state.bestiaryVersion + 1 })));
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
     socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
     socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));
@@ -108,7 +167,11 @@ export const useRoom = create((set, get) => ({
     const s = get().ensureSocket();
     if (get().campaignId === campaignId) return;
     if (get().campaignId) s.emit('room:leave', { campaignId: get().campaignId });
-    set({ campaignId, messages: [], online: [], joinError: null, removedCampaignId: null, worldTravel: null });
+    clearAimTimers();
+    set({
+      campaignId, messages: [], online: [], joinError: null, removedCampaignId: null,
+      worldTravel: null, spellAims: [], spellFx: [],
+    });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
         set({ joinError: resp.error, campaignId: null });
@@ -128,6 +191,7 @@ export const useRoom = create((set, get) => ({
   leaveRoom() {
     const { campaignId } = get();
     if (socket && campaignId) socket.emit('room:leave', { campaignId });
+    clearAimTimers();
     set({
       campaignId: null,
       campaignName: '',
@@ -137,6 +201,8 @@ export const useRoom = create((set, get) => ({
       online: [],
       combat: { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
       worldTravel: null,
+      spellAims: [],
+      spellFx: [],
     });
   },
 
@@ -313,6 +379,20 @@ export const useRoom = create((set, get) => ({
     );
   },
 
+  /**
+   * Comparte con la mesa a dónde está apuntando un conjuro (casillas en
+   * coordenadas ABSOLUTAS del editor). `null` retira la mira. Es información
+   * puramente visual: el conjuro sigue resolviéndose entero en el servidor al
+   * pulsar «Lanzar».
+   */
+  shareSpellAim(characterId, aim) {
+    const { campaignId } = get();
+    if (!socket || !campaignId || !characterId) return;
+    socket.emit('combate:apuntar', aim
+      ? { campaignId, characterId, ...aim }
+      : { campaignId, characterId, clear: true });
+  },
+
   /** Lanza un conjuro contra una criatura o una plantilla elegida en el mapa. */
   castBoardSpell(payload) {
     const { campaignId } = get();
@@ -361,11 +441,11 @@ export const useRoom = create((set, get) => ({
   },
 
   /** Pone/quita una condición de combate a un combatiente (solo DM). */
-  toggleCondition(combatantId, condition) {
+  toggleCondition(combatantId, condition, options = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
-      socket.emit('combat:toggle-condition', { campaignId, combatantId, condition }, resolve)
+      socket.emit('combat:toggle-condition', { campaignId, combatantId, condition, ...options }, resolve)
     );
   },
 
@@ -396,6 +476,14 @@ export const useRoom = create((set, get) => ({
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
       socket.emit('combat:death-save', { campaignId, combatantId, roll, d20 }, resolve)
+    );
+  },
+
+  useBossAction(combatantId, type, actionId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:boss-action', { campaignId, combatantId, type, actionId }, resolve)
     );
   },
 }));

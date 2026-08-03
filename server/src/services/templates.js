@@ -1,5 +1,6 @@
 import { db } from '../db.js';
 import { cleanRouteLabel, normalizeRouteCost } from './worldRoutes.js';
+import { normalizeFluidEffects } from './fluidRules.js';
 
 // Biblioteca de plantillas del DM (migración v35): snapshot de salas, mapas
 // enteros, ciudades del mundo (paquete completo: imagen + pins + tableros
@@ -52,6 +53,7 @@ export function snapshotRoom(row) {
     wallEdges: JSON.parse(row.wall_edges || '[]'),
     elevationCells: JSON.parse(row.elevation_cells || '[]'),
     lightCells: JSON.parse(row.light_cells || '[]'),
+    fluidCells: JSON.parse(row.fluid_cells || '[]'),
     notes: row.notes ?? '',
     tokens: tokens.map((t) => ({
       ...snapshotTokenFields(t),
@@ -82,6 +84,10 @@ export function snapshotMap(map) {
     visionRadius: map.vision_radius,
     wallColor: map.wall_color,
     wallLightEvery: map.wall_light_every,
+    fluidEffects: normalizeFluidEffects(map.fluid_effects),
+    weather: map.weather ?? 'despejado',
+    timeOfDay: map.time_of_day ?? 'dia',
+    weatherIntensity: map.weather_intensity ?? 0.55,
     floors: floors.map((f, fi) => ({
       name: f.name,
       position: f.position,
@@ -197,8 +203,9 @@ export function instantiateRoom(userId, floorId, x, y, data) {
   const info = db
     .prepare(
       `INSERT INTO map_rooms (floor_id, name, x, y, width, height, background_url,
-         disabled_cells, obstacle_cells, spawn_cells, terrain_cells, wall_edges, elevation_cells, light_cells, notes, revealed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+         disabled_cells, obstacle_cells, spawn_cells, terrain_cells, wall_edges, elevation_cells,
+         light_cells, fluid_cells, notes, revealed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
     )
     .run(
       floorId,
@@ -215,6 +222,7 @@ export function instantiateRoom(userId, floorId, x, y, data) {
       JSON.stringify(data.wallEdges ?? []),
       JSON.stringify(data.elevationCells ?? []),
       JSON.stringify(data.lightCells ?? []),
+      JSON.stringify(data.fluidCells ?? []),
       data.notes ?? '',
     );
   const roomId = info.lastInsertRowid;
@@ -229,8 +237,9 @@ export function instantiateMap(campaignId, userId, data, nameOverride) {
   const name = String(nameOverride ?? data.name ?? 'Mapa de plantilla').slice(0, 80);
   const info = db
     .prepare(
-      `INSERT INTO maps (campaign_id, name, grid_size, vision_mode, vision_radius, wall_color, wall_light_every)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO maps (campaign_id, name, grid_size, vision_mode, vision_radius, wall_color,
+       wall_light_every, fluid_effects, weather, time_of_day, weather_intensity)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       campaignId,
@@ -239,7 +248,11 @@ export function instantiateMap(campaignId, userId, data, nameOverride) {
       data.visionMode ?? 'sala',
       data.visionRadius ?? 6,
       data.wallColor ?? '#9b8555',
-      data.wallLightEvery ?? 4
+      data.wallLightEvery ?? 4,
+      JSON.stringify(normalizeFluidEffects(data.fluidEffects)),
+      data.weather ?? 'despejado',
+      data.timeOfDay ?? 'dia',
+      data.weatherIntensity ?? 0.55
     );
   const mapId = info.lastInsertRowid;
 

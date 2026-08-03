@@ -14,6 +14,7 @@ import {
   ConditionEditor,
   InitiativeValue,
   ConcentrationChip,
+  BossActionControls,
 } from '../features/tactical-map/components/CombatantStatus.jsx';
 
 function hpRatioColor(ratio) {
@@ -319,7 +320,13 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                 />
               )}
 
-              <ConditionChips conditions={c.conditions} />
+              <ConditionChips conditions={c.conditions} timedConditions={c.timedConditions} />
+
+              {c.stable && (
+                <div className="mt-1 text-xs text-moss">
+                  <span>✚ Estable</span>
+                </div>
+              )}
 
               {/* PJ muerto de verdad (3 fallos): estado final */}
               {c.dead && (
@@ -329,10 +336,10 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
               )}
 
               {/* Salvaciones de muerte de un PJ agonizante */}
-              {c.downed && !c.dead && (
+              {c.dying && (
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <DeathSaveDots saves={c.deathSaves} />
-                  {(mine || isDm) && (
+                  {active && !c.deathSaveRolled && (mine || isDm) && (
                     <button
                       onClick={() => rollDeathSave(c)}
                       className="rounded-sm border border-blood/50 px-1.5 py-0.5 text-[0.65rem] text-blood hover:bg-blood/10"
@@ -341,6 +348,17 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
                     </button>
                   )}
                 </div>
+              )}
+
+              {isDm && (
+                <BossActionControls
+                  combatant={c}
+                  active={active}
+                  onUse={async (type, actionId) => {
+                    const resp = await room.useBossAction(c.id, type, actionId);
+                    if (resp?.error) toastError(resp.error);
+                  }}
+                />
               )}
 
               {/* Recursos del turno (Fase 8.5): visibles con el modo por turnos */}
@@ -425,8 +443,9 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
               {isDm && conditionsFor === c.id && (
                 <ConditionEditor
                   conditions={c.conditions}
-                  onToggle={async (key) => {
-                    const resp = await room.toggleCondition(c.id, key);
+                  timedConditions={c.timedConditions}
+                  onToggle={async (key, options) => {
+                    const resp = await room.toggleCondition(c.id, key, options);
                     if (resp?.error) toastError(resp.error);
                   }}
                 />

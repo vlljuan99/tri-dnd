@@ -3,9 +3,9 @@ import { api } from '../api.js';
 
 // Eventos del DM (Fases 18/19) en la gestión de la campaña: biblioteca
 // reutilizable (crear/editar/borrar) y enlaces a esta campaña (toda la
-// campaña, una sala, un marcador o una ubicación del mapa de mundo). Los
-// disparadores automáticos ('rondas', 'revelar' — que en una ubicación
-// significa "al viajar allí") publican un mensaje de sistema en el chat al
+// campaña, una sala, un marcador, una ubicación o una ruta del mundo). Los
+// disparadores automáticos ('rondas', 'revelar' — que en una ubicación/ruta
+// significa "al viajar") publican un mensaje de sistema en el chat al
 // cumplirse; los 'manual' son recordatorios a la vista del DM.
 
 const inputClass =
@@ -44,7 +44,7 @@ function EventForm({ initial, busy, allowWorldLocations, onSave, onCancel }) {
             {Object.entries({
               ...TRIGGER_LABELS,
               revelar: allowWorldLocations
-                ? 'Al revelarse una sala / llegar a una ubicación'
+                ? 'Al revelarse una sala / llegar / recorrer una ruta'
                 : 'Al revelarse una sala',
             }).map(([k, l]) => (
               <option key={k} value={k}>{l}</option>
@@ -98,7 +98,7 @@ export default function CampaignEventsPanel({
   const [events, setEvents] = useState([]);
   const [links, setLinks] = useState(() => campaignData?.links ?? []);
   const [targets, setTargets] = useState(
-    () => campaignData?.targets ?? { rooms: [], tokens: [], locations: [] }
+    () => campaignData?.targets ?? { rooms: [], tokens: [], locations: [], routes: [] }
   );
   const [editing, setEditing] = useState(null); // null | 'new' | event
   const [busy, setBusy] = useState(false);
@@ -111,7 +111,7 @@ export default function CampaignEventsPanel({
   function applyCampaignData(data) {
     if (!data) return;
     setLinks(data.links ?? []);
-    setTargets(data.targets ?? { rooms: [], tokens: [], locations: [] });
+    setTargets(data.targets ?? { rooms: [], tokens: [], locations: [], routes: [] });
   }
 
   async function reload() {
@@ -181,12 +181,21 @@ export default function CampaignEventsPanel({
       })
     );
 
-  const triggerSummary = (event) =>
+  const triggerSummary = (event, targetType = null) =>
     event.triggerKind === 'rondas'
       ? `cada ${event.triggerEvery} ronda${event.triggerEvery === 1 ? '' : 's'}`
       : event.triggerKind === 'revelar'
-        ? 'al revelarse'
+        ? targetType === 'ruta'
+          ? 'al recorrer la ruta'
+          : targetType === 'ubicacion'
+            ? 'al llegar'
+            : targetType === 'sala'
+              ? 'al revelarse'
+              : 'al revelarse o viajar'
         : 'manual';
+  const linkableEvents = linkTargetType === 'ruta'
+    ? events.filter((event) => event.triggerKind === 'revelar')
+    : events;
 
   return (
     <section>
@@ -201,7 +210,7 @@ export default function CampaignEventsPanel({
       </div>
       <p className="mb-3 text-xs text-bone/50">
         {allowWorldLocations
-          ? 'Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la campaña, una sala, un enemigo o una ubicación del mapa de mundo; los de rondas, revelado y viaje saltan solos como mensaje en el chat.'
+          ? 'Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la campaña, una sala, un enemigo, una ubicación o una ruta del mundo; los de rondas, revelado y viaje saltan solos como mensaje en el chat.'
           : 'Pasivas y consecuencias reutilizables (ej.: «oscuridad total: −1 a percepción»). Cuélgalos de la escaramuza, una sala o un enemigo; los de rondas y revelado saltan solos como mensaje en el chat.'}
       </p>
 
@@ -253,7 +262,7 @@ export default function CampaignEventsPanel({
             <span className={labelClass}>Evento</span>
             <select className={inputClass} value={linkEventId} onChange={(e) => setLinkEventId(e.target.value)}>
               <option value="">— elegir —</option>
-              {events.map((e) => (
+              {linkableEvents.map((e) => (
                 <option key={e.id} value={e.id}>{e.name}</option>
               ))}
             </select>
@@ -266,18 +275,34 @@ export default function CampaignEventsPanel({
               onChange={(e) => {
                 setLinkTargetType(e.target.value);
                 setLinkTargetId('');
+                if (e.target.value === 'ruta') {
+                  const selectedEvent = events.find((event) => event.id === Number(linkEventId));
+                  if (selectedEvent?.triggerKind !== 'revelar') setLinkEventId('');
+                }
               }}
             >
               <option value="campana">Toda la campaña</option>
               <option value="sala">Una sala</option>
               <option value="marcador">Un marcador</option>
               {allowWorldLocations && <option value="ubicacion">Una ubicación del mundo</option>}
+              {allowWorldLocations && <option value="ruta">Una ruta del mundo</option>}
             </select>
           </label>
+          {linkTargetType === 'ruta' && linkableEvents.length === 0 && (
+            <p className="max-w-xs text-xs text-bone/50">
+              Crea primero un evento con disparador «Al revelarse una sala / llegar / recorrer una ruta».
+            </p>
+          )}
           {linkTargetType !== 'campana' && (
             <label className="block">
               <span className={labelClass}>
-                {linkTargetType === 'sala' ? 'Sala' : linkTargetType === 'marcador' ? 'Marcador' : 'Ubicación'}
+                {linkTargetType === 'sala'
+                  ? 'Sala'
+                  : linkTargetType === 'marcador'
+                    ? 'Marcador'
+                    : linkTargetType === 'ruta'
+                      ? 'Ruta'
+                      : 'Ubicación'}
               </span>
               <select className={inputClass} value={linkTargetId} onChange={(e) => setLinkTargetId(e.target.value)}>
                 <option value="">— elegir —</option>
@@ -285,7 +310,9 @@ export default function CampaignEventsPanel({
                   ? targets.rooms
                   : linkTargetType === 'marcador'
                     ? targets.tokens
-                    : targets.locations ?? []
+                    : linkTargetType === 'ruta'
+                      ? targets.routes ?? []
+                      : targets.locations ?? []
                 ).map((t) => (
                   <option key={t.id} value={t.id}>{t.label}</option>
                 ))}
@@ -316,7 +343,7 @@ export default function CampaignEventsPanel({
                   <span className="text-bone/70">{link.targetName}</span>
                 </p>
                 <p className="text-xs text-bone/50">
-                  {triggerSummary(link.event)}
+                  {triggerSummary(link.event, link.targetType)}
                   {link.fired && ' · ya disparado'}
                   {link.lastFiredRound != null && ` · última ronda ${link.lastFiredRound}`}
                 </p>

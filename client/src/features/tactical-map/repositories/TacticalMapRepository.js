@@ -45,7 +45,9 @@ export class TacticalMapRepository {
     } else if (token.serverId) {
       await api(`/campaigns/${map.campaignId}/mapas/${map.serverMapId}/fichas/${token.serverId}`, {
         method: 'PATCH',
-        body: { x, y },
+        // Distingue un movimiento confirmado en la mesa de una recolocación
+        // del mismo marcador desde el editor de mapas.
+        body: { x, y, applyFluidEffects: true },
       });
     }
   }
