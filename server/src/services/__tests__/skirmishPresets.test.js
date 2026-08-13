@@ -111,6 +111,10 @@ test('hay sitio de aparición para el aventurero en una sala revelada', () => {
   for (const preset of SKIRMISH_PRESETS) {
     const revealed = preset.map.floors.flatMap((floor) => floor.rooms).filter((room) => room.revealed);
     assert.ok(revealed.length > 0, `${preset.id}: ninguna sala empieza revelada`);
+    assert.ok(
+      revealed.every((room) => room.backgroundUrl === preset.previewUrl),
+      `${preset.id}: la zona inicial debe mostrar la imagen del escenario`
+    );
     const spawns = revealed.reduce((total, room) => total + (room.spawnCells ?? []).length, 0);
     assert.ok(spawns >= preset.players, `${preset.id}: solo ${spawns} puntos de aparición para ${preset.players}`);
   }

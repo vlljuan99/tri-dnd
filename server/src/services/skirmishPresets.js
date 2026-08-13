@@ -234,6 +234,7 @@ function cryptPreset() {
           rooms: [
             {
               name: 'Vestíbulo derrumbado',
+              backgroundUrl: '/skirmishes/cripta-anegada.webp',
               x: 0,
               y: 5,
               width: 10,
@@ -301,6 +302,7 @@ function cryptPreset() {
             },
             {
               name: 'Sagrario',
+              backgroundUrl: '/skirmishes/cripta-anegada.webp',
               x: 28,
               y: 4,
               width: 10,

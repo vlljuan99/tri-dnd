@@ -72,7 +72,7 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     assert.equal(health.commit, 'sha-prueba');
     assert.equal(health.version, 'prueba');
     assert.equal(health.database.ok, true);
-    assert.equal(health.database.migration, 66);
+    assert.equal(health.database.migration, 67);
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
@@ -151,7 +151,7 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
       campaigns.push({ ...campaign, characterId: characterIds[index] });
     }
 
-    const database = new Database(path.join(dataDir, 'tri-dnd.db'), { readonly: true });
+    const database = new Database(path.join(dataDir, 'tri-dnd.db'));
     try {
       let totalPreparedEnemies = 0;
       for (const campaign of campaigns) {
@@ -201,6 +201,47 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
         totalPreparedEnemies += combatants.filter((entry) => entry.kind === 'enemigo').length;
       }
       assert.ok(totalPreparedEnemies > 0, 'el catálogo debe incluir encuentros preparados');
+
+      // Regresión del hotfix de producción: mover un PJ debe consultar los
+      // efectos de fluido del mapa activo, no una variable inexistente.
+      const firstCampaign = campaigns[0];
+      const player = database
+        .prepare(
+          `SELECT token.x, token.y, token.room_id, combatant.id AS combatant_id
+             FROM map_character_tokens token
+             JOIN combatants combatant ON combatant.character_id = token.character_id
+            WHERE token.character_id = ? AND combatant.campaign_id = ?`
+        )
+        .get(firstCampaign.characterId, firstCampaign.id);
+      assert.ok(player, 'el escenario de prueba debe tener PJ y combatiente');
+      database
+        .prepare('UPDATE game_tables SET combat_turn_id = ? WHERE campaign_id = ?')
+        .run(player.combatant_id, firstCampaign.id);
+      const room = database.prepare('SELECT * FROM map_rooms WHERE id = ?').get(player.room_id);
+      const blocked = new Set([
+        ...JSON.parse(room.disabled_cells || '[]'),
+        ...JSON.parse(room.obstacle_cells || '[]'),
+      ].map(([x, y]) => `${x},${y}`));
+      const destination = [
+        [player.x + 1, player.y],
+        [player.x - 1, player.y],
+        [player.x, player.y + 1],
+        [player.x, player.y - 1],
+      ].find(([x, y]) =>
+        x >= room.x && x < room.x + room.width &&
+        y >= room.y && y < room.y + room.height &&
+        !blocked.has(`${x - room.x},${y - room.y}`)
+      );
+      assert.ok(destination, 'el PJ debe tener una casilla contigua disponible');
+      const moveResponse = await fetch(
+        `${baseUrl}/api/campaigns/${firstCampaign.id}/mapa-activo/personajes/${firstCampaign.characterId}/mover`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify({ x: destination[0], y: destination[1] }),
+        }
+      );
+      assert.equal(moveResponse.status, 200, await moveResponse.text());
     } finally {
       database.close();
     }

@@ -1232,6 +1232,21 @@ const migrations = [
    AND (SELECT COUNT(*) FROM characters character
          WHERE character.campaign_id = campaigns.id AND character.kind = 'pj') = 1;
   `,
+
+  // v67 — Completa el fondo de la Cripta Anegada en las instancias ya
+  // creadas. La v65 sólo lo asignó a la nave oculta, de modo que el jugador
+  // empezaba en un vestíbulo sin imagen aunque el recurso sí estuviera en prod.
+  `
+  UPDATE map_rooms SET background_url = '/skirmishes/cripta-anegada.webp'
+   WHERE name IN ('Vestíbulo derrumbado', 'Nave anegada', 'Sagrario')
+     AND floor_id IN (
+       SELECT floor.id FROM map_floors floor
+         JOIN maps map ON map.id = floor.map_id
+         JOIN campaigns campaign ON campaign.id = map.campaign_id
+        WHERE map.name = 'Cripta de los Doce Silentes'
+          AND campaign.campaign_type = 'escaramuza'
+     );
+  `,
 ];
 
 export function runMigrations() {
