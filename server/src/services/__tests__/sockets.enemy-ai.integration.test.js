@@ -133,7 +133,28 @@ test('la IA enemiga mueve el turno, tira en servidor y aplica daño al PJ', { ti
       throw new Error(`${error.message}\n${server.logs.join('')}`);
     }
 
+    // Un 1 natural falla siempre, incluso con +100. Si sale, damos por
+    // terminado el turno del PJ y dejamos que el mismo autómata lo intente de
+    // nuevo; así la prueba valida daño real sin depender de una tirada aleatoria.
+    for (let attempt = 0; roll.body.fumble && attempt < 5; attempt += 1) {
+      const retryRoll = waitForEvent(
+        socket,
+        'chat:new',
+        (message) => message.type === 'roll' && message.body?.actorName === 'Autómata de prueba',
+        5000
+      );
+      const retryPlayerTurn = waitForEvent(
+        socket,
+        'combat:state',
+        (nextState) => nextState.turnId === pjCombatantId,
+        5000
+      );
+      await emitAck(socket, 'combat:end-turn', { campaignId });
+      [roll, state] = await Promise.all([retryRoll, retryPlayerTurn]);
+    }
+
     assert.equal(roll.body.kind, 'attack');
+    assert.equal(roll.body.fumble, false, 'el ataque de verificación debe resolver un impacto');
     assert.equal(state.enemyAiEnabled, true);
     const ownerEnemy = state.combatants.find((combatant) => combatant.kind === 'enemigo');
     assert.ok(ownerEnemy, 'el aventurero debe ver al enemigo en iniciativa');
