@@ -1009,6 +1009,170 @@ const migrations = [
   CREATE INDEX idx_opportunity_campaign ON opportunity_attacks(campaign_id);
   CREATE INDEX idx_opportunity_attacker ON opportunity_attacks(attacker_combatant_id);
   `,
+
+  // v52 — Exploración v2 (Corte C): reloj narrativo acumulado por campaña y
+  // eventos asociados a rutas. El enlace polimórfico no puede tener una FK
+  // directa a world_routes; el trigger evita enlaces huérfanos cuando una
+  // ruta desaparece directamente o por cascada al borrar su capa/extremos.
+  `
+  ALTER TABLE campaigns ADD COLUMN elapsed_days INTEGER NOT NULL DEFAULT 0
+    CHECK (elapsed_days >= 0);
+
+  CREATE TABLE event_links_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES dm_events(id) ON DELETE CASCADE,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    target_type TEXT NOT NULL CHECK (target_type IN ('campana', 'sala', 'marcador', 'ubicacion', 'ruta')),
+    target_id INTEGER,
+    last_fired_round INTEGER,
+    fired INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO event_links_new (id, event_id, campaign_id, target_type, target_id, last_fired_round, fired, created_at)
+    SELECT id, event_id, campaign_id, target_type, target_id, last_fired_round, fired, created_at FROM event_links;
+  DROP TABLE event_links;
+  ALTER TABLE event_links_new RENAME TO event_links;
+  CREATE INDEX idx_event_links_campaign ON event_links(campaign_id);
+
+  CREATE TRIGGER cleanup_world_route_event_links
+  AFTER DELETE ON world_routes
+  BEGIN
+    DELETE FROM event_links WHERE target_type = 'ruta' AND target_id = OLD.id;
+  END;
+  `,
+
+  // v53 — Capa decorativa de fluidos por sala. Cada entrada se guarda como
+  // [columna, fila, tipo] y se serializa junto al resto de capas del mapa.
+  `
+  ALTER TABLE map_rooms ADD COLUMN fluid_cells TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v54 — Dirección artística reutilizable para todas las imágenes de una
+  // campaña. Las restricciones técnicas se siguen añadiendo en el servidor.
+  `
+  ALTER TABLE campaigns ADD COLUMN art_style TEXT NOT NULL DEFAULT '';
+  `,
+
+  // v55 — Reglas mecánicas de los fluidos por mapa. Un objeto vacío usa
+  // siempre los valores recomendados definidos en el servidor.
+  `
+  ALTER TABLE maps ADD COLUMN fluid_effects TEXT NOT NULL DEFAULT '{}';
+  `,
+
+  // v56 — Condiciones temporales añadidas por fluidos. Se separa su origen
+  // para no retirar por accidente una condición que el DM puso a mano.
+  `
+  ALTER TABLE combatants ADD COLUMN fluid_conditions TEXT NOT NULL DEFAULT '[]';
+  `,
+
+  // v57 — Ciclo completo de muerte y condiciones con caducidad. El estado
+  // explícito distingue a un PJ estabilizado de uno que sigue agonizando a
+  // 0 PG; los temporizadores son independientes de las condiciones de fluidos.
+  `
+  ALTER TABLE combatants ADD COLUMN death_state TEXT NOT NULL DEFAULT 'normal'
+    CHECK (death_state IN ('normal', 'dying', 'stable', 'dead'));
+  ALTER TABLE combatants ADD COLUMN condition_timers TEXT NOT NULL DEFAULT '[]';
+
+  UPDATE combatants
+     SET death_state = CASE
+       WHEN kind = 'pj'
+        AND character_id IS NOT NULL
+        AND COALESCE((SELECT hp_current FROM characters WHERE id = combatants.character_id), 1) <= 0
+       THEN CASE WHEN death_failures >= 3 THEN 'dead' ELSE 'dying' END
+       ELSE 'normal'
+     END;
+  `,
+
+  // v58 — Una salvación de muerte por turno sin consumir la acción. Se usa
+  // la ronda porque cada combatiente recibe un turno ordinario por ronda.
+  `
+  ALTER TABLE combatants ADD COLUMN death_save_round INTEGER;
+  `,
+
+  // v59 — Recursos de jefe: las acciones legendarias se recargan al inicio
+  // de su turno y la guarida solo puede actuar una vez por ronda.
+  `
+  ALTER TABLE combatants ADD COLUMN legendary_points_max INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN legendary_points INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN lair_action_round INTEGER;
+  `,
+
+  // v60 — Zonas de peligro temporales sobre casillas absolutas del tablero.
+  // Son visibles para toda la mesa; la resolución de daño/salvación vive en
+  // servidor y su caducidad se expresa en rondas del combate.
+  `
+  CREATE TABLE combat_zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    visual_type TEXT NOT NULL DEFAULT 'fuego',
+    cells TEXT NOT NULL DEFAULT '[]',
+    trigger_timing TEXT NOT NULL DEFAULT 'both'
+      CHECK (trigger_timing IN ('enter', 'start', 'both')),
+    save_ability TEXT CHECK (save_ability IN ('str', 'dex', 'con', 'int', 'wis', 'cha')),
+    save_dc INTEGER,
+    damage_dice TEXT NOT NULL DEFAULT '',
+    damage_type TEXT,
+    half_on_save INTEGER NOT NULL DEFAULT 1,
+    condition TEXT,
+    expires_round INTEGER NOT NULL,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX idx_combat_zones_map ON combat_zones(map_id, expires_round);
+  `,
+
+  // v61 — Ambiente persistente por escena (cada mapa es una escena).
+  `
+  ALTER TABLE maps ADD COLUMN weather TEXT NOT NULL DEFAULT 'despejado'
+    CHECK (weather IN ('despejado', 'lluvia', 'nieve', 'niebla'));
+  ALTER TABLE maps ADD COLUMN time_of_day TEXT NOT NULL DEFAULT 'dia'
+    CHECK (time_of_day IN ('amanecer', 'dia', 'atardecer', 'noche'));
+  ALTER TABLE maps ADD COLUMN weather_intensity REAL NOT NULL DEFAULT 0.55;
+  `,
+
+  // v62 — Bestiario de campaña descubierto automáticamente. No guarda
+  // estadísticas secretas: solo la identidad pública y cuántas apariciones
+  // ha tenido, de modo que la ruta de jugador nunca necesita filtrar PG/CA.
+  `
+  CREATE TABLE campaign_bestiary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    creature_key TEXT NOT NULL,
+    monster_index TEXT,
+    display_name TEXT NOT NULL,
+    appearances INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (campaign_id, creature_key)
+  );
+  CREATE INDEX idx_campaign_bestiary_campaign ON campaign_bestiary(campaign_id, last_seen_at);
+  `,
+
+  // v63 — Normaliza datos históricos creados cuando la interfaz permitía
+  // PG negativos. Las reglas nuevas ya impiden volver a guardarlos.
+  `
+  UPDATE characters SET hp_current = 0 WHERE hp_current < 0;
+  UPDATE combatants SET hp_current = 0 WHERE hp_current < 0;
+  `,
+
+  // v64 — El diario nace también con las criaturas que ya estaban en el
+  // tracker al instalar la función; los descubrimientos futuros usan el
+  // registro incremental normal.
+  `
+  INSERT OR IGNORE INTO campaign_bestiary
+    (campaign_id, creature_key, monster_index, display_name, appearances)
+  SELECT campaign_id,
+         CASE WHEN monster_index IS NOT NULL AND monster_index <> ''
+              THEN 'monster:' || monster_index
+              ELSE 'custom:' || lower(name) END,
+         monster_index,
+         name,
+         1
+    FROM combatants
+   WHERE kind = 'enemigo';
+  `,
 ];
 
 export function runMigrations() {

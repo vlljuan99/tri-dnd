@@ -13,6 +13,7 @@ import {
   replaceMention,
   splitMessageReferences,
 } from '../../../lib/chatReferences.js';
+import BestiaryJournalPanel from './BestiaryJournalPanel.jsx';
 
 const ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g;
 
@@ -89,6 +90,7 @@ function Message({ message, selfId, onOpenReference }) {
 const TABS = [
   ['registro', 'Registro'],
   ['iniciativa', 'Iniciativa'],
+  ['bestiario', 'Bestiario'],
   ['mesa', 'Mesa'],
 ];
 
@@ -308,6 +310,12 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {tab === 'bestiario' && (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <BestiaryJournalPanel campaignId={campaignId} />
+        </div>
       )}
 
       {detail && <CompendiumDetail entry={detail} onClose={() => setDetail(null)} />}

@@ -148,6 +148,20 @@ export function composeBoardFromMap(map, preferredFloorId) {
     wallColor: map.wallColor || '#9b8555',
     // Antorchas automáticas de pared cada N casillas (0 = solo luces a mano)
     wallLightEvery: map.wallLightEvery ?? 0,
+    // Reglas por tipo resueltas por el servidor: recomendaciones más los
+    // cambios que haya hecho el DM para este mapa.
+    fluidEffects: map.fluidEffects,
+    weather: map.weather ?? 'despejado',
+    timeOfDay: map.timeOfDay ?? 'dia',
+    weatherIntensity: map.weatherIntensity ?? 0.55,
+    hazardZones: (map.hazardZones ?? [])
+      .map((zone) => ({
+        ...zone,
+        cells: (zone.cells ?? [])
+          .filter((cell) => cell.floorId === floor.id)
+          .map((cell) => ({ col: cell.x - minX, row: cell.y - minY })),
+      }))
+      .filter((zone) => zone.cells.length > 0),
     floorId: floor.id,
     floorName: floor.name,
     // Plantas con algo visible para este usuario: pestañas del tablero
@@ -179,6 +193,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
       elevationCells: r.elevationCells ?? [],
       // Fuentes de luz manuales [col, fila] (braseros, velas...)
       lightCells: r.lightCells ?? [],
+      // Fluidos [col, fila, tipo]: capa animada y casillas con reglas.
+      fluidCells: r.fluidCells ?? [],
       // Solo el DM recibe salas sin revelar: se pintan atenuadas
       revealed: r.revealed !== false,
     })),

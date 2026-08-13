@@ -3,6 +3,11 @@ dist/
 *.log
 .env
 
+# Artefactos de las pruebas E2E (Playwright)
+/test-results/
+/playwright-report/
+/e2e-results/
+
 # Base de datos local y secretos generados
 server/data/*.db
 server/data/*.db-journal
@@ -18,3 +23,10 @@ server/data/narrative-media/
 
 # Historial local de copias del archivo narrativo
 server/data/backups/
+
+# Estado operativo que solo existe en /opt/tridnd al desplegar
+deploy/.deploy*.env
+deploy/.last-backup
+deploy/backups/
+deploy/src/
+deploy/src.tar.gz

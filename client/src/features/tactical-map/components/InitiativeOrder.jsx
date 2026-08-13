@@ -9,6 +9,7 @@ import {
   ConditionEditor,
   InitiativeValue,
   ConcentrationChip,
+  BossActionControls,
 } from './CombatantStatus.jsx';
 
 // Barritas de vida y color por proporción (mismo criterio que el resto de la mesa)
@@ -50,7 +51,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
         const mine = c.kind === 'pj' && ownerByCharId?.[c.characterId] === userId;
         const knowsHp = Number.isInteger(c.hpCurrent) && Number.isInteger(c.hpMax) && c.hpMax > 0;
         const ratio = knowsHp ? Math.max(0, Math.min(1, c.hpCurrent / c.hpMax)) : 0;
-        const canRollSave = c.downed && !c.dead && (mine || isDm);
+        const canRollSave = active && c.dying && !c.deathSaveRolled && (mine || isDm);
         return (
           <div
             key={c.id}
@@ -85,7 +86,13 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
               </div>
             )}
 
-            <ConditionChips conditions={c.conditions} />
+            <ConditionChips conditions={c.conditions} timedConditions={c.timedConditions} />
+
+            {c.stable && (
+              <div className="mt-1 text-[0.65rem] text-moss">
+                <span>✚ Estable</span>
+              </div>
+            )}
 
             {/* PJ muerto de verdad (3 fallos): estado final */}
             {c.dead && (
@@ -95,7 +102,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
             )}
 
             {/* Salvaciones de muerte de un PJ agonizante */}
-            {c.downed && !c.dead && (
+            {c.dying && (
               <div className="mt-1 flex items-center justify-between gap-2">
                 <DeathSaveDots saves={c.deathSaves} />
                 {canRollSave && (
@@ -107,6 +114,17 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
                   </button>
                 )}
               </div>
+            )}
+
+            {isDm && (
+              <BossActionControls
+                combatant={c}
+                active={active}
+                onUse={async (type, actionId) => {
+                  const resp = await room.useBossAction(c.id, type, actionId);
+                  if (resp?.error) toastError(resp.error);
+                }}
+              />
             )}
 
             {/* Controles del DM: saltar turno del activo y editar condiciones */}
@@ -132,8 +150,9 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
             {isDm && conditionsFor === c.id && (
               <ConditionEditor
                 conditions={c.conditions}
-                onToggle={async (key) => {
-                  const resp = await room.toggleCondition(c.id, key);
+                timedConditions={c.timedConditions}
+                onToggle={async (key, options) => {
+                  const resp = await room.toggleCondition(c.id, key, options);
                   if (resp?.error) toastError(resp.error);
                 }}
               />

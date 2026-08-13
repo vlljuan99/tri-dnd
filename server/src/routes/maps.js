@@ -20,12 +20,16 @@ import {
   serializeFullMap,
   spawnRoomEnemies,
 } from '../services/mapLibrary.js';
-import { notifyCampaignMap, notifyIfActive, notifyCombat, notifyCombatStarted } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyIfActive, notifyCombat, notifyCombatStarted, notifyBestiary } from '../services/liveMap.js';
 import { trySpendEnemyMovement } from '../services/turnEconomy.js';
 import { buildWalkableGrid, findPath, buildElevationMap } from '../services/pathfinding.js';
 import { queueOpportunityAttacks } from '../services/opportunityAttacks.js';
 import { buildWallSet, isValidWallEdges } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
+import { mergeFluidEffects } from '../services/fluidRules.js';
+import { resolveFluidMovement } from '../services/fluidEffects.js';
+import { resolveHazardMovement, validateHazardDraft } from '../services/hazardZones.js';
+import { syncBossResources } from '../services/bossActions.js';
 import {
   snapshotMap,
   snapshotRoom,
@@ -75,6 +79,7 @@ mapsRouter.use((req, res, next) => {
 
 const ROOM_MAX_SIDE = 100;
 const ROOM_COORD_LIMIT = 1000;
+const FLUID_TYPES = new Set(['agua', 'lava', 'niebla', 'veneno', 'arcana']);
 
 // Misma validación de forma que la sala única de v7: pares [col, fila]
 // enteros no negativos relativos al origen de la sala.
@@ -87,6 +92,24 @@ function isValidDisabledCells(value) {
         Array.isArray(cell) &&
         cell.length === 2 &&
         cell.every((n) => Number.isInteger(n) && n >= 0)
+    )
+  );
+}
+
+// Fluidos: tríos [columna, fila, tipo] relativos a la sala.
+function isValidFluidCells(value) {
+  return (
+    Array.isArray(value) &&
+    value.length <= 4000 &&
+    value.every(
+      (cell) =>
+        Array.isArray(cell) &&
+        cell.length === 3 &&
+        Number.isInteger(cell[0]) &&
+        cell[0] >= 0 &&
+        Number.isInteger(cell[1]) &&
+        cell[1] >= 0 &&
+        FLUID_TYPES.has(cell[2])
     )
   );
 }
@@ -185,7 +208,10 @@ mapsRouter.patch('/:mapId', (req, res) => {
   const map = getMap(req.params.campaignId, req.params.mapId);
   if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
 
-  const { name, gridSize, visionMode, visionRadius, wallColor, wallLightEvery } = req.body ?? {};
+  const {
+    name, gridSize, visionMode, visionRadius, wallColor, wallLightEvery, fluidEffects,
+    weather, timeOfDay, weatherIntensity,
+  } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El mapa necesita un nombre' });
   }
@@ -206,11 +232,26 @@ mapsRouter.patch('/:mapId', (req, res) => {
   if (wallLightEvery !== undefined && !(Number.isInteger(wallLightEvery) && wallLightEvery >= 0 && wallLightEvery <= 20)) {
     return res.status(400).json({ error: 'Frecuencia de luces de pared no válida' });
   }
+  if (weather !== undefined && !['despejado', 'lluvia', 'nieve', 'niebla'].includes(weather)) {
+    return res.status(400).json({ error: 'Clima no válido' });
+  }
+  if (timeOfDay !== undefined && !['amanecer', 'dia', 'atardecer', 'noche'].includes(timeOfDay)) {
+    return res.status(400).json({ error: 'Hora de escena no válida' });
+  }
+  if (weatherIntensity !== undefined && (!Number.isFinite(weatherIntensity) || weatherIntensity < 0 || weatherIntensity > 1)) {
+    return res.status(400).json({ error: 'La intensidad debe estar entre 0 y 1' });
+  }
+  const mergedFluidEffects = fluidEffects === undefined
+    ? null
+    : mergeFluidEffects(map.fluid_effects, fluidEffects);
+  if (mergedFluidEffects?.error) return res.status(400).json({ error: mergedFluidEffects.error });
 
   db.prepare(
     `UPDATE maps SET name = COALESCE(?, name), grid_size = COALESCE(?, grid_size),
        vision_mode = COALESCE(?, vision_mode), vision_radius = COALESCE(?, vision_radius),
        wall_color = COALESCE(?, wall_color), wall_light_every = COALESCE(?, wall_light_every),
+       fluid_effects = COALESCE(?, fluid_effects), weather = COALESCE(?, weather),
+       time_of_day = COALESCE(?, time_of_day), weather_intensity = COALESCE(?, weather_intensity),
        updated_at = datetime('now') WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : null,
@@ -219,11 +260,79 @@ mapsRouter.patch('/:mapId', (req, res) => {
     visionRadius ?? null,
     wallColor ?? null,
     wallLightEvery ?? null,
+    mergedFluidEffects ? JSON.stringify(mergedFluidEffects.effects) : null,
+    weather ?? null,
+    timeOfDay ?? null,
+    weatherIntensity ?? null,
     map.id
   );
   notifyIfActive(map.campaign_id, map.id);
 
   res.json({ map: serializeFullMap(getMap(req.params.campaignId, map.id), req.params.campaignId) });
+});
+
+// Zona temporal creada desde el tablero. Las casillas son absolutas y se
+// vuelven a validar contra las salas del mapa: el cliente nunca puede colar
+// un efecto fuera de la escena ni en otra campaña.
+mapsRouter.post('/:mapId/zonas', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
+  if (getActiveMapId(req.params.campaignId) !== map.id) {
+    return res.status(400).json({ error: 'Solo puedes crear zonas en el mapa activo' });
+  }
+  const table = db
+    .prepare('SELECT combat_active, combat_round FROM game_tables WHERE campaign_id = ?')
+    .get(req.params.campaignId);
+  if (!table?.combat_active) return res.status(400).json({ error: 'Las zonas temporales requieren combate por turnos' });
+  const checked = validateHazardDraft(req.body);
+  if (checked.error) return res.status(400).json({ error: checked.error });
+  const draft = checked.value;
+  const rooms = db
+    .prepare(
+      `SELECT room.* FROM map_rooms room JOIN map_floors floor ON floor.id = room.floor_id
+       WHERE floor.map_id = ?`
+    )
+    .all(map.id);
+  if (draft.cells.some((cell) => {
+    const room = rooms.find((candidate) => candidate.floor_id === cell.floorId && cellInsideRoom(candidate, cell.x, cell.y));
+    return !room;
+  })) {
+    return res.status(400).json({ error: 'La zona contiene casillas fuera del tablero' });
+  }
+  const info = db.prepare(
+    `INSERT INTO combat_zones
+       (campaign_id, map_id, name, visual_type, cells, trigger_timing, save_ability,
+        save_dc, damage_dice, damage_type, half_on_save, condition, expires_round, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    req.params.campaignId,
+    map.id,
+    draft.name,
+    draft.visualType,
+    JSON.stringify(draft.cells),
+    draft.triggerTiming,
+    draft.saveAbility,
+    draft.saveDc,
+    draft.damageDice,
+    draft.damageType,
+    draft.halfOnSave ? 1 : 0,
+    draft.condition,
+    table.combat_round + draft.duration - 1,
+    req.user.id
+  );
+  touchAndNotify(map);
+  res.status(201).json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+mapsRouter.delete('/:mapId/zonas/:zoneId', (req, res) => {
+  const map = getMap(req.params.campaignId, req.params.mapId);
+  if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
+  const changed = db
+    .prepare('DELETE FROM combat_zones WHERE id = ? AND map_id = ? AND campaign_id = ?')
+    .run(req.params.zoneId, map.id, req.params.campaignId).changes;
+  if (!changed) return res.status(404).json({ error: 'Zona no encontrada' });
+  touchAndNotify(map);
+  res.json({ ok: true });
 });
 
 // Borrar un mapa; si era el activo, la mesa se queda sin mapa hasta activar otro
@@ -409,7 +518,10 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const room = map && getRoom(map.id, req.params.roomId);
   if (!room) return res.status(404).json({ error: 'Sala no encontrada' });
 
-  const { name, x, y, width, height, disabledCells, obstacleCells, spawnCells, terrainCells, wallEdges, elevationCells, lightCells, notes, revealed } = req.body ?? {};
+  const {
+    name, x, y, width, height, disabledCells, obstacleCells, spawnCells,
+    terrainCells, wallEdges, elevationCells, lightCells, fluidCells, notes, revealed,
+  } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'La sala necesita un nombre' });
   }
@@ -467,6 +579,9 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   if (lightCells !== undefined && !isValidDisabledCells(lightCells)) {
     return res.status(400).json({ error: 'Lista de luces no válida' });
   }
+  if (fluidCells !== undefined && !isValidFluidCells(fluidCells)) {
+    return res.status(400).json({ error: 'Lista de fluidos no válida' });
+  }
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json({ error: 'Las notas deben ser texto' });
   }
@@ -483,6 +598,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   const nextWalls = (wallEdges ?? JSON.parse(room.wall_edges || '[]')).filter(insideRoom);
   const nextElevation = (elevationCells ?? JSON.parse(room.elevation_cells || '[]')).filter(insideRoom);
   const nextLights = (lightCells ?? JSON.parse(room.light_cells || '[]')).filter(insideRoom);
+  const nextFluids = (fluidCells ?? JSON.parse(room.fluid_cells || '[]')).filter(insideRoom);
   const nextX = x ?? room.x;
   const nextY = y ?? room.y;
   const deltaX = nextX - room.x;
@@ -495,7 +611,9 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   db.transaction(() => {
     db.prepare(
       `UPDATE map_rooms SET name = ?, x = ?, y = ?, width = ?, height = ?,
-         disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?, wall_edges = ?, elevation_cells = ?, light_cells = ?, notes = ?, revealed = ? WHERE id = ?`
+         disabled_cells = ?, obstacle_cells = ?, spawn_cells = ?, terrain_cells = ?,
+         wall_edges = ?, elevation_cells = ?, light_cells = ?, fluid_cells = ?,
+         notes = ?, revealed = ? WHERE id = ?`
     ).run(
       name !== undefined ? name.trim().slice(0, 80) : room.name,
       nextX,
@@ -509,6 +627,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
       JSON.stringify(nextWalls),
       JSON.stringify(nextElevation),
       JSON.stringify(nextLights),
+      JSON.stringify(nextFluids),
       notes ?? room.notes,
       revealed !== undefined ? Number(Boolean(revealed)) : room.revealed,
       room.id
@@ -533,6 +652,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
   if (becameRevealed && getActiveMapId(req.params.campaignId) === map.id) {
     const spawned = spawnRoomEnemies(map.campaign_id, [room.id]);
     if (spawned.added > 0) notifyCombat(map.campaign_id);
+    if (spawned.added > 0) notifyBestiary(map.campaign_id);
     if (spawned.startedCombat) notifyCombatStarted(map.campaign_id);
     fireRevealEvents(map.campaign_id, [room.id]);
   }
@@ -623,6 +743,8 @@ mapsRouter.post('/:mapId/salas/:roomId/imagen/generar', async (req, res) => {
       width: room.width,
       height: room.height,
       openings: roomOpenings(map.id, room),
+      artStyle:
+        db.prepare('SELECT art_style FROM campaigns WHERE id = ?').get(map.campaign_id)?.art_style ?? '',
     });
     saveRoomBackground(map, room, generated.buffer, '.png', res);
   } catch (error) {
@@ -778,7 +900,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
 
   const {
     name, x, y, hidden, kind, dc, skill, perceptionDc, visionRadius, successConsequence,
-    failureConsequence, consequenceScope, overrides, loot,
+    failureConsequence, consequenceScope, overrides, loot, applyFluidEffects = false,
   } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
@@ -868,7 +990,7 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
       .prepare('SELECT * FROM map_rooms WHERE floor_id = ?')
       .all(currentRoom.floor_id);
     const pathResult = findPath(
-      buildWalkableGrid(floorRooms),
+      buildWalkableGrid(floorRooms, map.fluid_effects),
       { x: token.x, y: token.y },
       { x: nextX, y: nextY },
       150,
@@ -905,6 +1027,39 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     lootJson !== undefined ? lootJson : token.loot,
     token.id
   );
+  if (overridesJson !== undefined) {
+    const linked = db
+      .prepare('SELECT id FROM combatants WHERE campaign_id = ? AND map_token_id = ?')
+      .get(map.campaign_id, token.id);
+    if (linked) {
+      db.prepare('UPDATE combatants SET overrides = ? WHERE id = ?').run(overridesJson, linked.id);
+      syncBossResources(linked.id);
+    }
+  }
+  if (applyFluidEffects === true && movementPath?.length) {
+    resolveFluidMovement({
+      campaignId: map.campaign_id,
+      mapId: map.id,
+      targetKind: 'marcador',
+      targetId: token.id,
+      positions: movementPath.slice(1).map((position) => ({
+        floorId: movementFloorId,
+        x: position.x,
+        y: position.y,
+      })),
+    });
+    resolveHazardMovement({
+      campaignId: map.campaign_id,
+      mapId: map.id,
+      targetKind: 'marcador',
+      targetId: token.id,
+      positions: movementPath.slice(1).map((position) => ({
+        floorId: movementFloorId,
+        x: position.x,
+        y: position.y,
+      })),
+    });
+  }
   touchAndNotify(map);
   // El movimiento gastado se refleja en vivo en el tracker/HUD del DM
   if (x !== undefined || y !== undefined) {

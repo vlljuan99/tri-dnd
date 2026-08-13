@@ -2,7 +2,7 @@
 
 Mesa de juego virtual de D&D 5e para un grupo de ~4-6 amigos: fichas de personaje siempre a mano (también en el móvil, en partidas presenciales), sesiones online con chat, tiradas compartidas, tracker de iniciativa y mapa táctico con niebla de guerra. La voz va aparte (Discord); esta app no la gestiona.
 
-**Alcance actual: solo local.** No hay que preocuparse por despliegue (VPS Hetzner + Caddy) hasta que el usuario lo pida explícitamente en una fase futura separada.
+**Desarrollo local y publicación explícita.** El trabajo cotidiano se verifica en local. Existe una beta privada en el VPS Hetzner detrás de Caddy, pero nunca se despliega por iniciativa propia: solo cuando el usuario lo pida expresamente. El flujo versionado, backup y rollback vive en `deploy/README.md` y `.github/workflows/deploy.yml`.
 
 ## Decisiones de producto ya confirmadas (no volver a preguntar)
 

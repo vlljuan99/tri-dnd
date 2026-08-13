@@ -17,6 +17,7 @@ import {
   notifyCombatStarted,
   postSystemMessage,
   evictCampaignMember,
+  notifyBestiary,
 } from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
@@ -25,6 +26,12 @@ import { buildWalkableGrid, findPath, buildElevationMap } from '../services/path
 import { queueOpportunityAttacks } from '../services/opportunityAttacks.js';
 import { buildWallSet } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
+import { resolveFluidMovement } from '../services/fluidEffects.js';
+import { resolveHazardMovement } from '../services/hazardZones.js';
+import { resolveSkirmishSource, seedSkirmishMap } from '../services/skirmishes.js';
+import { listSkirmishPresets } from '../services/skirmishPresets.js';
+import { getTemplateData, saveTemplate, serializeTemplate, snapshotMap } from '../services/templates.js';
+import { campaignBestiary } from '../services/bestiary.js';
 import { serializeEvent } from './events.js';
 import {
   narrativeImagesForCampaign,
@@ -76,6 +83,7 @@ function serializeCampaign(row, role) {
     // La sinopsis es la brújula privada de preparación del DM. La presentación
     // pública al grupo vive en lore/objectives y sí se entrega a jugadores.
     description: isDm ? row.description : null,
+    artStyle: isDm ? row.art_style ?? '' : null,
     scene: row.scene,
     // Ocultarlo en el cliente no basta: un jugador ya unido no necesita volver
     // a recibir el código con el que otras personas pueden entrar.
@@ -89,6 +97,7 @@ function serializeCampaign(row, role) {
     hasWorldMap: Boolean(row.has_world_map),
     worldMapUrl: row.world_map_url ?? null,
     campaignType: row.campaign_type ?? (row.has_world_map ? 'campana' : 'escaramuza'),
+    elapsedDays: row.elapsed_days ?? 0,
     status: row.status,
     wizardStep: row.wizard_step,
   };
@@ -135,6 +144,26 @@ campaignsRouter.post('/', (req, res) => {
   if (requestedName.length > 80) return res.status(400).json({ error: 'El nombre admite hasta 80 caracteres' });
   const defaultName = campaignType === 'campana' ? 'Nueva campaña' : 'Nueva escaramuza';
 
+  // Una escaramuza puede nacer de un escenario de fábrica (presetId) o de una
+  // plantilla de escaramuza propia (templateId); si no llega ninguno se siembra
+  // el tablero mínimo de siempre.
+  const presetId = typeof req.body?.presetId === 'string' ? req.body.presetId : null;
+  const templateId = req.body?.templateId;
+  if ((presetId || templateId !== undefined) && campaignType !== 'escaramuza') {
+    return res.status(400).json({ error: 'Solo una escaramuza puede partir de un escenario o plantilla' });
+  }
+  if (presetId && templateId !== undefined) {
+    return res.status(400).json({ error: 'Elige un escenario predefinido o una plantilla, no las dos' });
+  }
+  let template = null;
+  if (templateId !== undefined) {
+    if (!Number.isInteger(templateId)) return res.status(400).json({ error: 'Plantilla no válida' });
+    template = getTemplateData(req.user.id, templateId, 'escaramuza');
+    if (!template) return res.status(404).json({ error: 'Plantilla de escaramuza no encontrada' });
+  }
+  const source = resolveSkirmishSource({ presetId, template });
+  if (source.error) return res.status(404).json({ error: source.error });
+
   const create = db.transaction(() => {
     const info = db
       .prepare(
@@ -143,7 +172,7 @@ campaignsRouter.post('/', (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
-        requestedName || defaultName,
+        requestedName || source.name || defaultName,
         req.user.id,
         generateInviteCode(),
         hasWorldMap ? 1 : 0,
@@ -158,9 +187,16 @@ campaignsRouter.post('/', (req, res) => {
 
     if (campaignType === 'campana') {
       seedDefaultNarrativeSections(id);
+    } else if (source.mapData) {
+      // Escenario de fábrica o plantilla propia: el tablero entra completo,
+      // con sus salas de inicio abiertas y sus enemigos en el tracker.
+      seedSkirmishMap(id, req.user.id, source.mapData, { name: source.mapData.name });
+      if (source.maxPlayers) {
+        db.prepare('UPDATE campaigns SET max_players = ? WHERE id = ?').run(source.maxPlayers, id);
+      }
     } else {
-      // La escaramuza es deliberadamente inmediata: nace completa y con un
-      // tablero mínimo activo, sin pasar por el asistente ni por el archivo.
+      // La escaramuza en blanco es deliberadamente inmediata: nace completa y
+      // con un tablero mínimo activo, sin asistente ni archivo.
       const mapInfo = db.prepare("INSERT INTO maps (campaign_id, name) VALUES (?, 'Escaramuza')").run(id);
       const mapId = Number(mapInfo.lastInsertRowid);
       const floorInfo = db
@@ -202,6 +238,50 @@ campaignsRouter.post('/join', (req, res) => {
   res.status(201).json({ campaign: serializeCampaign(row, 'jugador') });
 });
 
+// Catálogo de escenarios de fábrica para el Hub. Va antes que `/:id` para que
+// Express no lo confunda con el detalle de una campaña.
+campaignsRouter.get('/escaramuzas/predefinidas', (_req, res) => {
+  res.json({ presets: listSkirmishPresets() });
+});
+
+// Guardar una escaramuza como plantilla propia reutilizable: se fotografía su
+// mapa activo entero (plantas, salas con todas sus capas, puertas y
+// marcadores) y queda en la biblioteca del DM como tipo 'escaramuza'.
+campaignsRouter.post('/:id/guardar-plantilla', (req, res) => {
+  const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (campaign.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM puede guardar esta escaramuza como plantilla' });
+  }
+  if (campaign.campaign_type !== 'escaramuza') {
+    return res.status(400).json({ error: 'Solo una escaramuza se puede guardar como escenario' });
+  }
+  const mapId = getActiveMapId(campaign.id);
+  const map = mapId ? getMap(campaign.id, mapId) : null;
+  if (!map) return res.status(400).json({ error: 'Esta partida no tiene ningún tablero activo que guardar' });
+
+  // El snapshot no recuerda qué salas estaban reveladas (una plantilla del DM
+  // se estampa siempre a oscuras), así que la escaramuza marca las suyas para
+  // que al instanciarla vuelva a abrir exactamente las mismas.
+  const data = snapshotMap(map);
+  const revealedByRoom = db
+    .prepare(
+      `SELECT room.id, room.revealed, floor.position FROM map_rooms room
+       JOIN map_floors floor ON floor.id = room.floor_id
+       WHERE floor.map_id = ? ORDER BY floor.position, floor.id, room.id`
+    )
+    .all(map.id);
+  let cursor = 0;
+  for (const floor of data.floors ?? []) {
+    for (const room of floor.rooms ?? []) {
+      room.revealed = Boolean(revealedByRoom[cursor]?.revealed);
+      cursor += 1;
+    }
+  }
+  const template = saveTemplate(req.user.id, 'escaramuza', req.body?.name ?? campaign.name, data);
+  res.status(201).json({ template: serializeTemplate(template) });
+});
+
 campaignsRouter.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
@@ -227,6 +307,12 @@ campaignsRouter.get('/:id', (req, res) => {
   res.json({ campaign: serializeCampaign(row, membership.role), members, characters });
 });
 
+campaignsRouter.get('/:id/bestiario', (req, res) => {
+  const membership = getMembership(req.params.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  res.json({ creatures: campaignBestiary(req.params.id) });
+});
+
 // Editar campaña (solo el DM): lore de apertura, objetivos, plazas y si forma
 // parte de un mapa de mundo. Solo se tocan los campos presentes en el body.
 campaignsRouter.patch('/:id', (req, res) => {
@@ -236,8 +322,10 @@ campaignsRouter.patch('/:id', (req, res) => {
     return res.status(403).json({ error: 'Solo el DM puede editar la campaña' });
   }
 
-  const { name, description, lore, objectives, maxPlayers, hasWorldMap, campaignType, status, wizardStep } =
-    req.body ?? {};
+  const {
+    name, description, artStyle, lore, objectives, maxPlayers, hasWorldMap,
+    campaignType, status, wizardStep,
+  } = req.body ?? {};
   const sets = [];
   const values = [];
 
@@ -254,6 +342,13 @@ campaignsRouter.patch('/:id', (req, res) => {
     }
     sets.push('description = ?');
     values.push(description);
+  }
+  if (artStyle !== undefined) {
+    if (typeof artStyle !== 'string' || artStyle.length > 1000) {
+      return res.status(400).json({ error: 'El estilo artístico admite hasta 1.000 caracteres' });
+    }
+    sets.push('art_style = ?');
+    values.push(artStyle.trim());
   }
   if (lore !== undefined) {
     if (typeof lore !== 'string' || lore.length > 5000) {
@@ -525,9 +620,16 @@ campaignsRouter.delete('/:id/biblioteca/:tipo/:contentId', (req, res) => {
 
 // --- Eventos colgados de la campaña (Fase 18) ------------------------------
 // Los enlaces son cosa del DM: dónde ha colgado cada evento de su biblioteca
-// (la propia campaña, una sala o un marcador) y su estado de disparo.
+// (la campaña, una sala, un marcador, una ubicación o una ruta) y su estado.
 
-const EVENT_TARGET_TYPES = new Set(['campana', 'sala', 'marcador', 'ubicacion']);
+const EVENT_TARGET_TYPES = new Set(['campana', 'sala', 'marcador', 'ubicacion', 'ruta']);
+
+function routeTargetLabel(route) {
+  const path = `${route.from_name} ${route.one_way ? '→' : '↔'} ${route.to_name}`;
+  const name = route.route_label ? `${route.route_label}: ${path}` : path;
+  const cost = `${route.cost} jornada${route.cost === 1 ? '' : 's'}`;
+  return `${name} · ${cost}${route.world_map_name ? ` (${route.world_map_name})` : ''}`;
+}
 
 campaignsRouter.get('/:id/eventos', (req, res) => {
   const campaign = requireDm(req, res);
@@ -535,12 +637,18 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
   const links = db
     .prepare(
       `SELECT l.*, e.name, e.description, e.effect, e.trigger_kind, e.trigger_every, e.hidden,
-              r.name AS room_name, t.name AS token_name, wl.name AS location_name
+              r.name AS room_name, t.name AS token_name, wl.name AS location_name,
+              wr.label AS route_label, wr.cost, wr.one_way,
+              wr_from.name AS from_name, wr_to.name AS to_name, wr_map.name AS world_map_name
        FROM event_links l
        JOIN dm_events e ON e.id = l.event_id
        LEFT JOIN map_rooms r ON l.target_type = 'sala' AND r.id = l.target_id
        LEFT JOIN map_tokens t ON l.target_type = 'marcador' AND t.id = l.target_id
        LEFT JOIN world_locations wl ON l.target_type = 'ubicacion' AND wl.id = l.target_id
+       LEFT JOIN world_routes wr ON l.target_type = 'ruta' AND wr.id = l.target_id
+       LEFT JOIN world_locations wr_from ON wr_from.id = wr.from_location_id
+       LEFT JOIN world_locations wr_to ON wr_to.id = wr.to_location_id
+       LEFT JOIN world_maps wr_map ON wr_map.id = wr.world_map_id
        WHERE l.campaign_id = ? ORDER BY l.id`
     )
     .all(campaign.id);
@@ -567,6 +675,17 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
        WHERE l.campaign_id = ? ORDER BY wm.name, l.name`
     )
     .all(campaign.id);
+  const worldRoutes = db
+    .prepare(
+      `SELECT wr.id, wr.label AS route_label, wr.cost, wr.one_way,
+              origin.name AS from_name, destination.name AS to_name, wm.name AS world_map_name
+       FROM world_routes wr
+       JOIN world_locations origin ON origin.id = wr.from_location_id
+       JOIN world_locations destination ON destination.id = wr.to_location_id
+       JOIN world_maps wm ON wm.id = wr.world_map_id
+       WHERE wr.campaign_id = ? ORDER BY wm.name, origin.name, destination.name`
+    )
+    .all(campaign.id);
 
   res.json({
     links: links.map((l) => ({
@@ -581,6 +700,10 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
             ? l.token_name ?? 'Marcador borrado'
             : l.target_type === 'ubicacion'
               ? l.location_name ?? 'Ubicación borrada'
+              : l.target_type === 'ruta'
+                ? l.from_name && l.to_name
+                  ? routeTargetLabel(l)
+                  : 'Ruta borrada'
               : 'Toda la campaña',
       fired: Boolean(l.fired),
       lastFiredRound: l.last_fired_round,
@@ -592,6 +715,7 @@ campaignsRouter.get('/:id/eventos', (req, res) => {
         id: l.id,
         label: l.world_map_name ? `${l.name} (${l.world_map_name})` : l.name,
       })),
+      routes: worldRoutes.map((route) => ({ id: route.id, label: routeTargetLabel(route) })),
     },
   });
 });
@@ -600,7 +724,7 @@ campaignsRouter.post('/:id/eventos', (req, res) => {
   const campaign = requireDm(req, res);
   if (!campaign) return;
   const { eventId, targetType = 'campana', targetId } = req.body ?? {};
-  const event = db.prepare('SELECT id FROM dm_events WHERE id = ? AND user_id = ?').get(eventId, req.user.id);
+  const event = db.prepare('SELECT id, trigger_kind FROM dm_events WHERE id = ? AND user_id = ?').get(eventId, req.user.id);
   if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
   if (!EVENT_TARGET_TYPES.has(targetType)) return res.status(400).json({ error: 'Destino no válido' });
 
@@ -630,6 +754,15 @@ campaignsRouter.post('/:id/eventos', (req, res) => {
       .get(targetId, campaign.id);
     if (!location) return res.status(400).json({ error: 'Ubicación no válida' });
     cleanTargetId = location.id;
+  } else if (targetType === 'ruta') {
+    if (event.trigger_kind !== 'revelar') {
+      return res.status(400).json({ error: 'Los eventos automáticos de ruta deben usar el disparador de viaje' });
+    }
+    const route = db
+      .prepare('SELECT id FROM world_routes WHERE id = ? AND campaign_id = ?')
+      .get(targetId, campaign.id);
+    if (!route) return res.status(400).json({ error: 'Ruta no válida' });
+    cleanTargetId = route.id;
   }
 
   const info = db
@@ -665,6 +798,7 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
   if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
 
   const activeMapId = getActiveMapId(req.params.id);
+  const activeMap = activeMapId ? getMap(req.params.id, activeMapId) : null;
   const map = activeMapId ? getMap(req.params.id, activeMapId) : null;
   if (!map) return res.json({ map: null });
 
@@ -770,7 +904,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
           .all(activeMapId, ...traversableIds, ...traversableIds)
       : [];
     const pathResult = findPath(
-      buildWalkableGrid(traversable),
+      buildWalkableGrid(traversable, activeMap?.fluid_effects),
       { x: token.x, y: token.y },
       { x, y },
       150,
@@ -826,6 +960,36 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     finalY,
     token.id
   );
+  const finalRoom = finalRoomId === targetRoom.id
+    ? targetRoom
+    : db.prepare('SELECT * FROM map_rooms WHERE id = ?').get(finalRoomId);
+  const fluidPositions = movementPath.slice(1).map((position) => ({
+    floorId: currentRoom.floor_id,
+    x: position.x,
+    y: position.y,
+  }));
+  if (
+    finalRoom &&
+    !fluidPositions.some(
+      (position) => position.floorId === finalRoom.floor_id && position.x === finalX && position.y === finalY
+    )
+  ) {
+    fluidPositions.push({ floorId: finalRoom.floor_id, x: finalX, y: finalY });
+  }
+  const fluidResult = resolveFluidMovement({
+    campaignId: req.params.id,
+    mapId: activeMapId,
+    targetKind: 'personaje',
+    targetId: character.id,
+    positions: fluidPositions,
+  });
+  const hazardResult = resolveHazardMovement({
+    campaignId: req.params.id,
+    mapId: activeMapId,
+    targetKind: 'personaje',
+    targetId: character.id,
+    positions: fluidPositions,
+  });
   touchMap(activeMapId);
   notifyCampaignMap(req.params.id);
   if (!isDm) {
@@ -841,11 +1005,16 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
       floorId: currentRoom.floor_id,
       path: movementPath,
     });
-    if (queued.length) notifyCombat(req.params.id);
+    if (queued.length || fluidResult.changed || hazardResult.changed) notifyCombat(req.params.id);
+  } else if (fluidResult.changed || hazardResult.changed) {
+    notifyCombat(req.params.id);
   }
   if (newlyRevealed.length) {
     const spawned = spawnRoomEnemies(req.params.id, newlyRevealed);
-    if (spawned.added > 0) notifyCombat(req.params.id);
+    if (spawned.added > 0) {
+      notifyCombat(req.params.id);
+      notifyBestiary(req.params.id);
+    }
     if (spawned.startedCombat) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }
@@ -942,7 +1111,10 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
   notifyCampaignMap(req.params.id);
   if (newlyRevealed.length) {
     const spawned = spawnRoomEnemies(req.params.id, newlyRevealed);
-    if (spawned.added > 0) notifyCombat(req.params.id);
+    if (spawned.added > 0) {
+      notifyCombat(req.params.id);
+      notifyBestiary(req.params.id);
+    }
     if (spawned.startedCombat) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }

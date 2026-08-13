@@ -32,8 +32,13 @@ export default function PlayerHud({
   const remaining = budget != null ? Math.max(0, budget - (combatant?.movedSquares ?? 0)) : null;
   const hasHp = Number.isInteger(hp) && Number.isInteger(hpMax) && hpMax > 0;
   const downed = Boolean(combatant?.downed);
+  const dying = Boolean(combatant?.dying);
+  const stable = Boolean(combatant?.stable);
   const dead = Boolean(combatant?.dead);
   const conditions = combatant?.conditions ?? [];
+  const conditionTimers = Object.fromEntries(
+    (combatant?.timedConditions ?? []).map((timer) => [timer.condition, timer])
+  );
   // Acciones especiales disponibles: solo en tu turno, con la mesa en turnos y
   // sin estar agonizando; se deshabilitan si ya has gastado la acción.
   const canAct = Boolean(combatActive && isMyTurn && combatant && !downed);
@@ -98,6 +103,7 @@ export default function PlayerHud({
               className="rounded-sm border border-blood/40 bg-blood/10 px-1 text-[0.65rem] text-blood/90"
             >
               {conditionSymbol(cond)} {conditionLabel(cond)}
+              {conditionTimers[cond] && <span className="ml-1 text-gold/80">⌛{conditionTimers[cond].remaining}</span>}
             </span>
           ))}
         </div>
@@ -110,8 +116,14 @@ export default function PlayerHud({
         </div>
       )}
 
+      {combatActive && stable && (
+        <div className="flex items-center gap-2 border-l border-moss/30 pl-3">
+          <span className="font-display text-xs uppercase tracking-widest text-moss">✚ Estable</span>
+        </div>
+      )}
+
       {/* PJ agonizante: salvaciones de muerte en vez de acciones normales */}
-      {combatActive && downed && !dead && (
+      {combatActive && dying && (
         <div className="flex items-center gap-2 border-l border-bone/10 pl-3">
           <span className="flex items-center gap-1" title="Salvaciones de muerte">
             {[0, 1, 2].map((i) => (
@@ -122,7 +134,7 @@ export default function PlayerHud({
               <span key={`f${i}`} className={`h-2 w-2 rounded-full ${i < (combatant?.deathSaves?.failures ?? 0) ? 'bg-blood' : 'bg-night-950 ring-1 ring-blood/40'}`} />
             ))}
           </span>
-          {isMyTurn && onDeathSave && (
+          {isMyTurn && !combatant?.deathSaveRolled && onDeathSave && (
             <button
               onClick={onDeathSave}
               className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"

@@ -2,7 +2,7 @@
 
 Mesa de juego virtual de D&D 5e para un grupo de ~4-6 amigos: fichas de personaje siempre a mano (también en el móvil, en partidas presenciales), sesiones online con chat, tiradas compartidas, tracker de iniciativa y mapa táctico con niebla de guerra. La voz va aparte (Discord); esta app no la gestiona.
 
-**Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights, gestionado por Caddy en `/opt/tilestudio`) en `https://tridnd.167-233-99-156.sslip.io`, sin dominio propio todavía. El redeploy se lanza a mano desde GitHub Actions (`workflow_dispatch`, no en cada push) — ver "Despliegue" en [ROADMAP.md](ROADMAP.md) y los archivos en `deploy/` y `.github/workflows/deploy.yml`. El desarrollo del día a día sigue siendo local (`npm run dev`).
+**Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights, gestionado por Caddy en `/opt/tilestudio`) en `https://tridnd.167-233-99-156.sslip.io`, sin dominio propio todavía. El redeploy se lanza a mano desde GitHub Actions (`workflow_dispatch`, no en cada push): primero prueba y audita, después crea un backup, publica `tridnd:<commit-sha>` y valida versión/SQLite/Socket.IO con rollback de código si falla. Ver [deploy/README.md](deploy/README.md), "Despliegue" en [ROADMAP.md](ROADMAP.md) y `.github/workflows/deploy.yml`. El desarrollo del día a día sigue siendo local (`npm run dev`).
 
 ## Decisiones de producto ya confirmadas (no volver a preguntar)
 
@@ -23,7 +23,8 @@ Mesa de juego virtual de D&D 5e para un grupo de ~4-6 amigos: fichas de personaj
 
 ```
 client/src/
-  pages/       # Pantallas: AuthPage, HubPage (campañas), CharactersPage, CharacterSheetPage, MesaPage
+  pages/       # Pantallas: AuthPage, CharactersPage, CharacterSheetPage, CompendiumPage, BibliotecaPage
+  features/hub/ # Zona de campañas (/campanas): sub-navegación y secciones (Campañas, Escaramuzas, Escenarios, Donde juego, Crear)
   components/  # DiceOverlay (FAB + tirador), RollCard, SrdPicker (buscador de compendio), ParchmentShell
   lib/         # dnd.js (reglas 5e: modificadores, competencia, ataques), dice.js (motor de tiradas)
   store/       # Zustand: auth.js (sesión), socket.js (sala/chat/tiradas), dice.js (overlay de dados)

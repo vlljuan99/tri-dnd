@@ -7,6 +7,7 @@ import { useMapEditor } from '../hooks/useMapEditor.js';
 import { buildObjectMarkerLoot } from '../lib/objectMarker.js';
 import { applyWallStroke } from '../lib/wallBrush.js';
 import { readMapCreationIntent } from '../lib/mapCreationIntent.js';
+import { FLUID_TYPES, paintFluidCell } from '../../tactical-map/domain/fluids.js';
 import EditorCanvas from '../components/EditorCanvas.jsx';
 import RoomPanel from '../components/RoomPanel.jsx';
 import DoorPanel from '../components/DoorPanel.jsx';
@@ -38,7 +39,7 @@ const toolButton = (active) =>
     active ? 'border-gold bg-gold/15 text-gold' : 'border-bone/20 text-bone/60 hover:border-bone/40'
   }`;
 
-// Las diez herramientas agrupadas en tres capas de trabajo, que son tres
+// Las herramientas se agrupan en tres capas de trabajo, que son tres
 // momentos de la cabeza del DM: dibujar la planta (Estructura), poblarla
 // (Contenido) y darle propiedades a las casillas (Ambiente). Mientras una
 // herramienta está activa, el lienzo atenúa las otras dos capas.
@@ -66,6 +67,7 @@ const TOOL_LAYERS = [
     label: 'Ambiente',
     tools: [
       { mode: 'light', label: 'Luces' },
+      { mode: 'fluid', label: 'Fluidos' },
       { mode: 'elevation', label: 'Elevación' },
       { mode: 'terrain', label: 'Terreno' },
     ],
@@ -111,6 +113,8 @@ export default function MapEditorPage() {
   const [tokenName, setTokenName] = useState('');
   const [terrainCost, setTerrainCost] = useState(2); // coste del pincel de terreno difícil
   const [elevationLevel, setElevationLevel] = useState(1); // nivel del pincel de elevación
+  const [fluidType, setFluidType] = useState('agua');
+  const [fluidErase, setFluidErase] = useState(false);
   const [tokenMonster, setTokenMonster] = useState(null); // { index, name } del compendio
   const [showMonsterPicker, setShowMonsterPicker] = useState(false);
   const [tokenItem, setTokenItem] = useState(null); // equipo SRD o de la biblioteca propia
@@ -357,6 +361,17 @@ export default function MapEditorPage() {
       ? room.lightCells.filter(([c, r]) => !(c === rel[0] && r === rel[1]))
       : [...(room.lightCells ?? []), rel];
     await editor.patchRoom(room.id, { lightCells: next });
+  }
+
+  // Pinta la capa de fluido. Una casilla solo puede tener un
+  // tipo: pintar otro lo sustituye; repetirlo o usar la goma lo borra.
+  async function toggleFluid(target) {
+    const room = allRooms.find((candidate) => candidate.id === target.roomId);
+    if (!room) return;
+    const col = target.x - room.x;
+    const row = target.y - room.y;
+    const next = paintFluidCell(room.fluidCells, col, row, fluidType, { erase: fluidErase });
+    await editor.patchRoom(room.id, { fluidCells: next });
   }
 
   // Pinta o borra un punto de aparición en la casilla pulsada de la sala
@@ -883,6 +898,36 @@ export default function MapEditorPage() {
                     automáticas de pared se configuran en «Ajustes»
                   </span>
                 )}
+                {mode === 'fluid' && (
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-bone/60">
+                      Tipo
+                      <select
+                        value={fluidType}
+                        onChange={(event) => {
+                          setFluidType(event.target.value);
+                          setFluidErase(false);
+                        }}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                      >
+                        {FLUID_TYPES.map((fluid) => (
+                          <option key={fluid.key} value={fluid.key}>{fluid.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      aria-pressed={fluidErase}
+                      onClick={() => setFluidErase((current) => !current)}
+                      className={toolButton(fluidErase)}
+                    >
+                      Goma
+                    </button>
+                    <span className="text-xs italic text-bone/50">
+                      clic para pintar; repetir el mismo tipo o activar la goma lo borra
+                    </span>
+                  </>
+                )}
                 {mode === 'elevation' && (
                   <>
                     <label className="flex items-center gap-1.5 text-xs text-bone/60">
@@ -1081,6 +1126,7 @@ export default function MapEditorPage() {
                     onWallStroke={saveWallStroke}
                     onElevationCellClick={(target) => toggleElevation(target).catch(() => {})}
                     onLightCellClick={(target) => toggleLight(target).catch(() => {})}
+                    onFluidCellClick={(target) => toggleFluid(target).catch(() => {})}
                     onMoveRoom={(roomId, pos) => editor.patchRoom(roomId, pos).catch(() => {})}
                     onMoveToken={(tokenId, pos) => editor.patchToken(tokenId, pos).catch(() => {})}
                   />

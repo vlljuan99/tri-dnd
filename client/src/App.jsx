@@ -2,7 +2,12 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './store/auth.js';
 import AuthPage from './pages/AuthPage.jsx';
-import HubPage from './pages/HubPage.jsx';
+import HubLayout from './features/hub/pages/HubLayout.jsx';
+import CampanasSection from './features/hub/components/CampanasSection.jsx';
+import CrearSection from './features/hub/components/CrearSection.jsx';
+import EscaramuzasSection from './features/hub/components/EscaramuzasSection.jsx';
+import EscenariosSection from './features/hub/components/EscenariosSection.jsx';
+import DondeJuegoSection from './features/hub/components/DondeJuegoSection.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import BibliotecaPage from './pages/BibliotecaPage.jsx';
 import CompendiumPage from './pages/CompendiumPage.jsx';
@@ -75,14 +80,24 @@ export default function App() {
     <Routes>
       <Route path="/acceso" element={<AuthPage />} />
       <Route element={<Protected />}>
+        {/* La zona de campañas vive en /campanas con sus secciones como
+            segmentos estáticos, que React Router prioriza sobre el
+            /campanas/:id del detalle. El antiguo Hub en / redirige. */}
+        <Route path="/" element={<Navigate to="/campanas" replace />} />
         <Route
-          path="/"
+          path="/campanas"
           element={
             <ParchmentShell>
-              <HubPage />
+              <HubLayout />
             </ParchmentShell>
           }
-        />
+        >
+          <Route index element={<CampanasSection />} />
+          <Route path="crear" element={<CrearSection />} />
+          <Route path="escaramuzas" element={<EscaramuzasSection />} />
+          <Route path="escenarios" element={<EscenariosSection />} />
+          <Route path="donde-juego" element={<DondeJuegoSection />} />
+        </Route>
         <Route
           path="/personajes"
           element={

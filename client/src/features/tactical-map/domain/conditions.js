@@ -1,7 +1,7 @@
 // Condiciones de combate 5e (más inconsciente). Mismo listado que el servidor
 // (turnEconomy.COMBAT_CONDITIONS); aquí se les da etiqueta en español y un
-// símbolo corto para pintar el chip sobre el token y en el tracker. La app no
-// aplica efectos automáticos: son estado que el DM narra.
+// símbolo corto para pintar el chip sobre el token y en el tracker. El servidor
+// aplica los efectos representables y controla también su duración opcional.
 export const CONDITIONS = [
   { key: 'envenenado', label: 'Envenenado', symbol: '☠' },
   { key: 'derribado', label: 'Derribado', symbol: '⤓' },

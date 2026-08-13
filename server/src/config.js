@@ -9,7 +9,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envFile = path.resolve(__dirname, '../.env');
 if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
-export const DATA_DIR = path.resolve(__dirname, '../data');
+// Las pruebas de integración arrancan el servidor real contra una carpeta
+// temporal para no tocar nunca la base local del desarrollador. En producción
+// se mantiene la ruta histórica dentro del volumen persistente.
+export const DATA_DIR = process.env.TRIDND_DATA_DIR
+  ? path.resolve(process.env.TRIDND_DATA_DIR)
+  : path.resolve(__dirname, '../data');
 export const DB_PATH = path.join(DATA_DIR, 'tri-dnd.db');
 export const UPLOADS_ROOT = path.join(DATA_DIR, 'uploads');
 export const MAP_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'maps');
@@ -23,6 +28,9 @@ export const NARRATIVE_MEDIA_DIR = path.join(DATA_DIR, 'narrative-media');
 // contener notas privadas del DM que nunca deben servirse como estáticas.
 export const NARRATIVE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'narrativa');
 export const PORT = Number(process.env.PORT) || 4000;
+export const APP_VERSION = process.env.APP_VERSION || '0.1.0-dev';
+export const GIT_SHA = process.env.GIT_SHA || 'desconocido';
+export const BUILD_TIME = process.env.BUILD_TIME || null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(MAP_UPLOADS_DIR, { recursive: true });

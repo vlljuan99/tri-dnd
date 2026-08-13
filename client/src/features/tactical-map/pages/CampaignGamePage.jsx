@@ -111,6 +111,7 @@ export default function CampaignGamePage() {
     enabled: hasWorldMap,
     version: worldVersion,
   });
+  const elapsedDays = world?.elapsedDays ?? campaign?.elapsedDays ?? 0;
   const currentLocationId = world?.currentLocationId ?? null;
   const currentLocation =
     world?.maps?.flatMap((m) => m.locations).find((l) => l.id === currentLocationId) ?? null;
@@ -248,6 +249,14 @@ export default function CampaignGamePage() {
                 Modo DM
               </span>
             )}
+            {(campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
+              <span
+                className="rounded-sm border border-gold/30 bg-night-950/60 px-2 py-0.5 font-display text-xs tracking-wide text-gold/80"
+                title="Jornadas transcurridas en la campaña"
+              >
+                Día {elapsedDays}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-bone/60">
             {user?.displayName || user?.username || 'Usuario'} · {isDm ? 'DM' : 'Jugador'}
@@ -321,6 +330,7 @@ export default function CampaignGamePage() {
           isLive={isLive}
           playerCount={playerCount}
           campaignId={campaignId}
+          elapsedDays={elapsedDays}
           onTakePath={takePath}
         />
       );

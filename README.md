@@ -2,7 +2,7 @@
 
 Mesa de juego virtual para D&D 5e pensada para un grupo de amigos: fichas de personaje siempre a mano (también en el móvil, en partidas presenciales), sesiones online con chat, tiradas compartidas, tracker de iniciativa y mapa táctico con niebla de guerra. La voz va aparte (Discord).
 
-**Estado**: en desarrollo por fases. Completadas las fases **1-5**: base + autenticación + SRD 5e en español, ficha de personaje mobile-first con autoguardado, cálculo de ataques, tirador de dados flotante y salas de campaña con chat y tiradas compartidas en tiempo real (incluidas tiradas ocultas del DM). Siguiente: fase 6 (tracker de iniciativa + panel de enemigos del DM).
+**Estado**: beta privada avanzada. Ya están operativos el taller y archivo del DM, fichas semiautomáticas, compendio en español, mapas de mundo y tácticos, niebla de guerra filtrada en servidor, combate por turnos, conjuros, eventos, botín, plantillas y escaramuzas preparadas. El cierre real sigue siendo el pulido y la prueba completa con el grupo; consulta [ROADMAP.md](ROADMAP.md) para el detalle.
 
 ## Stack
 
@@ -44,13 +44,40 @@ Arranca a la vez:
 
 La base de datos se crea automáticamente en `server/data/tri-dnd.db` al arrancar el servidor.
 
+## Verificación
+
+```bash
+npm test
+npm run build --prefix client
+npm audit --omit=dev --prefix server
+npm audit --omit=dev --prefix client
+```
+
+Las pruebas del servidor incluyen una integración aislada que arranca la API
+real contra una SQLite temporal. Nunca utiliza la base local del desarrollador.
+
+## Producción
+
+La beta está disponible en <https://tridnd.167-233-99-156.sslip.io>. El
+despliegue se inicia manualmente desde el workflow `Deploy to Hetzner`, pero el
+artefacto es reproducible y queda identificado por commit:
+
+- dependencias instaladas con `npm ci`, pruebas, build y auditoría antes de publicar;
+- imagen Docker inmutable `tridnd:<commit-sha>`;
+- backup consistente de SQLite y medios antes del reinicio;
+- `/api/health` expone versión, commit y migración activa;
+- smoke test del frontend, SQLite y Socket.IO, con rollback de código si falla.
+
+La operación y recuperación están documentadas en [deploy/README.md](deploy/README.md).
+
 ## Estructura del proyecto
 
 ```
 tri-dnd/
 ├── client/            # Frontend React (Vite + Tailwind)
 │   └── src/
-│       ├── pages/       # Pantallas (acceso, hub, personajes, ficha, mesa)
+│       ├── pages/       # Pantallas generales (acceso, personajes, compendio…)
+│       ├── features/    # Hub, taller, archivo, mundo, editor y tablero táctico
 │       ├── components/  # Tirador de dados, tarjetas de tirada, selector SRD…
 │       ├── lib/         # Reglas 5e (modificadores, ataques) y motor de dados
 │       └── store/       # Estado global (Zustand): sesión, sala, dados
@@ -60,7 +87,8 @@ tri-dnd/
 │   │   ├── db.js      # SQLite + migraciones
 │   │   ├── auth.js    # Registro/login con cookie de sesión (JWT)
 │   │   ├── sockets.js # Tiempo real: chat, tiradas, presencia, sesión en vivo
-│   │   └── routes/    # API: compendio SRD, personajes, campañas
+│   │   ├── routes/    # API: compendio, biblioteca, campañas, mapas y mundo
+│   │   └── services/  # Reglas, visión, combate, plantillas y escaramuzas
 │   ├── scripts/
 │   │   └── sync-srd.js        # Sincronización manual del SRD 5e
 │   └── data/

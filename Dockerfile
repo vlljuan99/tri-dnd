@@ -3,8 +3,8 @@
 # 1. Build del cliente (Vite)
 FROM node:20-alpine AS client-build
 WORKDIR /app/client
-COPY client/package.json client/package-lock.json* ./
-RUN npm install --no-audit --no-fund
+COPY client/package.json client/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY client/ ./
 RUN npm run build
 
@@ -12,14 +12,24 @@ RUN npm run build
 FROM node:20-alpine AS server-deps
 WORKDIR /app/server
 RUN apk add --no-cache python3 make g++
-COPY server/package.json server/package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund
+COPY server/package.json server/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # 3. Runtime — un solo contenedor sirviendo API + build estático del cliente
 FROM node:20-alpine AS runner
 RUN apk add --no-cache tzdata
+ARG APP_VERSION=0.1.0-dev
+ARG GIT_SHA=desconocido
+ARG BUILD_TIME=1970-01-01T00:00:00Z
 ENV NODE_ENV=production
 ENV TZ=Europe/Madrid
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+LABEL org.opencontainers.image.title="TriDnD" \
+      org.opencontainers.image.version=${APP_VERSION} \
+      org.opencontainers.image.revision=${GIT_SHA} \
+      org.opencontainers.image.created=${BUILD_TIME}
 WORKDIR /app
 COPY --from=server-deps /app/server/node_modules ./server/node_modules
 COPY server/ ./server/

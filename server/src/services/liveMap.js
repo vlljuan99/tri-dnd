@@ -61,6 +61,16 @@ export function notifyCampaignMap(campaignId) {
   ioRef?.to(`campaign:${campaignId}`).emit('mapa:actualizado');
 }
 
+// Eventos visuales efímeros: nunca contienen estadísticas privadas, solo el
+// objetivo público y el número ya narrado en mesa.
+export function notifyCombatVisual(campaignId, visual) {
+  ioRef?.to(`campaign:${campaignId}`).emit('combat:visual', visual);
+}
+
+export function notifyBestiary(campaignId) {
+  ioRef?.to(`campaign:${campaignId}`).emit('bestiario:actualizado');
+}
+
 // Notifica solo si el mapa tocado es el que está en la mesa
 export function notifyIfActive(campaignId, mapId) {
   if (getActiveMapId(campaignId) === Number(mapId)) notifyCampaignMap(campaignId);

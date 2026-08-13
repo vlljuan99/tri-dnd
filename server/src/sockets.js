@@ -12,6 +12,8 @@ import {
   postSystemMessage,
   notifyCampaignMap,
   notifyCombatStarted,
+  notifyCombatVisual,
+  notifyBestiary,
 } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
@@ -33,6 +35,9 @@ import {
 } from './services/combatGeometry.js';
 import {
   orderedCombatants,
+  combatantTakesTurn,
+  bindConditionExpirationNotifier,
+  bindTurnStartEffectsNotifier,
   rollInitiativeDetailed,
   rollInitiativeFor,
   setManualInitiative,
@@ -49,10 +54,14 @@ import {
   tryUseReaction,
   trySpecialAction,
   toggleCondition,
+  tickConditionsForTurn,
   startDeathSaves,
+  resetDeathSaves,
+  recordDamageAtZero,
   recordDeathSave,
   endCombatIfNoEnemiesLeft,
 } from './services/turnEconomy.js';
+import { DEATH_STATES, isMassiveDamage, normalizeConditionTimers } from './services/combatLifecycle.js';
 import { parseConditions, resolveAttackEffects } from './services/combatRules.js';
 import {
   absorbTemporaryHitPoints,
@@ -64,6 +73,10 @@ import {
 import { buildMultiattackPlans, parseMultiattackState } from './services/monsterActions.js';
 import { sanitizeChatReferences, standaloneChatReference } from './services/chatReferences.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './services/serverDice.js';
+import { resolveFluidTurnEnd } from './services/fluidEffects.js';
+import { resolveHazardTurnStart } from './services/hazardZones.js';
+import { bossActionsFor, syncBossResources, useBossAction } from './services/bossActions.js';
+import { discoverCreatures } from './services/bestiary.js';
 import {
   clearOpportunitiesForAttacker,
   dismissOpportunity,
@@ -160,6 +173,8 @@ function combatantView(row, { isDm, round }) {
     dashed: Boolean(row.dashed),
     stance: row.stance ?? null,
     conditions,
+    timedConditions: normalizeConditionTimers(row.condition_timers),
+    deathSaveRolled: row.death_save_round === round,
     // Qué hechizo concentra (null = ninguno). Público: la mesa entera ve al
     // mago apretando los dientes, y el grupo decide a quién protege.
     concentration: row.concentration_spell ?? null,
@@ -181,16 +196,20 @@ function combatantView(row, { isDm, round }) {
         downed,
         // Muerto de verdad (3 fallos): a diferencia de "agonizando", ya no
         // se pueden tirar más salvaciones de muerte ni volver con un 20.
-        dead: downed && row.death_failures >= 3,
+        deathState: downed ? row.death_state : DEATH_STATES.NORMAL,
+        dying: downed && row.death_state === DEATH_STATES.DYING,
+        stable: downed && row.death_state === DEATH_STATES.STABLE,
+        dead: downed && row.death_state === DEATH_STATES.DEAD,
         // Salvaciones de muerte: visibles para toda la mesa (el grupo ve caer
         // a un compañero), solo tienen sentido mientras está agonizando.
-        deathSaves: downed
+        deathSaves: downed && row.death_state !== DEATH_STATES.NORMAL
           ? { successes: row.death_successes, failures: row.death_failures }
           : null,
       });
     }
   } else if (row.kind === 'enemigo' && isDm) {
     const overrides = JSON.parse(row.overrides || '{}');
+    const bossActions = bossActionsFor(row);
     Object.assign(base, {
       hpCurrent: row.hp_current,
       hpMax: row.hp_max,
@@ -207,6 +226,13 @@ function combatantView(row, { isDm, round }) {
       // aplica estos deltas a los ataques y muestra los rasgos añadidos.
       overrides,
       multiattackState: parseMultiattackState(row.multiattack_state),
+      bossActions: {
+        legendary: bossActions.legendary,
+        lair: bossActions.lair,
+        legendaryPoints: row.legendary_points,
+        legendaryPointsMax: row.legendary_points_max || bossActions.maxPoints,
+        lairUsedThisRound: row.lair_action_round === round,
+      },
     });
   }
   return base;
@@ -803,6 +829,21 @@ function dropConcentrationOnDowned(campaignId, combatant) {
   return '';
 }
 
+function combatVisualTarget(resolved) {
+  return resolved.kind === 'personaje'
+    ? { characterId: resolved.character.id }
+    : { mapTokenId: resolved.token.id };
+}
+
+function emitAttackVisual(campaignId, resolved, { hit, crit = false } = {}) {
+  notifyCombatVisual(campaignId, {
+    type: hit ? 'hit' : 'miss',
+    ...combatVisualTarget(resolved),
+    critical: Boolean(crit),
+    strong: Boolean(crit),
+  });
+}
+
 function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', critical = false } = {}) {
   const resolution = resolveDamageComponents(incoming.components, targetDamageProfile(resolved), { source });
   const damage = resolution.appliedTotal;
@@ -830,19 +871,29 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
       detail.remainingTempHp = absorption.remainingTemporaryHitPoints;
       detail.maxHp = combatant.hp_max ?? null;
       if (damage > 0 && newHp <= 0) {
-        // Botín (Fase 20): al caer se tira su tabla y lo que toca queda en
-        // un marcador saqueable en su casilla
-        const rolledLoot = rollLoot(JSON.parse(resolved.token.loot || '[]'));
+        // El cadáver permanece a 0 PG: así se ve la animación de muerte y
+        // el DM puede revivirlo. El botín cae en un marcador separado para
+        // que saquearlo no borre el token de la criatura.
+        const firstDefeat = combatant.hp_current > 0;
+        const rolledLoot = firstDefeat ? rollLoot(JSON.parse(resolved.token.loot || '[]')) : [];
+        const conditions = parseConditions(combatant.conditions);
+        const defeatedConditions = conditions.includes('inconsciente')
+          ? conditions
+          : [...conditions, 'inconsciente'];
         db.transaction(() => {
-          db.prepare('DELETE FROM combatants WHERE id = ?').run(combatant.id);
+          db.prepare('UPDATE combatants SET hp_current = 0, hp_temp = ?, conditions = ? WHERE id = ?').run(
+            absorption.remainingTemporaryHitPoints,
+            JSON.stringify(defeatedConditions),
+            combatant.id
+          );
+          if (firstDefeat) db.prepare("UPDATE map_tokens SET loot = '[]' WHERE id = ?").run(resolved.token.id);
           const table = db
             .prepare('SELECT combat_turn_id FROM game_tables WHERE campaign_id = ?')
             .get(campaignId);
           if (table?.combat_turn_id === combatant.id) {
             db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
           }
-          db.prepare('DELETE FROM map_tokens WHERE id = ?').run(resolved.token.id);
-          dropLootMarker(resolved.token, rolledLoot);
+          if (firstDefeat) dropLootMarker(resolved.token, rolledLoot);
         })();
         detail.remainingHp = 0;
         detail.defeated = true;
@@ -877,7 +928,9 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
   } else {
     const prevHp = resolved.character.hp_current ?? 0;
     const absorption = absorbTemporaryHitPoints(damage, resolved.character.hp_temp);
-    const newHp = Math.max(-99, prevHp - absorption.hitPointDamage);
+    // En 5e los PG no bajan de 0: el daño sobrante solo importa para decidir
+    // si la criatura muere al instante por daño masivo.
+    const newHp = Math.max(0, prevHp - absorption.hitPointDamage);
     db.prepare("UPDATE characters SET hp_current = ?, hp_temp = ?, updated_at = datetime('now') WHERE id = ?").run(
       newHp,
       absorption.remainingTemporaryHitPoints,
@@ -896,16 +949,28 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
       .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
       .get(campaignId, resolved.character.id);
     if (damage > 0 && newHp <= 0) {
+      const massive = isMassiveDamage({
+        previousHp: prevHp,
+        hpMax: resolved.character.hp_max,
+        hitPointDamage: absorption.hitPointDamage,
+      });
       if (prevHp > 0) {
-        if (pjCombatant) startDeathSaves(pjCombatant.id);
+        if (pjCombatant) {
+          if (massive) recordDamageAtZero(pjCombatant.id, { massive: true });
+          else startDeathSaves(pjCombatant.id);
+        }
         dropConcentrationOnDowned(campaignId, pjCombatant);
-        body = `${resolved.name} recibe ${damage} puntos de daño${adjustmentSuffix} y cae inconsciente.`;
+        body = massive
+          ? `${resolved.name} recibe ${damage} puntos de daño${adjustmentSuffix} y muere al instante por daño masivo.`
+          : `${resolved.name} recibe ${damage} puntos de daño${adjustmentSuffix} y cae inconsciente.`;
       } else if (pjCombatant) {
-        const addedFailures = critical ? 2 : 1;
-        const failures = Math.min(3, pjCombatant.death_failures + addedFailures);
-        db.prepare('UPDATE combatants SET death_failures = ? WHERE id = ?').run(failures, pjCombatant.id);
+        const transition = recordDamageAtZero(pjCombatant.id, { critical, massive });
+        const addedFailures = transition?.addedFailures ?? (critical ? 2 : 1);
+        const failures = transition?.failures ?? Math.min(3, pjCombatant.death_failures + addedFailures);
         body =
-          failures >= 3
+          massive
+            ? `${resolved.name} recibe daño estando a 0 PG y muere al instante por daño masivo.`
+            : transition?.died
             ? `${resolved.name} recibe daño estando inconsciente y muere.`
             : `${resolved.name} recibe daño estando inconsciente: falla ${addedFailures === 2 ? 'dos salvaciones' : 'una salvación'} de muerte (${failures}/3).`;
       } else {
@@ -918,6 +983,15 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
     if (absorption.absorbed) body += ` Sus PG temporales absorben ${absorption.absorbed}.`;
   }
 
+  if (damage > 0) {
+    notifyCombatVisual(campaignId, {
+      type: 'damage',
+      ...combatVisualTarget(resolved),
+      value: damage,
+      critical: Boolean(critical),
+      strong: Boolean(critical || (detail.maxHp && damage >= Math.max(10, detail.maxHp / 3))),
+    });
+  }
   return { body, detail };
 }
 
@@ -945,6 +1019,14 @@ function validateAttackMode(roll, effects) {
 }
 
 export function setupSockets(io) {
+  bindConditionExpirationNotifier((campaignId, expirations) => {
+    emitConditionExpirations(campaignId, expirations);
+  });
+  bindTurnStartEffectsNotifier((campaignId, combatantId, round) => {
+    const result = resolveHazardTurnStart(campaignId, combatantId, round);
+    if (result.changed) broadcastCombat(campaignId);
+    if (result.changed || result.expired) notifyCampaignMap(campaignId);
+  });
   // Autenticación por la misma cookie de sesión que la API
   io.use((socket, next) => {
     try {
@@ -1012,6 +1094,12 @@ export function setupSockets(io) {
         'combat:state',
         combatStateFor(campaignId, { isDm: membership.role === 'dm', userId: s.data.user.id })
       );
+    }
+  }
+
+  function emitConditionExpirations(campaignId, expirations = []) {
+    for (const expiration of expirations) {
+      io.to(roomName(campaignId)).emit('combat:condition-expired', expiration);
     }
   }
   // Las rutas HTTP del mapa también meten enemigos en el tracker al
@@ -1287,13 +1375,17 @@ export function setupSockets(io) {
       if (!cleanName) return cb?.({ error: 'El combatiente necesita un nombre' });
 
       let charId = null;
+      let charDowned = false;
       if (cleanKind === 'pj' && Number.isInteger(characterId)) {
         // Una ficha del DM puede estar asignada a la campaña, pero nunca debe
         // entrar por el flujo de PJ: expondría sus PG/CA al resto del grupo.
         const char = db
-          .prepare("SELECT id FROM characters WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
+          .prepare("SELECT id, hp_current FROM characters WHERE id = ? AND campaign_id = ? AND kind = 'pj'")
           .get(characterId, campaignId);
-        if (char) charId = char.id;
+        if (char) {
+          charId = char.id;
+          charDowned = char.hp_current <= 0;
+        }
       }
       const hpC = cleanKind === 'enemigo' && Number.isInteger(hpCurrent) ? hpCurrent : null;
       const hpM = cleanKind === 'enemigo' && Number.isInteger(hpMax) ? hpMax : null;
@@ -1313,10 +1405,10 @@ export function setupSockets(io) {
         ? null
         : rollInitiativeDetailed({ kind: cleanKind, character_id: charId, monster_index: monsterIdx });
 
-      db.prepare(
+      const inserted = db.prepare(
         `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative, hp_current,
-         hp_max, ac, monster_index, initiative_source, initiative_d20, initiative_mod)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         hp_max, ac, monster_index, initiative_source, initiative_d20, initiative_mod, death_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         campaignId,
         charId,
@@ -1329,12 +1421,40 @@ export function setupSockets(io) {
         monsterIdx,
         manual ? 'manual' : 'auto',
         detail?.d20 ?? null,
-        detail?.modifier ?? null
+        detail?.modifier ?? null,
+        charDowned ? DEATH_STATES.DYING : DEATH_STATES.NORMAL
       );
+      if (cleanKind === 'enemigo') {
+        syncBossResources(Number(inserted.lastInsertRowid));
+        discoverCreatures(campaignId, [{ monster_index: monsterIdx, name: cleanName }]);
+        notifyBestiary(campaignId);
+      }
       ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
       if (detail) narrateInitiativeRolls(campaignId, [{ name: cleanName, kind: cleanKind, ...detail }]);
       cb?.({ ok: true });
+    });
+
+    socket.on('combat:boss-action', ({ campaignId, combatantId, type, actionId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM controla las acciones de jefe' });
+      const result = useBossAction(campaignId, combatantId, type, actionId);
+      if (!result.ok) return cb?.(result);
+      const boss = db.prepare('SELECT name FROM combatants WHERE id = ?').get(combatantId);
+      postSystemMessage(
+        campaignId,
+        result.type === 'lair'
+          ? `La guarida de ${boss?.name ?? 'el jefe'} actúa: ${result.action.name}. ${result.action.desc}`.trim()
+          : `${boss?.name ?? 'El jefe'} usa una acción legendaria: ${result.action.name}. ${result.action.desc}`.trim()
+      );
+      broadcastCombat(campaignId);
+      notifyCombatVisual(campaignId, {
+        type: result.type === 'lair' ? 'lair' : 'legendary',
+        mapTokenId: db.prepare('SELECT map_token_id FROM combatants WHERE id = ?').get(combatantId)?.map_token_id,
+        text: result.action.name,
+        strong: true,
+      });
+      cb?.({ ok: true, ...result });
     });
 
     // Tira (o vuelve a tirar) la iniciativa de un combatiente en el servidor.
@@ -1371,7 +1491,7 @@ export function setupSockets(io) {
       // «Añadir grupo» significa únicamente personajes jugadores. Los PNJ,
       // enemigos y jefes del DM se añaden por su flujo propio de combatiente.
       const characters = db
-        .prepare("SELECT id, name FROM characters WHERE campaign_id = ? AND kind = 'pj'")
+        .prepare("SELECT id, name, hp_current FROM characters WHERE campaign_id = ? AND kind = 'pj'")
         .all(campaignId);
       const existingIds = new Set(
         db
@@ -1381,14 +1501,22 @@ export function setupSockets(io) {
       );
       const insert = db.prepare(
         `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative,
-         initiative_source, initiative_d20, initiative_mod)
-         VALUES (?, ?, 'pj', ?, ?, 'auto', ?, ?)`
+         initiative_source, initiative_d20, initiative_mod, death_state)
+         VALUES (?, ?, 'pj', ?, ?, 'auto', ?, ?, ?)`
       );
       const rolls = [];
       for (const c of characters) {
         if (existingIds.has(c.id)) continue;
         const detail = rollInitiativeDetailed({ kind: 'pj', character_id: c.id });
-        insert.run(campaignId, c.id, c.name, detail.total, detail.d20, detail.modifier);
+        insert.run(
+          campaignId,
+          c.id,
+          c.name,
+          detail.total,
+          detail.d20,
+          detail.modifier,
+          c.hp_current <= 0 ? DEATH_STATES.DYING : DEATH_STATES.NORMAL
+        );
         rolls.push({ name: c.name, kind: 'pj', ...detail });
       }
       ensureTurnStarted(campaignId);
@@ -1403,6 +1531,8 @@ export function setupSockets(io) {
 
       const row = db.prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?').get(combatantId, campaignId);
       if (!row) return cb?.({ error: 'Combatiente no encontrado' });
+      let previousHpForVisual = null;
+      let nextHpForVisual = null;
 
       if (membership.role !== 'dm') {
         if (row.kind !== 'pj' || !row.character_id) return cb?.({ error: 'No puedes editar este combatiente' });
@@ -1431,8 +1561,10 @@ export function setupSockets(io) {
       }
 
       if (row.kind === 'pj' && row.character_id) {
+        const previousCharacter = db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(row.character_id);
+        previousHpForVisual = previousCharacter?.hp_current ?? null;
         const patch = {};
-        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(-99, Math.min(999, hpCurrent));
+        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(0, Math.min(999, hpCurrent));
         if (Number.isInteger(hpMax)) patch.hp_max = Math.max(0, Math.min(999, hpMax));
         if (Number.isInteger(hpTemp)) patch.hp_temp = Math.max(0, Math.min(999, hpTemp));
         if (Object.keys(patch).length) {
@@ -1442,16 +1574,40 @@ export function setupSockets(io) {
             row.character_id
           );
         }
+        if (Number.isInteger(patch.hp_current)) {
+          nextHpForVisual = patch.hp_current;
+          if (patch.hp_current > 0) resetDeathSaves(row.id);
+          else if ((previousCharacter?.hp_current ?? 1) > 0 || row.death_state === DEATH_STATES.NORMAL) {
+            startDeathSaves(row.id);
+          }
+        }
       } else {
+        previousHpForVisual = row.hp_current;
         const patch = {};
-        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(-99, Math.min(999, hpCurrent));
+        if (Number.isInteger(hpCurrent)) patch.hp_current = Math.max(0, Math.min(999, hpCurrent));
         if (Number.isInteger(hpMax)) patch.hp_max = Math.max(0, Math.min(999, hpMax));
         if (Number.isInteger(hpTemp)) patch.hp_temp = Math.max(0, Math.min(999, hpTemp));
         if (Number.isInteger(ac)) patch.ac = Math.max(0, Math.min(40, ac));
+        if (Number.isInteger(hpCurrent)) {
+          const conditions = parseConditions(row.conditions);
+          patch.conditions = JSON.stringify(
+            hpCurrent > 0
+              ? conditions.filter((condition) => condition !== 'inconsciente')
+              : [...new Set([...conditions, 'inconsciente'])]
+          );
+        }
         if (Object.keys(patch).length) {
           const sets = Object.keys(patch).map((k) => `${k} = ?`).join(', ');
           db.prepare(`UPDATE combatants SET ${sets} WHERE id = ?`).run(...Object.values(patch), row.id);
         }
+        if (Number.isInteger(patch.hp_current)) nextHpForVisual = patch.hp_current;
+      }
+      if (Number.isInteger(previousHpForVisual) && Number.isInteger(nextHpForVisual) && nextHpForVisual > previousHpForVisual) {
+        notifyCombatVisual(campaignId, {
+          type: 'heal',
+          ...(row.character_id ? { characterId: row.character_id } : { mapTokenId: row.map_token_id }),
+          value: nextHpForVisual - previousHpForVisual,
+        });
       }
       broadcastCombat(campaignId);
       // El HP editado en el tracker también actualiza las barras del tablero
@@ -1491,17 +1647,56 @@ export function setupSockets(io) {
     // dar la vuelta, y resetea sus recursos del turno. Compartido por
     // combat:next (solo DM) y combat:end-turn (el propio jugador o el DM).
     function advanceTurn(campaignId) {
-      const list = orderedCombatants(campaignId);
-      if (list.length === 0) return { error: 'No hay combatientes' };
-
       const table = db.prepare('SELECT combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?').get(campaignId);
-      const idx = list.findIndex((c) => c.id === table?.combat_turn_id);
-      const nextIdx = idx === -1 ? 0 : (idx + 1) % list.length;
-      const wrapped = idx !== -1 && nextIdx === 0;
+      const endExpirations = table?.combat_turn_id
+        ? tickConditionsForTurn(campaignId, table.combat_turn_id, 'end')
+        : [];
+      const fluidResult = table?.combat_turn_id
+        ? resolveFluidTurnEnd(campaignId, table.combat_turn_id)
+        : { changed: false };
+      // Un fluido puede volver a aplicar en la misma casilla una condición
+      // cuyo temporizador acaba de terminar. En ese caso no anunciamos que
+      // «se cae», porque mecánicamente continúa activa por la otra fuente.
+      const actualEndExpirations = endExpirations.filter((expiration) => {
+        const current = db.prepare('SELECT conditions FROM combatants WHERE id = ?').get(expiration.combatantId);
+        return !parseConditions(current?.conditions).includes(expiration.condition);
+      });
+      const tableAfterFluid = db
+        .prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?')
+        .get(campaignId);
+      if (!tableAfterFluid?.combat_active) {
+        return { ok: true, fluidChanged: fluidResult.changed, expiredConditions: actualEndExpirations };
+      }
+      // Los agonizantes sí conservan turno para su salvación. Solo se saltan
+      // enemigos derrotados y PJs estables o muertos.
+      const ordered = orderedCombatants(campaignId);
+      const list = ordered.filter(combatantTakesTurn);
+      if (list.length === 0) {
+        db.prepare('UPDATE game_tables SET combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+        return { ok: true, fluidChanged: fluidResult.changed, expiredConditions: actualEndExpirations };
+      }
+
+      const currentIdx = ordered.findIndex((combatant) => combatant.id === table?.combat_turn_id);
+      let next = list[0];
+      let wrapped = currentIdx === -1;
+      if (currentIdx !== -1) {
+        for (let step = 1; step <= ordered.length; step += 1) {
+          const candidateIndex = (currentIdx + step) % ordered.length;
+          const candidate = ordered[candidateIndex];
+          if (!list.some((combatant) => combatant.id === candidate.id)) continue;
+          next = candidate;
+          wrapped = currentIdx + step >= ordered.length;
+          break;
+        }
+      }
       const nextRound = (table?.combat_round ?? 1) + (wrapped ? 1 : 0);
 
-      startTurnFor(campaignId, list[nextIdx].id, nextRound);
-      return { ok: true };
+      startTurnFor(campaignId, next.id, nextRound);
+      return {
+        ok: true,
+        fluidChanged: fluidResult.changed,
+        expiredConditions: actualEndExpirations,
+      };
     }
 
     socket.on('combat:next', ({ campaignId }, cb) => {
@@ -1511,6 +1706,8 @@ export function setupSockets(io) {
       const result = advanceTurn(campaignId);
       if (result.error) return cb?.(result);
       broadcastCombat(campaignId);
+      emitConditionExpirations(campaignId, result.expiredConditions);
+      if (result.fluidChanged) notifyCampaignMap(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1536,6 +1733,8 @@ export function setupSockets(io) {
       const result = advanceTurn(campaignId);
       if (result.error) return cb?.(result);
       broadcastCombat(campaignId);
+      emitConditionExpirations(campaignId, result.expiredConditions);
+      if (result.fluidChanged) notifyCampaignMap(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1688,11 +1887,11 @@ export function setupSockets(io) {
       cb?.({ ok: true, held: outcome.held, total: roll.total, dc: targetDc });
     });
 
-    socket.on('combat:toggle-condition', ({ campaignId, combatantId, condition }, cb) => {
+    socket.on('combat:toggle-condition', ({ campaignId, combatantId, condition, duration, timing }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM gestiona las condiciones' });
 
-      const result = toggleCondition(campaignId, combatantId, condition);
+      const result = toggleCondition(campaignId, combatantId, condition, { duration, timing });
       if (!result.ok) return cb?.(result);
       broadcastCombat(campaignId);
       cb?.({ ok: true, conditions: result.conditions });
@@ -1720,8 +1919,20 @@ export function setupSockets(io) {
       if (!character || character.hp_current > 0) {
         return cb?.({ error: 'Ese personaje no está agonizando' });
       }
-      if (row.death_failures >= 3) {
-        return cb?.({ error: 'Ese personaje ya ha muerto' });
+      if (row.death_state === DEATH_STATES.STABLE) {
+        return cb?.({ error: 'Ese personaje ya está estable' });
+      }
+      if (row.death_state === DEATH_STATES.DEAD) return cb?.({ error: 'Ese personaje ya ha muerto' });
+      if (row.death_state !== DEATH_STATES.DYING) return cb?.({ error: 'Ese personaje no está agonizando' });
+
+      const table = db
+        .prepare('SELECT combat_active, combat_turn_id, combat_round FROM game_tables WHERE campaign_id = ?')
+        .get(campaignId);
+      if (!table?.combat_active || table.combat_turn_id !== row.id) {
+        return cb?.({ error: 'La salvación de muerte se tira durante el turno del personaje' });
+      }
+      if (row.death_save_round === table.combat_round) {
+        return cb?.({ error: 'Ya se ha tirado la salvación de muerte de este turno' });
       }
 
       const die = Number.isInteger(d20) ? d20 : Math.round(Number(roll?.total)) || 1;
@@ -1919,6 +2130,7 @@ export function setupSockets(io) {
       const naturalCrit = attackRoll.crit;
       const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= resolved.ac);
       const critical = hit && (naturalCrit || effects.autoCrit);
+      emitAttackVisual(campaignId, resolved, { hit, crit: critical });
       const sharedAttack = critical && !naturalCrit
         ? { ...attackRoll, crit: true, forcedCrit: true }
         : attackRoll;
@@ -1984,6 +2196,46 @@ export function setupSockets(io) {
       cb?.({ ok: true, hit, crit: critical, ac: resolved.ac, damage });
     });
 
+    // Apuntado visible: mientras alguien coloca una plantilla o elige objetivo,
+    // el resto de la mesa ve su mira en el tablero. Es información puramente
+    // visual (el conjuro se resuelve entero al lanzarlo), así que solo se
+    // comprueba que quien apunta maneje ese personaje y se recortan las
+    // casillas; nada de lo que llega aquí influye en ninguna regla.
+    let lastAimAt = 0;
+    socket.on('combate:apuntar', (payload) => {
+      const { campaignId, characterId, clear, floorId, origin, aim, cells, valid, spellName, element } = payload ?? {};
+      const now = Date.now();
+      if (now - lastAimAt < 50) return;
+      lastAimAt = now;
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return;
+      const character = db
+        .prepare('SELECT id, name, user_id FROM characters WHERE id = ? AND campaign_id = ?')
+        .get(characterId, campaignId);
+      if (!character) return;
+      if (membership.role !== 'dm' && character.user_id !== user.id) return;
+
+      if (clear) {
+        socket.to(roomName(campaignId)).emit('combate:apuntando', { casterId: character.id, clear: true });
+        return;
+      }
+      const cleanCell = (value) =>
+        Number.isInteger(value?.x) && Number.isInteger(value?.y) ? { x: value.x, y: value.y } : null;
+      const cleanAim = cleanCell(aim);
+      if (!cleanAim) return;
+      socket.to(roomName(campaignId)).emit('combate:apuntando', {
+        casterId: character.id,
+        casterName: character.name,
+        floorId: Number.isInteger(floorId) ? floorId : null,
+        origin: cleanCell(origin),
+        aim: cleanAim,
+        cells: (Array.isArray(cells) ? cells : []).map(cleanCell).filter(Boolean).slice(0, 400),
+        valid: valid !== false,
+        spellName: typeof spellName === 'string' ? spellName.slice(0, 60) : '',
+        element: typeof element === 'string' ? element.slice(0, 20) : null,
+      });
+    });
+
     // Conjuros lanzados desde el tablero: el cliente solo elige conjuro,
     // centro/dirección y espacio. Alcance, visión, objetivos de la plantilla,
     // CA, salvaciones y daño salen de la ficha y del SRD en el servidor.
@@ -2021,6 +2273,7 @@ export function setupSockets(io) {
       let targets = [];
       let targetForAttack = null;
       let aimCell;
+      let areaCells = [];
       if (area) {
         if (!Number.isInteger(aim?.x) || !Number.isInteger(aim?.y)) {
           return cb?.({ error: 'Elige un centro o una dirección para el conjuro' });
@@ -2047,13 +2300,13 @@ export function setupSockets(io) {
           sight
         );
         if (!aimCheck.ok) return cb?.({ error: aimCheck.error });
-        const cells = spellAreaCells({
+        areaCells = spellAreaCells({
           origin: { x: attackerToken.x, y: attackerToken.y },
           aim: aimCell,
           area,
           self: aimCheck.range === 0,
         });
-        targets = spellAreaTargets(campaignId, attackerToken, cells, {
+        targets = spellAreaTargets(campaignId, attackerToken, areaCells, {
           isDm: membership.role === 'dm',
         });
       } else {
@@ -2137,6 +2390,7 @@ export function setupSockets(io) {
         const message = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(shared) });
         io.to(roomName(campaignId)).emit('chat:new', message);
         outcomes.push({ target: targetForAttack, hit, saved: null, critical: spellAttackCritical });
+        emitAttackVisual(campaignId, targetForAttack, { hit, crit: spellAttackCritical });
       } else {
         for (const resolved of targets) {
           const saveAbility = data.dc?.dc_type?.index ?? null;
@@ -2232,6 +2486,21 @@ export function setupSockets(io) {
         body: `${character.name} lanza ${data.name}${requestedSlot > Number(data.level) ? ` con un espacio de nivel ${requestedSlot}` : ''}.`,
       });
       io.to(roomName(campaignId)).emit('chat:new', castNote);
+      // Destello del conjuro para toda la mesa: proyectil hasta el objetivo o
+      // estallido sobre la plantilla, en el color del tipo de daño. Es solo
+      // presentación de algo YA resuelto arriba, y viaja con lo que el tablero
+      // ya muestra (posiciones y casillas), sin datos ocultos del DM.
+      io.to(roomName(campaignId)).emit('combate:efecto', {
+        casterId: character.id,
+        floorId: attackerToken.floor_id,
+        origin: { x: attackerToken.x, y: attackerToken.y },
+        aim: aimCell,
+        cells: areaCells.slice(0, 400),
+        element: data.damage?.damage_type?.index ?? null,
+        projectile: !area,
+        spellName: data.name,
+      });
+      io.to(roomName(campaignId)).emit('combate:apuntando', { casterId: character.id, clear: true });
       if (mapId) touchMap(mapId);
       notifyCampaignMap(campaignId);
       broadcastCombat(campaignId);
@@ -2270,6 +2539,7 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      emitAttackVisual(campaignId, resolved, { hit, crit });
 
       const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
       const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
@@ -2425,6 +2695,7 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      emitAttackVisual(campaignId, resolved, { hit, crit });
 
       const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
       const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });

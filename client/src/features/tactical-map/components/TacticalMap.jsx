@@ -1,5 +1,6 @@
-import { Component, useEffect, useMemo, useState } from 'react';
-import { worldToGrid, gridToWorld } from '../domain/grid.js';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
+import { absoluteToBoard, boardToAbsolute, worldToGrid, gridToWorld } from '../domain/grid.js';
+import { elementColor, spellElement } from '../domain/elements.js';
 import { canMoveToken } from '../domain/permissions.js';
 import { cellKey } from '../domain/cells.js';
 import { buildBoardWalkable, findBoardPath, reachableWithin, buildBoardElevation } from '../domain/pathfinding.js';
@@ -7,9 +8,16 @@ import { buildBoardWalls } from '../domain/walls.js';
 import { computeBoardVision, hasBoardLineOfSight } from '../domain/vision.js';
 import { spellRangeSquares } from '../domain/combatGeometry.js';
 import { spellAimValidation, spellArea, spellAreaCells } from '../domain/spellAreas.js';
+import {
+  FLUID_TYPES,
+  fluidEffectSummary,
+  fluidTypesAlongBoardPath,
+  normalizeFluidEffects,
+} from '../domain/fluids.js';
 import { useRoom } from '../../../store/socket.js';
 import { toastError } from '../../../store/toast.js';
 import { rollPool } from '../../../lib/dice.js';
+import { api } from '../../../api.js';
 import TacticalMapCanvas from './TacticalMapCanvas.jsx';
 import AttackPanel from './AttackPanel.jsx';
 import MonsterAttackPanel from './MonsterAttackPanel.jsx';
@@ -25,6 +33,41 @@ import CombatAlert from './CombatAlert.jsx';
 import InitiativeOrder from './InitiativeOrder.jsx';
 import OpportunityPrompt from './OpportunityPrompt.jsx';
 import SpellPanel from './SpellPanel.jsx';
+
+const HAZARD_PRESETS = {
+  fuego: {
+    name: 'Muro de fuego', visualType: 'fuego', triggerTiming: 'both',
+    saveAbility: 'dex', saveDc: 14, damageDice: '2d6', damageType: 'fire', condition: null,
+    cells(center) {
+      return Array.from({ length: 6 }, (_, index) => ({ col: center.col + index - 2, row: center.row }));
+    },
+  },
+  telarana: {
+    name: 'Telaraña', visualType: 'telarana', triggerTiming: 'both',
+    saveAbility: 'dex', saveDc: 13, damageDice: '', damageType: null, condition: 'apresado',
+    cells(center) {
+      return Array.from({ length: 16 }, (_, index) => ({ col: center.col + (index % 4) - 1, row: center.row + Math.floor(index / 4) - 1 }));
+    },
+  },
+  nube: {
+    name: 'Nube hedionda', visualType: 'nube', triggerTiming: 'both',
+    saveAbility: 'con', saveDc: 14, damageDice: '', damageType: 'poison', condition: 'envenenado',
+    cells(center) {
+      const cells = [];
+      for (let row = -2; row <= 2; row += 1) for (let col = -2; col <= 2; col += 1) {
+        if (col * col + row * row <= 6) cells.push({ col: center.col + col, row: center.row + row });
+      }
+      return cells;
+    },
+  },
+  arcana: {
+    name: 'Zona arcana', visualType: 'arcana', triggerTiming: 'both',
+    saveAbility: 'wis', saveDc: 13, damageDice: '1d6', damageType: 'force', condition: null,
+    cells(center) {
+      return Array.from({ length: 9 }, (_, index) => ({ col: center.col + (index % 3) - 1, row: center.row + Math.floor(index / 3) - 1 }));
+    },
+  },
+};
 
 class CanvasErrorBoundary extends Component {
   constructor(props) {
@@ -91,6 +134,10 @@ export default function TacticalMap({
   const [spellError, setSpellError] = useState('');
   const [showSelectedVision, setShowSelectedVision] = useState(false);
   const [perceptionState, setPerceptionState] = useState({ busy: false, message: '' });
+  const [hazardTool, setHazardTool] = useState(null);
+  const [hazardDuration, setHazardDuration] = useState(3);
+  const [hazardError, setHazardError] = useState('');
+  const [hazardBusy, setHazardBusy] = useState(false);
   const selectedToken = useMemo(
     () => map.tokens.find((token) => token.id === selectedTokenId) || null,
     [map.tokens, selectedTokenId]
@@ -100,6 +147,10 @@ export default function TacticalMap({
 
   // --- Economía de turno (Fase 8.5) ---------------------------------
   const combat = useRoom((s) => s.combat);
+  const combatVisuals = useRoom((s) => s.combatVisuals);
+  const spellAims = useRoom((s) => s.spellAims);
+  const spellFx = useRoom((s) => s.spellFx);
+  const shareSpellAim = useRoom((s) => s.shareSpellAim);
   const endTurn = useRoom((s) => s.endTurn);
   const toggleTurnMode = useRoom((s) => s.toggleTurnMode);
   const specialAction = useRoom((s) => s.specialAction);
@@ -127,13 +178,33 @@ export default function TacticalMap({
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
   // ¿El combatiente activo es un PJ de este usuario? (el DM controla todos)
-  const activeToken = activeCombatant?.characterId
-    ? map.tokens.find((t) => t.characterId === activeCombatant.characterId) ?? null
+  const activeToken = activeCombatant
+    ? map.tokens.find((token) =>
+        activeCombatant.characterId
+          ? token.characterId === activeCombatant.characterId
+          : token.serverId === activeCombatant.mapTokenId
+      ) ?? null
     : null;
   // Es realmente TU turno (para el HUD y el botón "Terminar turno"): tu
   // propio personaje, nunca el DM salvo que además sea el dueño (caso raro,
   // PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
+
+  useEffect(() => {
+    if (!combat.active || !activeToken) return;
+    setCameraCommand({
+      type: 'focus',
+      x: activeToken.position.x,
+      z: activeToken.position.z,
+      nonce: `${combat.round}-${combat.turnId}`,
+    });
+  }, [activeToken?.id, combat.active, combat.round, combat.turnId]);
+
+  const latestCombatVisual = combatVisuals.at(-1);
+  useEffect(() => {
+    if (!latestCombatVisual?.strong) return;
+    setCameraCommand({ type: 'shake', strong: true, nonce: latestCombatVisual.id });
+  }, [latestCombatVisual?.id]);
 
   // --- Barra de estado (HUD) ------------------------------------------
   // El jugador siempre ve su propio personaje (útil saber tu HP aunque no
@@ -174,6 +245,15 @@ export default function TacticalMap({
   const boardWalkable = useMemo(() => buildBoardWalkable(map), [map]);
   const boardWalls = useMemo(() => buildBoardWalls(map), [map]);
   const boardElevation = useMemo(() => buildBoardElevation(map), [map]);
+  const moveFluidWarnings = useMemo(() => {
+    if (!movePreview?.path?.length) return [];
+    const effects = normalizeFluidEffects(map.fluidEffects);
+    return fluidTypesAlongBoardPath(map, movePreview.path).map((type) => ({
+      type,
+      label: FLUID_TYPES.find((entry) => entry.key === type)?.label ?? type,
+      summary: fluidEffectSummary(type, effects[type]),
+    }));
+  }, [map, movePreview]);
   const spellOrigin = hudToken ? worldToGrid(hudToken.position, map.gridSize) : null;
   const spellPreview = useMemo(() => {
     if (!spellCast?.data || !spellCast.aim || !spellOrigin) {
@@ -181,13 +261,16 @@ export default function TacticalMap({
     }
     const sight = hasBoardLineOfSight(map, spellOrigin, spellCast.aim);
     const validation = spellAimValidation(spellCast.data, spellOrigin, spellCast.aim, sight);
-    if (!validation.ok) return { validation, cells: [], affectedNames: [] };
-    const rawCells = spellAreaCells({
-      origin: spellOrigin,
-      aim: spellCast.aim,
-      area: spellCast.area,
-      self: validation.range === 0,
-    });
+    // La plantilla se pinta también cuando el apuntado NO es válido (en rojo):
+    // ver dónde caería el conjuro es justo lo que ayuda a corregir la mira.
+    const rawCells = spellCast.area
+      ? spellAreaCells({
+          origin: spellOrigin,
+          aim: spellCast.aim,
+          area: spellCast.area,
+          self: spellRangeSquares(spellCast.data) === 0,
+        })
+      : [];
     const keys = new Set(rawCells.map((cell) => `${cell.x},${cell.y}`));
     const affectedNames = spellCast.area
       ? map.tokens
@@ -207,6 +290,85 @@ export default function TacticalMap({
       affectedNames,
     };
   }, [hudToken, map, spellCast, spellOrigin?.col, spellOrigin?.row]);
+
+  // --- Apuntado visible en el tablero -------------------------------
+  // Tu propia mira se pinta en local (sin esperar al servidor) y la de los
+  // demás llega por socket ya en coordenadas absolutas del editor, así que
+  // hay que devolverlas al marco del tablero compuesto antes de dibujarlas.
+  const spellAimValid = spellPreview.validation?.ok !== false;
+  const aims = useMemo(() => {
+    const entries = [];
+    if (spellCast?.data && spellCast.aim && spellOrigin) {
+      entries.push({
+        id: 'propio',
+        origin: { col: spellOrigin.col, row: spellOrigin.row },
+        aim: { col: spellCast.aim.x, row: spellCast.aim.y },
+        cells: spellPreview.cells,
+        valid: spellAimValid,
+        color: elementColor(spellElement(spellCast.data)),
+      });
+    }
+    for (const remote of spellAims) {
+      if (remote.floorId != null && remote.floorId !== map.floorId) continue;
+      if (remote.casterId === hudCharacterId) continue;
+      if (!remote.aim) continue;
+      entries.push({
+        id: `lanzador-${remote.casterId}`,
+        origin: remote.origin ? absoluteToBoard(remote.origin, map) : null,
+        aim: absoluteToBoard(remote.aim, map),
+        cells: (remote.cells ?? []).map((cell) => absoluteToBoard(cell, map)),
+        valid: remote.valid !== false,
+        color: elementColor(remote.element),
+        label: [remote.casterName, remote.spellName].filter(Boolean).join(' · '),
+      });
+    }
+    return entries;
+  }, [hudCharacterId, map, spellAims, spellAimValid, spellCast, spellOrigin?.col, spellOrigin?.row, spellPreview.cells]);
+
+  // Destellos de conjuros ya resueltos (los emite el servidor al lanzar)
+  const boardSpellFx = useMemo(
+    () => spellFx
+      .filter((fx) => fx.aim && (fx.floorId == null || fx.floorId === map.floorId))
+      .map((fx) => ({
+        ...fx,
+        origin: fx.origin ? absoluteToBoard(fx.origin, map) : null,
+        aim: absoluteToBoard(fx.aim, map),
+        cells: (fx.cells ?? []).map((cell) => absoluteToBoard(cell, map)),
+        color: elementColor(fx.element),
+      })),
+    [map, spellFx]
+  );
+
+  // Comparte la mira con la mesa cuando cambia (y la retira al cerrar el
+  // panel o cambiar de personaje). La clave evita reenviar en cada render.
+  const aimKey = spellCast?.data && spellCast.aim && spellOrigin
+    ? `${map.floorId}:${spellCast.spell.index}:${spellCast.aim.x}:${spellCast.aim.y}:${spellOrigin.col}:${spellOrigin.row}:${spellAimValid}`
+    : '';
+  const aimSharedRef = useRef(false);
+  useEffect(() => {
+    if (!hudCharacterId) return;
+    if (!aimKey) {
+      if (aimSharedRef.current) shareSpellAim(hudCharacterId, null);
+      aimSharedRef.current = false;
+      return;
+    }
+    shareSpellAim(hudCharacterId, {
+      floorId: map.floorId,
+      origin: boardToAbsolute(spellOrigin, map),
+      aim: boardToAbsolute({ col: spellCast.aim.x, row: spellCast.aim.y }, map),
+      cells: spellPreview.cells.map((cell) => boardToAbsolute(cell, map)),
+      valid: spellAimValid,
+      spellName: spellCast.spell.name,
+      element: spellElement(spellCast.data),
+    });
+    aimSharedRef.current = true;
+  }, [aimKey, hudCharacterId]);
+
+  // Al desmontar el tablero (o cambiar de personaje en el HUD) la mira que
+  // quedó publicada debe irse con él, no envejecer sola en la mesa.
+  useEffect(() => () => {
+    if (aimSharedRef.current && hudCharacterId) shareSpellAim(hudCharacterId, null);
+  }, [hudCharacterId]);
   const selectedHasHighGround = (() => {
     if (!selectedToken || !combatTarget) return false;
     const attackerCell = worldToGrid(selectedToken.position, map.gridSize);
@@ -335,6 +497,34 @@ export default function TacticalMap({
   // hasta esa casilla y muestra la vista previa (el movimiento espera a la
   // confirmación); clic fuera del suelo pisable = deseleccionar.
   function handleGroundClick(point) {
+    if (hazardTool && isDm) {
+      const preset = HAZARD_PRESETS[hazardTool];
+      const center = worldToGrid(point, map.gridSize);
+      const cells = preset.cells(center).filter((cell) => boardWalkable.has(cellKey(cell.col, cell.row)));
+      if (!cells.length) {
+        setHazardError('La zona debe caer sobre casillas transitables.');
+        return;
+      }
+      setHazardBusy(true);
+      setHazardError('');
+      api(`/campaigns/${campaignId}/mapas/${map.serverMapId}/zonas`, {
+        method: 'POST',
+        body: {
+          ...preset,
+          cells: cells.map((cell) => ({
+            floorId: map.floorId,
+            x: cell.col + (map.origin?.x ?? 0),
+            y: cell.row + (map.origin?.y ?? 0),
+          })),
+          duration: hazardDuration,
+          halfOnSave: true,
+        },
+      })
+        .then(() => setHazardTool(null))
+        .catch((error) => setHazardError(error.message || 'No se pudo crear la zona.'))
+        .finally(() => setHazardBusy(false));
+      return;
+    }
     if (spellCast?.data) {
       const cell = worldToGrid(point, map.gridSize);
       setSpellCast((current) => ({
@@ -539,11 +729,63 @@ export default function TacticalMap({
           terrainCells={terrainCells}
           pathCells={movePreview?.path ?? []}
           visionCells={visionCells}
-          spellCells={spellPreview.cells}
+          aims={aims}
+          spellFx={boardSpellFx}
+          activeTokenId={activeToken?.id ?? null}
+          combatVisuals={combatVisuals}
         />
       </CanvasErrorBoundary>
 
       <CombatAlert />
+      {isDm && (
+        <div className="absolute left-1/2 top-3 z-20 w-[22rem] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-sm border border-gold/25 bg-night-900/95 p-2.5 text-bone shadow-xl backdrop-blur">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 font-display text-xs uppercase tracking-widest text-gold">Zonas</span>
+            {Object.entries(HAZARD_PRESETS).map(([key, preset]) => (
+              <button
+                key={key}
+                type="button"
+                disabled={!combat.active || hazardBusy}
+                onClick={() => {
+                  setHazardTool((current) => current === key ? null : key);
+                  setHazardError('');
+                }}
+                className={`rounded-sm border px-2 py-1 text-[0.65rem] ${hazardTool === key ? 'border-gold bg-gold/15 text-gold' : 'border-bone/20 text-bone/65 hover:border-gold/50'}`}
+              >
+                {preset.name}
+              </button>
+            ))}
+            <label className="ml-auto flex items-center gap-1 text-[0.65rem] text-bone/55">
+              Rondas
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={hazardDuration}
+                onChange={(event) => setHazardDuration(Math.max(1, Math.min(20, Number(event.target.value) || 1)))}
+                className="w-11 rounded-sm border border-bone/20 bg-night-950 px-1 py-0.5 text-center text-bone"
+              />
+            </label>
+          </div>
+          {hazardTool && <p className="mt-1.5 text-[0.68rem] text-gold/70">Pulsa una casilla para colocar {HAZARD_PRESETS[hazardTool].name.toLowerCase()}.</p>}
+          {(map.hazardZones ?? []).length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1 border-t border-bone/10 pt-1.5">
+              {(map.hazardZones ?? []).map((zone) => (
+                <button
+                  key={zone.id}
+                  type="button"
+                  title={`Retirar ${zone.name}`}
+                  onClick={() => api(`/campaigns/${campaignId}/mapas/${map.serverMapId}/zonas/${zone.id}`, { method: 'DELETE' }).catch((error) => setHazardError(error.message))}
+                  className="rounded-full border border-blood/30 px-2 py-0.5 text-[0.62rem] text-bone/60 hover:border-blood hover:text-blood"
+                >
+                  {zone.name} ×
+                </button>
+              ))}
+            </div>
+          )}
+          {hazardError && <p className="mt-1 text-[0.65rem] text-blood">{hazardError}</p>}
+        </div>
+      )}
       {combat.opportunities?.[0] && (
         <OpportunityPrompt
           key={combat.opportunities[0].id}
@@ -588,7 +830,9 @@ export default function TacticalMap({
             const response = await castBoardSpell({
               characterId: hudCharacterId,
               spellIndex: spellCast.spell.index,
-              aim: spellCast.aim,
+              // El servidor valida alcance y plantilla contra las coordenadas
+              // absolutas del editor, no contra las del tablero compuesto
+              aim: boardToAbsolute({ col: spellCast.aim.x, row: spellCast.aim.y }, map),
               target: spellCast.target,
               slotLevel: spellCast.slotLevel,
             });
@@ -791,6 +1035,17 @@ export default function TacticalMap({
                   </span>
                 )}
               </p>
+              {moveFluidWarnings.length > 0 && (
+                <div className="mt-2 rounded-sm border border-blood/30 bg-blood/10 px-2 py-1.5 text-xs text-bone/70">
+                  <p className="font-medium text-blood/90">El trayecto activa fluidos:</p>
+                  {moveFluidWarnings.map((warning) => (
+                    <p key={warning.type} className="mt-0.5">
+                      {warning.label}: {warning.summary}.
+                    </p>
+                  ))}
+                  <p className="mt-1 text-bone/45">El servidor resuelve tiradas, daño y estados al confirmar.</p>
+                </div>
+              )}
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => confirmMove()}

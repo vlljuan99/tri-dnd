@@ -12,7 +12,9 @@ name: tridnd
 
 services:
   app:
-    image: tridnd:latest
+    # `.deploy.env` fija esta referencia a `tridnd:<commit-sha>`. El valor
+    # local solo es un fallback explícito para instalaciones nuevas.
+    image: ${TRIDND_IMAGE:-tridnd:local}
     container_name: tridnd-app
     restart: unless-stopped
     env_file:

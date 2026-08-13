@@ -5,7 +5,14 @@ import http from 'node:http';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
-import { PORT, UPLOADS_ROOT } from './config.js';
+import {
+  APP_VERSION,
+  BUILD_TIME,
+  DATA_DIR,
+  GIT_SHA,
+  PORT,
+  UPLOADS_ROOT,
+} from './config.js';
 import { runMigrations, db } from './db.js';
 import { authRouter } from './auth.js';
 import { srdRouter } from './routes/srd.js';
@@ -29,7 +36,35 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use('/uploads', express.static(UPLOADS_ROOT));
 
-app.get('/api/health', (req, res) => res.json({ ok: true, app: 'TriDnD' }));
+app.get('/api/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    db.prepare('SELECT 1 AS ok').get();
+    fs.accessSync(DATA_DIR, fs.constants.R_OK | fs.constants.W_OK);
+    res.json({
+      ok: true,
+      app: 'TriDnD',
+      version: APP_VERSION,
+      commit: GIT_SHA,
+      builtAt: BUILD_TIME,
+      database: {
+        ok: true,
+        migration: db.pragma('user_version', { simple: true }),
+        storageWritable: true,
+      },
+    });
+  } catch (error) {
+    console.error('[health] La comprobación de disponibilidad ha fallado:', error);
+    res.status(503).json({
+      ok: false,
+      app: 'TriDnD',
+      version: APP_VERSION,
+      commit: GIT_SHA,
+      builtAt: BUILD_TIME,
+      database: { ok: false },
+    });
+  }
+});
 app.use('/api/auth', authRouter);
 app.use('/api/srd', srdRouter);
 app.use('/api/biblioteca', libraryRouter);

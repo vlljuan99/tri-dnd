@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serializeToken } from '../mapLibrary.js';
+import { serializeRoom, serializeToken } from '../mapLibrary.js';
 
 const tokenRow = {
   id: 7,
@@ -40,4 +40,21 @@ test('el jugador no recibe consecuencias, CD ni enlaces a fichas ocultas', () =>
   assert.equal('perceptionDc' in token, false);
   assert.equal('monsterIndex' in token, false);
   assert.equal('characterId' in token, false);
+});
+
+test('los fluidos se serializan para DM y jugador', () => {
+  const row = {
+    id: 2,
+    floor_id: 1,
+    name: 'Galería inundada',
+    x: 0,
+    y: 0,
+    width: 3,
+    height: 2,
+    fluid_cells: '[[0,0,"agua"],[1,0,"arcana"]]',
+    revealed: 1,
+  };
+
+  assert.deepEqual(serializeRoom(row).fluidCells, [[0, 0, 'agua'], [1, 0, 'arcana']]);
+  assert.deepEqual(serializeRoom(row, { forPlayer: true }).fluidCells, [[0, 0, 'agua'], [1, 0, 'arcana']]);
 });

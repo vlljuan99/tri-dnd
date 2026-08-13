@@ -27,6 +27,67 @@ function OverrideNumber({ label, value, onChange, placeholder }) {
   );
 }
 
+function BossActionEditor({ title, actions, legendary = false, onChange, onSave }) {
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between">
+        <span className={labelClass}>{title}</span>
+        <button
+          type="button"
+          onClick={() => onChange([...(actions ?? []), { name: 'Nueva acción', desc: '', ...(legendary ? { cost: 1 } : {}) }])}
+          className="text-xs text-gold/80 hover:text-gold"
+        >
+          + Acción
+        </button>
+      </div>
+      {(actions ?? []).map((action, index) => (
+        <div key={index} className="mt-1.5 rounded-sm border border-bone/10 p-1.5">
+          <div className="flex gap-1">
+            <input
+              value={action.name ?? ''}
+              onChange={(event) => onChange(actions.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))}
+              onBlur={onSave}
+              placeholder="Nombre"
+              className="min-w-0 flex-1 rounded-sm border border-bone/15 bg-night-950 px-2 py-1 text-xs text-bone"
+            />
+            {legendary && (
+              <input
+                type="number"
+                min={1}
+                max={3}
+                value={action.cost ?? 1}
+                onChange={(event) => onChange(actions.map((item, itemIndex) => itemIndex === index ? { ...item, cost: Math.max(1, Math.min(3, Number(event.target.value) || 1)) } : item))}
+                onBlur={onSave}
+                title="Coste"
+                className="w-10 rounded-sm border border-bone/15 bg-night-950 px-1 text-center text-xs text-bone"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                const next = actions.filter((_, itemIndex) => itemIndex !== index);
+                onChange(next);
+                onSave(next);
+              }}
+              className="px-1 text-bone/40 hover:text-blood"
+            >
+              ×
+            </button>
+          </div>
+          <textarea
+            rows={2}
+            value={action.desc ?? ''}
+            onChange={(event) => onChange(actions.map((item, itemIndex) => itemIndex === index ? { ...item, desc: event.target.value } : item))}
+            onBlur={onSave}
+            placeholder="Efecto narrado"
+            className="mt-1 w-full resize-y rounded-sm border border-bone/15 bg-night-950 px-2 py-1 text-xs text-bone"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Panel lateral del marcador seleccionado (enemigo, aliado, objeto o trampa)
 export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, onSaveTemplate }) {
   const [name, setName] = useState(token.name);
@@ -58,6 +119,9 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
       if (Number.isInteger(next[k])) clean[k] = next[k];
     }
     if (Array.isArray(next.traits) && next.traits.length) clean.traits = next.traits;
+    if (Array.isArray(next.legendaryActions) && next.legendaryActions.length) clean.legendaryActions = next.legendaryActions;
+    if (Array.isArray(next.lairActions) && next.lairActions.length) clean.lairActions = next.lairActions;
+    if (Number.isInteger(next.legendaryPointsMax)) clean.legendaryPointsMax = next.legendaryPointsMax;
     onPatch(token.id, { overrides: clean });
   }
 
@@ -198,6 +262,28 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
               </div>
             ))}
           </div>
+
+          <div className="mt-3 grid max-w-[8rem] grid-cols-1 gap-2">
+            <OverrideNumber
+              label="Puntos legendarios"
+              value={overrides.legendaryPointsMax}
+              onChange={(value) => setOv('legendaryPointsMax', value == null ? null : Math.max(1, Math.min(5, value)))}
+              placeholder="3"
+            />
+          </div>
+          <BossActionEditor
+            title="Acciones legendarias"
+            legendary
+            actions={overrides.legendaryActions ?? []}
+            onChange={(legendaryActions) => setOv('legendaryActions', legendaryActions)}
+            onSave={(legendaryActions) => saveOverrides(legendaryActions ? { ...overrides, legendaryActions } : overrides)}
+          />
+          <BossActionEditor
+            title="Acciones de guarida"
+            actions={overrides.lairActions ?? []}
+            onChange={(lairActions) => setOv('lairActions', lairActions)}
+            onSave={(lairActions) => saveOverrides(lairActions ? { ...overrides, lairActions } : overrides)}
+          />
         </div>
       )}
 

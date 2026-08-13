@@ -6,7 +6,9 @@ import { requireAuth } from '../auth.js';
 import { AVATAR_UPLOADS_DIR } from '../config.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
-import { notifyCampaignMap } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyCombat, notifyCombatVisual } from '../services/liveMap.js';
+import { resetDeathSaves, startDeathSaves } from '../services/turnEconomy.js';
+import { DEATH_STATES } from '../services/combatLifecycle.js';
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -153,7 +155,7 @@ const UPDATABLE = {
   campaign_id: (v) => v === null || Number.isInteger(v),
   level: (v) => Number.isInteger(v) && v >= 1 && v <= 20,
   hp_max: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
-  hp_current: (v) => Number.isInteger(v) && v >= -99 && v <= 999,
+  hp_current: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
   hp_temp: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
   ac: (v) => Number.isInteger(v) && v >= 0 && v <= 40,
   speed: (v) => Number.isInteger(v) && v >= 0 && v <= 300,
@@ -245,6 +247,24 @@ charactersRouter.put('/:id', (req, res) => {
     `UPDATE characters SET ${updates.join(', ')}, updated_at = datetime('now') WHERE id = ?`
   ).run(...values, row.id);
   const updated = db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id);
+
+  if ('hp_current' in plainUpdates && updated.campaign_id) {
+    const combatant = db
+      .prepare("SELECT id, death_state FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
+      .get(updated.campaign_id, updated.id);
+    if (combatant) {
+      if (updated.hp_current > 0) resetDeathSaves(combatant.id);
+      else if (row.hp_current > 0 || combatant.death_state === DEATH_STATES.NORMAL) startDeathSaves(combatant.id);
+      notifyCombat(updated.campaign_id);
+    }
+    if (updated.hp_current > row.hp_current) {
+      notifyCombatVisual(updated.campaign_id, {
+        type: 'heal',
+        characterId: updated.id,
+        value: updated.hp_current - row.hp_current,
+      });
+    }
+  }
 
   // Curarse o cambiar HP/CA desde la ficha refresca las barras del tablero
   if (

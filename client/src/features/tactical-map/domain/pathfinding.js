@@ -1,5 +1,6 @@
 import { cellKey } from './cells.js';
 import { wallBlocksStep } from './walls.js';
+import { normalizeFluidEffects } from './fluids.js';
 
 // Movimiento por camino real (estilo Baldur's Gate): espejo cliente del
 // Dijkstra de server/src/services/pathfinding.js, operando en coordenadas
@@ -41,6 +42,7 @@ function climbCost(elevation, fromKey, toKey) {
 // desactivadas y obstáculos, igual que en el servidor.
 export function buildBoardWalkable(map) {
   const walkable = new Map();
+  const fluidEffects = normalizeFluidEffects(map.fluidEffects);
   for (const room of map.rooms ?? []) {
     const blocked = new Set(
       [...(room.disabledCells ?? []), ...(room.obstacleCells ?? [])].map(([c, r]) => cellKey(c, r))
@@ -48,11 +50,17 @@ export function buildBoardWalkable(map) {
     const terrain = new Map(
       (room.terrainCells ?? []).map(([c, r, cost]) => [cellKey(c, r), Math.max(1, Math.min(10, Number(cost) || 2))])
     );
+    const fluids = new Map(
+      (room.fluidCells ?? []).map(([c, r, type]) => [cellKey(c, r), type])
+    );
     for (let r = 0; r < room.height; r += 1) {
       for (let c = 0; c < room.width; c += 1) {
         if (blocked.has(cellKey(c, r))) continue;
         const key = cellKey(room.col + c, room.row + r);
-        const cost = terrain.get(cellKey(c, r)) ?? 1;
+        const terrainCost = terrain.get(cellKey(c, r)) ?? 1;
+        const fluidType = fluids.get(cellKey(c, r));
+        const fluidCost = fluidType ? fluidEffects[fluidType]?.movementCost ?? 1 : 1;
+        const cost = Math.max(terrainCost, fluidCost);
         walkable.set(key, Math.min(walkable.get(key) ?? Infinity, cost));
       }
     }

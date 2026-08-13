@@ -6,6 +6,7 @@ import {
   roomWallEdgeKey,
   samplePointerSegment,
 } from '../lib/wallBrush.js';
+import { FLUID_TYPES } from '../../tactical-map/domain/fluids.js';
 
 // Lienzo 2D del editor: plano cenital de una planta con sus salas y puertas.
 // Coordenadas en casillas del lienzo de la planta (pueden ser negativas);
@@ -142,6 +143,8 @@ const TOKEN_COLORS = {
   trampa: '#8a5fb5',
 };
 
+const FLUID_COLORS = Object.fromEntries(FLUID_TYPES.map((type) => [type.key, type.color]));
+
 export default function EditorCanvas({
   floor,
   doors,
@@ -164,6 +167,7 @@ export default function EditorCanvas({
   onWallStroke,
   onElevationCellClick,
   onLightCellClick,
+  onFluidCellClick,
   onMoveRoom,
   onMoveToken,
 }) {
@@ -438,6 +442,18 @@ export default function EditorCanvas({
           !r.disabledCells.some(([c, w]) => c === cellPos.x - r.x && w === cellPos.y - r.y)
       );
       if (target) onLightCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
+    } else if (mode === 'fluid') {
+      const target = rooms.find(
+        (candidate) =>
+          cellPos.x >= candidate.x &&
+          cellPos.x < candidate.x + candidate.width &&
+          cellPos.y >= candidate.y &&
+          cellPos.y < candidate.y + candidate.height &&
+          !candidate.disabledCells.some(
+            ([c, r]) => c === cellPos.x - candidate.x && r === cellPos.y - candidate.y
+          )
+      );
+      if (target) onFluidCellClick({ roomId: target.id, x: cellPos.x, y: cellPos.y });
     } else if (!room) {
       onSelect(null);
     }
@@ -564,7 +580,7 @@ export default function EditorCanvas({
         className={
           mode === 'add-room' || mode === 'token'
             ? 'cursor-copy'
-            : mode === 'door' || mode === 'obstacle' || mode === 'terrain' || mode === 'spawn' || mode === 'wall' || mode === 'elevation' || mode === 'light'
+            : mode === 'door' || mode === 'obstacle' || mode === 'terrain' || mode === 'spawn' || mode === 'wall' || mode === 'elevation' || mode === 'light' || mode === 'fluid'
               ? 'cursor-crosshair'
               : 'cursor-default'
         }
@@ -601,6 +617,30 @@ export default function EditorCanvas({
                   fill={room.revealed ? '#3a3128' : '#241f1a'}
                 />
               )}
+              {/* Fluidos: lámina tintada con una onda simple de referencia.
+                  La animación procedimental completa vive en el tablero 3D. */}
+              {(room.fluidCells ?? []).map(([c, r, type]) => (
+                <g key={`fluid-${c},${r}`} className="pointer-events-none" opacity={ambientDim}>
+                  <rect
+                    x={pos.left + c * cell + 1}
+                    y={pos.top + r * cell + 1}
+                    width={cell - 2}
+                    height={cell - 2}
+                    fill={FLUID_COLORS[type] ?? '#4a8bd6'}
+                    fillOpacity={type === 'niebla' ? 0.35 : 0.62}
+                  />
+                  <path
+                    d={`M ${pos.left + c * cell + cell * 0.14} ${pos.top + r * cell + cell * 0.56}
+                        Q ${pos.left + c * cell + cell * 0.34} ${pos.top + r * cell + cell * 0.38},
+                          ${pos.left + c * cell + cell * 0.54} ${pos.top + r * cell + cell * 0.56}
+                        T ${pos.left + c * cell + cell * 0.88} ${pos.top + r * cell + cell * 0.5}`}
+                    fill="none"
+                    stroke="#e8f7f2"
+                    strokeOpacity={0.72}
+                    strokeWidth={Math.max(1, cell * 0.06)}
+                  />
+                </g>
+              ))}
               {room.disabledCells.map(([c, r]) => (
                 <rect
                   key={`${c},${r}`}
