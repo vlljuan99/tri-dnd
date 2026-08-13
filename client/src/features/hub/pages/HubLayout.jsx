@@ -29,7 +29,7 @@ export default function HubLayout() {
   // en su taller y la escaramuza va directa a su tablero (al editor si nace en
   // blanco, a la mesa si ya viene poblada por un escenario o una plantilla).
   const createCampaign = useCallback(
-    async (campaignType, { name = '', presetId = null, templateId = null } = {}) => {
+    async (campaignType, { name = '', presetId = null, templateId = null, characterId = null } = {}) => {
       setCreating(true);
       setError('');
       try {
@@ -37,6 +37,7 @@ export default function HubLayout() {
         if (name.trim()) body.name = name.trim();
         if (presetId) body.presetId = presetId;
         if (templateId != null) body.templateId = templateId;
+        if (characterId != null) body.characterId = characterId;
         const { campaign } = await api('/campaigns', { method: 'POST', body });
         const seeded = Boolean(presetId || templateId != null);
         navigate(

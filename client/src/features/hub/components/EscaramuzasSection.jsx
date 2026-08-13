@@ -69,7 +69,7 @@ export default function EscaramuzasSection() {
             compact
             onDelete={requestDeletion}
             onLeave={requestLeaving}
-            extra={
+            extra={!campaign.soloMode ? (
               <button
                 type="button"
                 disabled={savingId === campaign.id}
@@ -83,7 +83,7 @@ export default function EscaramuzasSection() {
                     ? 'Guardado ✓'
                     : 'Guardar como escenario'}
               </button>
-            }
+            ) : null}
           />
         ))}
       </ul>

@@ -22,6 +22,7 @@ export default function CampaignGamePage() {
   const sendPing = useRoom((s) => s.sendPing);
   const isLive = useRoom((s) => s.isLive);
   const setLive = useRoom((s) => s.setLive);
+  const setEnemyAi = useRoom((s) => s.setEnemyAi);
   const removedCampaignId = useRoom((s) => s.removedCampaignId);
 
   // Unirse a la sala de la campaña para recibir 'mapa:actualizado' aunque
@@ -35,16 +36,24 @@ export default function CampaignGamePage() {
   const [campaignError, setCampaignError] = useState('');
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [doorError, setDoorError] = useState('');
+  const [directorError, setDirectorError] = useState('');
   const [floorId, setFloorId] = useState(null);
   const [playerView, setPlayerView] = useState(false);
   const combat = useRoom((s) => s.combat);
   const isDm = campaign?.role === 'dm';
+  const isSolo = Boolean(campaign?.soloMode);
   const ownCharacterId = campaignCharacters.find((c) => c.user_id === user?.id)?.id ?? null;
   const playerCount = campaignMembers.filter((m) => m.role === 'jugador').length;
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
   const isMyTurn = Boolean(activeCombatant && ownCharacterId && activeCombatant.characterId === ownCharacterId);
+
+  async function toggleDirector() {
+    setDirectorError('');
+    const response = await setEnemyAi(!combat.enemyAiEnabled);
+    if (response?.error) setDirectorError(response.error);
+  }
 
   // Abrir una puerta (o alternarla, si eres DM). El nuevo estado del mapa
   // llega a todos —incluido quien pulsa— por el evento de socket.
@@ -249,6 +258,11 @@ export default function CampaignGamePage() {
                 Modo DM
               </span>
             )}
+            {isSolo && (
+              <span className="rounded-sm border border-ember/50 bg-night-900/90 px-2 py-0.5 font-display text-xs uppercase tracking-widest text-ember">
+                Sin DM
+              </span>
+            )}
             {(campaign?.campaignType ?? (campaign?.hasWorldMap ? 'campana' : 'escaramuza')) === 'campana' && (
               <span
                 className="rounded-sm border border-gold/30 bg-night-950/60 px-2 py-0.5 font-display text-xs tracking-wide text-gold/80"
@@ -259,7 +273,7 @@ export default function CampaignGamePage() {
             )}
           </div>
           <p className="mt-1 text-xs text-bone/60">
-            {user?.displayName || user?.username || 'Usuario'} · {isDm ? 'DM' : 'Jugador'}
+            {user?.displayName || user?.username || 'Usuario'} · {isSolo ? 'Aventurero' : isDm ? 'DM' : 'Jugador'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -309,8 +323,32 @@ export default function CampaignGamePage() {
               {isLive ? 'Cerrar sesión de juego' : 'Abrir sesión de juego'}
             </button>
           )}
+          {isSolo && (
+            <button
+              type="button"
+              onClick={toggleDirector}
+              title="Pausa o reanuda los turnos automáticos de los enemigos"
+              className={`rounded-sm border px-3 py-1 font-display text-sm tracking-wide ${
+                combat.enemyAiEnabled
+                  ? 'border-ember/60 text-ember hover:bg-ember/10'
+                  : 'border-bone/30 text-bone/65 hover:border-bone/60'
+              }`}
+            >
+              Director {combat.enemyAiEnabled ? 'activo' : 'pausado'}
+            </button>
+          )}
         </div>
       </header>
+
+      {directorError && (
+        <p className="border-b border-blood/30 bg-blood/10 px-4 py-2 text-sm text-blood">{directorError}</p>
+      )}
+      {isSolo && !ownCharacterId && (
+        <p className="border-b border-ember/30 bg-ember/10 px-4 py-2 text-sm text-bone">
+          Esta partida antigua no tiene un aventurero asignado. Vincula un PJ completo desde{' '}
+          <Link to="/personajes" className="font-semibold text-gold underline">Personajes</Link> antes de jugar.
+        </p>
+      )}
 
       {renderBody()}
     </div>

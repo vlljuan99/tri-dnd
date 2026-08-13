@@ -1,5 +1,5 @@
-// Escaramuzas predefinidas: escenarios de fábrica listos para jugar, pensados
-// para grupos de hasta 6 jugadores. Cada uno es un snapshot de mapa con el
+// Escaramuzas predefinidas: escenarios de fábrica listos para jugar sin DM,
+// pensados para probar un PJ. Cada uno es un snapshot de mapa con el
 // mismo formato que las plantillas del DM (services/templates.js), así que se
 // instancian con `instantiateMap` sin ninguna ruta especial.
 //
@@ -79,10 +79,16 @@ function ravinePreset() {
 
   return {
     id: 'paso-del-cuervo',
+    previewUrl: '/skirmishes/paso-del-cuervo.webp',
+    enemyAi: true,
+    soloMode: true,
     name: 'Emboscada en el Paso del Cuervo',
     summary:
       'Una caravana entra por el desfiladero y los bandidos esperan en las repisas. Cota alta, barro y lluvia al atardecer: quien se quede en el fondo del paso lo va a pasar mal.',
-    players: 6,
+    briefing:
+      'La lluvia borra el camino de vuelta. Al entrar en el Paso del Cuervo, una cuerda cae tras de ti y siluetas armadas ocupan las repisas. Encuentra una salida y rompe la emboscada.',
+    objectives: ['Sobrevive a la emboscada', 'Atraviesa el desfiladero', 'Derrota a quien dirige a los bandidos'],
+    players: 1,
     suggestedLevel: '3-4',
     tags: ['exterior', 'elevación', 'terreno difícil', 'clima'],
     map: {
@@ -102,6 +108,7 @@ function ravinePreset() {
           rooms: [
             {
               name: 'El paso',
+              backgroundUrl: '/skirmishes/paso-del-cuervo.webp',
               x: 0,
               y: 0,
               width,
@@ -196,10 +203,16 @@ function cryptPreset() {
 
   return {
     id: 'cripta-anegada',
+    previewUrl: '/skirmishes/cripta-anegada.webp',
+    enemyAi: true,
+    soloMode: true,
     name: 'La Cripta Anegada',
     summary:
       'Tres estancias a oscuras, agua hasta las rodillas y una puerta atrancada al fondo. Los esqueletos de la nave son el ruido; lo que espera en el sagrario es el problema.',
-    players: 6,
+    briefing:
+      'Las campanas de la cripta llevan doce noches sonando bajo el agua. Debes entrar, cruzar la nave anegada y silenciar aquello que se ha despertado en el sagrario.',
+    objectives: ['Explora la cripta', 'Supera la puerta del sagrario', 'Silencia al guardián de los Doce'],
+    players: 1,
     suggestedLevel: '4-5',
     tags: ['interior', 'oscuridad', 'agua', 'puertas', 'trampa'],
     map: {
@@ -253,6 +266,7 @@ function cryptPreset() {
             },
             {
               name: 'Nave anegada',
+              backgroundUrl: '/skirmishes/cripta-anegada.webp',
               x: 10,
               y: 0,
               width: naveWidth,
@@ -356,10 +370,16 @@ function forgePreset() {
 
   return {
     id: 'puente-igneo',
+    previewUrl: '/skirmishes/puente-igneo.webp',
+    enemyAi: true,
+    soloMode: true,
     name: 'La Fundición del Puente Ígneo',
     summary:
       'Una fosa de colada parte la sala en dos y solo la cruza una pasarela de dos casillas. Arriba, en las andaderas, espera lo que el capataz no quiso bajar.',
-    players: 6,
+    briefing:
+      'La Fundición de Escoria Roja vuelve a arder sin herreros. Cruza la fosa, alcanza las andaderas y apaga la criatura que alimenta el horno antes de que la estructura ceda.',
+    objectives: ['Cruza la fosa de colada', 'Alcanza las andaderas', 'Derrota al amo de la fundición'],
+    players: 1,
     suggestedLevel: '6-7',
     tags: ['interior', 'lava', 'dos plantas', 'elevación'],
     map: {
@@ -379,6 +399,7 @@ function forgePreset() {
           rooms: [
             {
               name: 'Fosa de colada',
+              backgroundUrl: '/skirmishes/puente-igneo.webp',
               x: 0,
               y: 0,
               width,
@@ -492,7 +513,10 @@ export function listSkirmishPresets() {
   return PRESETS.map((preset) => {
     const rooms = preset.map.floors.flatMap((floor) => floor.rooms);
     const enemies = rooms.reduce(
-      (total, room) => total + (room.tokens ?? []).filter((token) => (token.kind ?? 'enemigo') === 'enemigo').length,
+      (total, room) => {
+        const count = (room.tokens ?? []).filter((token) => (token.kind ?? 'enemigo') === 'enemigo').length;
+        return total + (preset.soloMode ? Math.min(count, 2) : count);
+      },
       0
     );
     return {
@@ -502,6 +526,9 @@ export function listSkirmishPresets() {
       players: preset.players,
       suggestedLevel: preset.suggestedLevel,
       tags: preset.tags,
+      previewUrl: preset.previewUrl,
+      enemyAi: preset.enemyAi === true,
+      soloMode: preset.soloMode === true,
       floors: preset.map.floors.length,
       rooms: rooms.length,
       enemies,

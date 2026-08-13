@@ -5,20 +5,23 @@ import { instantiateMap } from './templates.js';
 
 // Sembrado de una escaramuza a partir de un snapshot de mapa: sirve tanto para
 // los escenarios de fábrica (services/skirmishPresets.js) como para las
-// plantillas propias del DM. La partida queda lista para dirigir: tablero
+// plantillas propias del DM. La partida queda lista para jugar: tablero
 // activo, salas de inicio abiertas y los enemigos a la vista ya en el tracker
 // de iniciativa con su tirada hecha.
 //
-// Lo que NO se hace es arrancar el combate: cuando se crea la escaramuza
-// todavía no hay ningún personaje jugador en la mesa, así que un combate
-// abierto solo tendría enemigos jugando turnos entre ellos. El DM pulsa
-// «Añadir grupo» cuando llegan los suyos y empieza.
+// Las plantillas propias pueden seguir naciendo sin PJ ni turno activo; los
+// presets oficiales reciben el PJ durante la misma transacción y arrancan.
 
 /**
  * Crea el mapa de la escaramuza en la campaña y la deja lista para jugar.
  * Devuelve `{ mapId, revealedRoomIds, enemies }`.
  */
-export function seedSkirmishMap(campaignId, userId, mapData, { name } = {}) {
+export function seedSkirmishMap(
+  campaignId,
+  userId,
+  mapData,
+  { name, enemyAi = false, soloPartySize = null } = {}
+) {
   const mapId = instantiateMap(campaignId, userId, mapData, name);
 
   // `instantiateMap` crea toda sala sin revelar (lo correcto para una
@@ -35,6 +38,25 @@ export function seedSkirmishMap(campaignId, userId, mapData, { name } = {}) {
       if (room.revealed && rooms[roomIndex]) revealedRoomIds.push(rooms[roomIndex].id);
     });
   });
+
+  // Los mapas conservan todos sus encuentros de diseño, pero una prueba con
+  // un único PJ no puede recibir la misma economía de acciones que un grupo.
+  // Dejamos dos rivales por estancia (el primero y el último, que suele ser el
+  // líder) y retiramos el resto únicamente de esta instancia solitaria.
+  if (soloPartySize === 1) {
+    for (const floor of floors) {
+      const rooms = db.prepare('SELECT id FROM map_rooms WHERE floor_id = ? ORDER BY id').all(floor.id);
+      for (const room of rooms) {
+        const enemies = db
+          .prepare("SELECT id FROM map_tokens WHERE room_id = ? AND kind = 'enemigo' ORDER BY id")
+          .all(room.id);
+        if (enemies.length <= 2) continue;
+        const kept = new Set([enemies[0].id, enemies.at(-1).id]);
+        const removed = enemies.filter((enemy) => !kept.has(enemy.id)).map((enemy) => enemy.id);
+        db.prepare(`DELETE FROM map_tokens WHERE id IN (${removed.map(() => '?').join(', ')})`).run(...removed);
+      }
+    }
+  }
   // Un snapshot sin ninguna sala marcada (p. ej. una plantilla vieja) abriría
   // un tablero completamente a oscuras: en ese caso se revela la primera.
   if (!revealedRoomIds.length && floors.length) {
@@ -47,7 +69,9 @@ export function seedSkirmishMap(campaignId, userId, mapData, { name } = {}) {
     ).run(...revealedRoomIds);
   }
 
-  db.prepare('UPDATE game_tables SET active_map_id = ? WHERE campaign_id = ?').run(mapId, campaignId);
+  db.prepare(
+    'UPDATE game_tables SET active_map_id = ?, enemy_ai_enabled = ? WHERE campaign_id = ?'
+  ).run(mapId, enemyAi ? 1 : 0, campaignId);
   // Las iniciativas quedan preparadas, pero todavía no existe un turno
   // activo: la escaramuza nace sin PJ y no debe avanzar entre enemigos solos.
   // «Añadir grupo» o activar el modo por turnos iniciará el orden después.
@@ -64,10 +88,24 @@ export function resolveSkirmishSource({ presetId, template }) {
   if (presetId) {
     const preset = getSkirmishPreset(presetId);
     if (!preset) return { error: 'Ese escenario predefinido no existe' };
-    return { mapData: preset.map, name: preset.name, maxPlayers: preset.players };
+    return {
+      mapData: preset.map,
+      name: preset.name,
+      maxPlayers: preset.players,
+      enemyAi: preset.enemyAi === true,
+      soloMode: preset.soloMode === true,
+      briefing: preset.briefing,
+      objectives: preset.objectives,
+    };
   }
   if (template) {
-    return { mapData: template.data, name: template.row.name, maxPlayers: null };
+    return {
+      mapData: template.data,
+      name: template.row.name,
+      maxPlayers: null,
+      enemyAi: false,
+      soloMode: false,
+    };
   }
   return {};
 }

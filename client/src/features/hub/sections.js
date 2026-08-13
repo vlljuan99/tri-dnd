@@ -44,10 +44,10 @@ export function isDraft(campaign) {
 
 /** Reparto de las campañas del usuario entre las secciones que las muestran. */
 export function splitCampaigns(campaigns) {
-  const own = (campaigns ?? []).filter((campaign) => campaign.role === 'dm');
+  const own = (campaigns ?? []).filter((campaign) => campaign.owner || campaign.role === 'dm');
   return {
     campanas: own.filter((campaign) => campaignTypeOf(campaign) === 'campana'),
     escaramuzas: own.filter((campaign) => campaignTypeOf(campaign) === 'escaramuza'),
-    ajenas: (campaigns ?? []).filter((campaign) => campaign.role !== 'dm'),
+    ajenas: (campaigns ?? []).filter((campaign) => !campaign.owner && campaign.role !== 'dm'),
   };
 }

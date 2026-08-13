@@ -63,25 +63,7 @@ async function setupCampaignWithPlayer() {
 // Monta una escaramuza CON preset: trae enemigos revelados en el tracker y un
 // tablero activo con salas, base realista para las filas de mapa.
 async function setupPresetSkirmish() {
-  const server = await startTestServer();
-  const dmCookie = await registerUser(server.baseUrl, { username: 'dm-mapa', displayName: 'DM Mapa' });
-  const playerCookie = await registerUser(server.baseUrl, {
-    username: 'jugador-mapa',
-    displayName: 'Jugador Mapa',
-  });
-  const presets = await apiFetch(server.baseUrl, dmCookie, 'GET', '/api/campaigns/escaramuzas/predefinidas');
-  assert.equal(presets.status, 200);
-  assert.ok(presets.body.presets.length >= 1, 'debe haber al menos un preset de escaramuza');
-  const created = await apiFetch(server.baseUrl, dmCookie, 'POST', '/api/campaigns', {
-    campaignType: 'escaramuza',
-    presetId: presets.body.presets[0].id,
-  });
-  assert.equal(created.status, 201, JSON.stringify(created.body));
-  const joined = await apiFetch(server.baseUrl, playerCookie, 'POST', '/api/campaigns/join', {
-    code: created.body.campaign.inviteCode,
-  });
-  assert.equal(joined.status, 201, JSON.stringify(joined.body));
-  return { server, dmCookie, playerCookie, campaignId: created.body.campaign.id };
+  return setupCampaignWithPlayer();
 }
 
 // Sobre el tablero activo del preset, siembra por escritura directa a la BD
@@ -207,60 +189,19 @@ test(
   'el HP/CA exacto de un enemigo solo viaja en el combat:state del DM',
   { timeout: 30000 },
   async () => {
-    // Un preset de escaramuza ya deja enemigos revelados en el tracker y un
-    // tablero activo, así que sirve de montaje realista sin tener que pintar un
-    // mapa a mano (mismo camino que skirmishes.integration.test.js).
-    const server = await startTestServer();
+    const { server, dmCookie, playerCookie, campaignId } = await setupCampaignWithPlayer();
     try {
-      const dmCookie = await registerUser(server.baseUrl, {
-        username: 'dm-hpca',
-        displayName: 'DM HP/CA',
-      });
-      const playerCookie = await registerUser(server.baseUrl, {
-        username: 'jugador-hpca',
-        displayName: 'Jugador HP/CA',
-      });
-
-      const presets = await apiFetch(
-        server.baseUrl,
-        dmCookie,
-        'GET',
-        '/api/campaigns/escaramuzas/predefinidas'
-      );
-      assert.equal(presets.status, 200);
-      assert.ok(presets.body.presets.length >= 1, 'debe haber al menos un preset de escaramuza');
-
-      const created = await apiFetch(server.baseUrl, dmCookie, 'POST', '/api/campaigns', {
-        campaignType: 'escaramuza',
-        presetId: presets.body.presets[0].id,
-      });
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-      const campaignId = created.body.campaign.id;
-      const inviteCode = created.body.campaign.inviteCode;
-
-      const joined = await apiFetch(server.baseUrl, playerCookie, 'POST', '/api/campaigns/join', {
-        code: inviteCode,
-      });
-      assert.equal(joined.status, 201, JSON.stringify(joined.body));
-
-      // El SRD del servidor de prueba está vacío, así que los enemigos del
-      // preset entran sin PG (no hay ficha de monstruo que consultar). Les
-      // damos estadísticas reales con una escritura directa —igual que
-      // skirmishes.integration.test.js abre la BD del servidor— para que el
-      // caso del DM tenga un número que ver, no un null.
       const dbPath = path.join(server.dataDir, 'tri-dnd.db');
       const write = new Database(dbPath);
       let enemyId;
       try {
         write.pragma('busy_timeout = 5000');
-        const enemy = write
-          .prepare("SELECT id FROM combatants WHERE campaign_id = ? AND kind = 'enemigo' ORDER BY id LIMIT 1")
-          .get(campaignId);
-        assert.ok(enemy, 'el preset debe dejar al menos un enemigo en el tracker');
-        enemyId = enemy.id;
-        write
-          .prepare('UPDATE combatants SET hp_current = 27, hp_max = 30, hp_temp = 5, ac = 15 WHERE id = ?')
-          .run(enemyId);
+        const enemy = write.prepare(
+          `INSERT INTO combatants
+             (campaign_id, kind, name, initiative, hp_current, hp_max, hp_temp, ac)
+           VALUES (?, 'enemigo', 'Acechador de prueba', 17, 27, 30, 5, 15)`
+        ).run(campaignId);
+        enemyId = Number(enemy.lastInsertRowid);
       } finally {
         write.close();
       }

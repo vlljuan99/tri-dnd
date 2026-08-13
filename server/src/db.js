@@ -1173,6 +1173,65 @@ const migrations = [
     FROM combatants
    WHERE kind = 'enemigo';
   `,
+
+  // v65 — Automatización enemiga por mesa. Nace desactivada para no cambiar
+  // campañas existentes; los tres escenarios de fábrica la activan al crearse
+  // y el DM puede pausarla desde el tracker en cualquier momento.
+  `
+  ALTER TABLE game_tables ADD COLUMN enemy_ai_enabled INTEGER NOT NULL DEFAULT 0
+    CHECK (enemy_ai_enabled IN (0, 1));
+
+  -- Los escenarios ya instanciados son snapshots. Reconocemos los tres mapas
+  -- de fábrica por su nombre estable para que también reciban fondo e IA; las
+  -- escaramuzas personales permanecen intactas y con la IA pausada.
+  UPDATE map_rooms SET background_url = '/skirmishes/paso-del-cuervo.webp'
+   WHERE name = 'El paso' AND floor_id IN (
+     SELECT floor.id FROM map_floors floor
+       JOIN maps map ON map.id = floor.map_id
+       JOIN campaigns campaign ON campaign.id = map.campaign_id
+      WHERE map.name = 'Paso del Cuervo' AND campaign.campaign_type = 'escaramuza'
+   );
+  UPDATE map_rooms SET background_url = '/skirmishes/cripta-anegada.webp'
+   WHERE name = 'Nave anegada' AND floor_id IN (
+     SELECT floor.id FROM map_floors floor
+       JOIN maps map ON map.id = floor.map_id
+       JOIN campaigns campaign ON campaign.id = map.campaign_id
+      WHERE map.name = 'Cripta de los Doce Silentes' AND campaign.campaign_type = 'escaramuza'
+   );
+  UPDATE map_rooms SET background_url = '/skirmishes/puente-igneo.webp'
+   WHERE name = 'Fosa de colada' AND floor_id IN (
+     SELECT floor.id FROM map_floors floor
+       JOIN maps map ON map.id = floor.map_id
+       JOIN campaigns campaign ON campaign.id = map.campaign_id
+      WHERE map.name = 'Fundición de Escoria Roja' AND campaign.campaign_type = 'escaramuza'
+   );
+  UPDATE game_tables SET enemy_ai_enabled = 1
+   WHERE active_map_id IN (
+     SELECT map.id FROM maps map JOIN campaigns campaign ON campaign.id = map.campaign_id
+      WHERE campaign.campaign_type = 'escaramuza'
+        AND map.name IN ('Paso del Cuervo', 'Cripta de los Doce Silentes', 'Fundición de Escoria Roja')
+   );
+  `,
+
+  // v66 — Modo sin DM para los tres escenarios de fábrica. La cuenta que
+  // crea la partida conserva la propiedad administrativa, pero el servidor
+  // le aplica siempre la vista y los permisos de jugador durante la partida.
+  `
+  ALTER TABLE campaigns ADD COLUMN solo_mode INTEGER NOT NULL DEFAULT 0
+    CHECK (solo_mode IN (0, 1));
+
+  -- Solo se convierten instancias anteriores que ya tenían exactamente un PJ
+  -- y ninguna otra persona: una mesa de grupo reconocida por el mismo mapa no
+  -- debe cambiar de permisos al actualizar.
+  UPDATE campaigns SET solo_mode = 1, max_players = 1
+   WHERE campaign_type = 'escaramuza' AND id IN (
+     SELECT map.campaign_id FROM maps map
+      WHERE map.name IN ('Paso del Cuervo', 'Cripta de los Doce Silentes', 'Fundición de Escoria Roja')
+   )
+   AND (SELECT COUNT(*) FROM campaign_members member WHERE member.campaign_id = campaigns.id) = 1
+   AND (SELECT COUNT(*) FROM characters character
+         WHERE character.campaign_id = campaigns.id AND character.kind = 'pj') = 1;
+  `,
 ];
 
 export function runMigrations() {

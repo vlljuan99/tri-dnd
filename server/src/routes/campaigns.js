@@ -54,8 +54,16 @@ function generateInviteCode() {
 
 export function getMembership(campaignId, userId) {
   return db
-    .prepare('SELECT role FROM campaign_members WHERE campaign_id = ? AND user_id = ?')
+    .prepare(
+      `SELECT CASE WHEN c.solo_mode = 1 THEN 'jugador' ELSE m.role END AS role
+         FROM campaign_members m JOIN campaigns c ON c.id = m.campaign_id
+        WHERE m.campaign_id = ? AND m.user_id = ?`
+    )
     .get(campaignId, userId);
+}
+
+export function isSoloCampaign(campaignId) {
+  return Boolean(db.prepare('SELECT solo_mode FROM campaigns WHERE id = ?').get(campaignId)?.solo_mode);
 }
 
 // Publica una consecuencia únicamente después de resolver la interacción.
@@ -74,9 +82,10 @@ function publishMarkerConsequence(campaignId, actorUserId, token, consequence) {
   return scope;
 }
 
-function serializeCampaign(row, role) {
+function serializeCampaign(row, role, userId) {
   const table = db.prepare('SELECT is_live FROM game_tables WHERE campaign_id = ?').get(row.id);
-  const isDm = role === 'dm';
+  const effectiveRole = row.solo_mode ? 'jugador' : role;
+  const isDm = effectiveRole === 'dm';
   return {
     id: row.id,
     name: row.name,
@@ -89,7 +98,9 @@ function serializeCampaign(row, role) {
     // a recibir el código con el que otras personas pueden entrar.
     inviteCode: isDm ? row.invite_code : null,
     dmUserId: row.dm_user_id,
-    role,
+    role: effectiveRole,
+    owner: row.dm_user_id === userId,
+    soloMode: Boolean(row.solo_mode),
     isLive: Boolean(table?.is_live),
     maxPlayers: row.max_players,
     lore: row.lore,
@@ -108,7 +119,12 @@ function serializeCampaign(row, role) {
 // antes de poder abrir la sesión en vivo.
 export function countPlayers(campaignId) {
   return db
-    .prepare("SELECT COUNT(*) AS n FROM campaign_members WHERE campaign_id = ? AND role = 'jugador'")
+    .prepare(
+      `SELECT COUNT(*) AS n FROM campaign_members member
+         JOIN campaigns campaign ON campaign.id = member.campaign_id
+        WHERE member.campaign_id = ?
+          AND (member.role = 'jugador' OR campaign.solo_mode = 1)`
+    )
     .get(campaignId).n;
 }
 
@@ -120,7 +136,7 @@ campaignsRouter.get('/', (req, res) => {
        WHERE m.user_id = ? ORDER BY c.created_at DESC`
     )
     .all(req.user.id);
-  res.json({ campaigns: rows.map((r) => serializeCampaign(r, r.role)) });
+  res.json({ campaigns: rows.map((r) => serializeCampaign(r, r.role, req.user.id)) });
 });
 
 // Nace como borrador con lo mínimo (nombre genérico según el tipo elegido);
@@ -163,13 +179,36 @@ campaignsRouter.post('/', (req, res) => {
   }
   const source = resolveSkirmishSource({ presetId, template });
   if (source.error) return res.status(404).json({ error: source.error });
+  if (source.soloMode && req.body?.hasWorldMap === true) {
+    return res.status(400).json({ error: 'Los escenarios sin DM usan únicamente su tablero táctico' });
+  }
+
+  const characterId = req.body?.characterId;
+  let soloCharacter = null;
+  if (source.soloMode) {
+    if (!Number.isInteger(characterId)) {
+      return res.status(400).json({ error: 'Elige un personaje completo para jugar este escenario sin DM' });
+    }
+    soloCharacter = db
+      .prepare(
+        `SELECT id FROM characters
+          WHERE id = ? AND user_id = ? AND kind = 'pj'
+            AND status = 'complete' AND campaign_id IS NULL`
+      )
+      .get(characterId, req.user.id);
+    if (!soloCharacter) {
+      return res.status(400).json({ error: 'Ese personaje no está disponible para una partida en solitario' });
+    }
+  } else if (characterId !== undefined) {
+    return res.status(400).json({ error: 'Solo los escenarios con director automático aceptan un personaje inicial' });
+  }
 
   const create = db.transaction(() => {
     const info = db
       .prepare(
         `INSERT INTO campaigns
-           (name, dm_user_id, invite_code, has_world_map, campaign_type, status)
-         VALUES (?, ?, ?, ?, ?, ?)`
+           (name, dm_user_id, invite_code, has_world_map, campaign_type, status, solo_mode, lore, objectives)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         requestedName || source.name || defaultName,
@@ -177,7 +216,10 @@ campaignsRouter.post('/', (req, res) => {
         generateInviteCode(),
         hasWorldMap ? 1 : 0,
         campaignType,
-        campaignType === 'campana' ? 'draft' : 'complete'
+        campaignType === 'campana' ? 'draft' : 'complete',
+        source.soloMode ? 1 : 0,
+        source.briefing ?? '',
+        JSON.stringify(source.objectives ?? [])
       );
     const id = Number(info.lastInsertRowid);
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
@@ -190,9 +232,23 @@ campaignsRouter.post('/', (req, res) => {
     } else if (source.mapData) {
       // Escenario de fábrica o plantilla propia: el tablero entra completo,
       // con sus salas de inicio abiertas y sus enemigos en el tracker.
-      seedSkirmishMap(id, req.user.id, source.mapData, { name: source.mapData.name });
+      const seeded = seedSkirmishMap(id, req.user.id, source.mapData, {
+        name: source.mapData.name,
+        enemyAi: source.enemyAi,
+        soloPartySize: source.soloMode ? 1 : null,
+      });
       if (source.maxPlayers) {
         db.prepare('UPDATE campaigns SET max_players = ? WHERE id = ?').run(source.maxPlayers, id);
+      }
+      if (soloCharacter) {
+        db.prepare('UPDATE characters SET campaign_id = ? WHERE id = ?').run(id, soloCharacter.id);
+        const map = getMap(id, seeded.mapId);
+        ensureCharacterTokens(map, id);
+        ensureCombatantForCharacter(id, soloCharacter.id);
+        db.prepare(
+          `INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden)
+           VALUES (?, NULL, 'system', ?, 0)`
+        ).run(id, `Director automático: ${source.briefing}`);
       }
     } else {
       // La escaramuza en blanco es deliberadamente inmediata: nace completa y
@@ -213,7 +269,7 @@ campaignsRouter.post('/', (req, res) => {
   });
   const id = create();
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(id);
-  res.status(201).json({ campaign: serializeCampaign(row, 'dm') });
+  res.status(201).json({ campaign: serializeCampaign(row, 'dm', req.user.id) });
 });
 
 campaignsRouter.post('/join', (req, res) => {
@@ -225,17 +281,20 @@ campaignsRouter.post('/join', (req, res) => {
   if (!row) return res.status(404).json({ error: 'Código de invitación no válido' });
 
   const existing = getMembership(row.id, req.user.id);
-  if (existing) return res.json({ campaign: serializeCampaign(row, existing.role) });
+  if (existing) return res.json({ campaign: serializeCampaign(row, existing.role, req.user.id) });
 
   if (row.max_players != null && countPlayers(row.id) >= row.max_players) {
     return res.status(403).json({ error: 'La campaña ya tiene todas las plazas ocupadas' });
+  }
+  if (row.solo_mode) {
+    return res.status(403).json({ error: 'Este escenario está reservado a la partida sin DM de su propietario' });
   }
 
   db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'jugador')").run(
     row.id,
     req.user.id
   );
-  res.status(201).json({ campaign: serializeCampaign(row, 'jugador') });
+  res.status(201).json({ campaign: serializeCampaign(row, 'jugador', req.user.id) });
 });
 
 // Catálogo de escenarios de fábrica para el Hub. Va antes que `/:id` para que
@@ -250,7 +309,7 @@ campaignsRouter.get('/escaramuzas/predefinidas', (_req, res) => {
 campaignsRouter.post('/:id/guardar-plantilla', (req, res) => {
   const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
-  if (campaign.dm_user_id !== req.user.id) {
+  if (campaign.dm_user_id !== req.user.id || campaign.solo_mode) {
     return res.status(403).json({ error: 'Solo el DM puede guardar esta escaramuza como plantilla' });
   }
   if (campaign.campaign_type !== 'escaramuza') {
@@ -293,7 +352,8 @@ campaignsRouter.get('/:id', (req, res) => {
       `SELECT u.id, u.display_name AS displayName, m.role FROM campaign_members m
        JOIN users u ON u.id = m.user_id WHERE m.campaign_id = ? ORDER BY m.joined_at`
     )
-    .all(row.id);
+    .all(row.id)
+    .map((member) => (row.solo_mode ? { ...member, role: 'jugador' } : member));
   const characters = db
     .prepare(
       `SELECT id, user_id, name, kind, class_index, race_index, level, hp_current, hp_max, ac, avatar_path AS avatarUrl
@@ -304,7 +364,7 @@ campaignsRouter.get('/:id', (req, res) => {
     // El jugador solo recibe PJ; el DM conserva su vista completa.
     .filter((character) => membership.role === 'dm' || character.kind === 'pj');
 
-  res.json({ campaign: serializeCampaign(row, membership.role), members, characters });
+  res.json({ campaign: serializeCampaign(row, membership.role, req.user.id), members, characters });
 });
 
 campaignsRouter.get('/:id/bestiario', (req, res) => {
@@ -318,7 +378,7 @@ campaignsRouter.get('/:id/bestiario', (req, res) => {
 campaignsRouter.patch('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
-  if (row.dm_user_id !== req.user.id) {
+  if (row.dm_user_id !== req.user.id || row.solo_mode) {
     return res.status(403).json({ error: 'Solo el DM puede editar la campaña' });
   }
 
@@ -411,7 +471,7 @@ campaignsRouter.patch('/:id', (req, res) => {
     })();
   }
   const updated = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(row.id);
-  res.json({ campaign: serializeCampaign(updated, 'dm') });
+  res.json({ campaign: serializeCampaign(updated, 'dm', req.user.id) });
 });
 
 // Invalida el código anterior al instante. No hace falta guardar un historial:
@@ -419,7 +479,7 @@ campaignsRouter.patch('/:id', (req, res) => {
 campaignsRouter.post('/:id/invitacion/regenerar', (req, res) => {
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
-  if (row.dm_user_id !== req.user.id) {
+  if (row.dm_user_id !== req.user.id || row.solo_mode) {
     return res.status(403).json({ error: 'Solo el DM puede regenerar la invitación' });
   }
 
@@ -477,7 +537,7 @@ function removePlayerFromCampaign(row, userId) {
 campaignsRouter.delete('/:id/jugadores/:userId', (req, res) => {
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
-  if (row.dm_user_id !== req.user.id) {
+  if (row.dm_user_id !== req.user.id || row.solo_mode) {
     return res.status(403).json({ error: 'Solo el DM puede expulsar jugadores' });
   }
 
@@ -537,7 +597,7 @@ function requireDm(req, res) {
     res.status(404).json({ error: 'Campaña no encontrada' });
     return null;
   }
-  if (row.dm_user_id !== req.user.id) {
+  if (row.dm_user_id !== req.user.id || row.solo_mode) {
     res.status(403).json({ error: 'Solo el DM gestiona la campaña' });
     return null;
   }
