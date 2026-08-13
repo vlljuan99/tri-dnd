@@ -7,7 +7,7 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "sync-srd": "node scripts/sync-srd.js",
-    "test": "node --test \"src/services/__tests__/*.test.js\""
+    "test": "node --test"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

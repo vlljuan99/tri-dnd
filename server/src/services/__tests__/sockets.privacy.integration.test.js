@@ -18,6 +18,8 @@
 // primer test y cambia el evento y la aserción.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   startTestServer,
   registerUser,
@@ -176,6 +178,28 @@ test(
       });
       assert.equal(joined.status, 201, JSON.stringify(joined.body));
 
+      // El SRD del servidor de prueba está vacío, así que los enemigos del
+      // preset entran sin PG (no hay ficha de monstruo que consultar). Les
+      // damos estadísticas reales con una escritura directa —igual que
+      // skirmishes.integration.test.js abre la BD del servidor— para que el
+      // caso del DM tenga un número que ver, no un null.
+      const dbPath = path.join(server.dataDir, 'tri-dnd.db');
+      const write = new Database(dbPath);
+      let enemyId;
+      try {
+        write.pragma('busy_timeout = 5000');
+        const enemy = write
+          .prepare("SELECT id FROM combatants WHERE campaign_id = ? AND kind = 'enemigo' ORDER BY id LIMIT 1")
+          .get(campaignId);
+        assert.ok(enemy, 'el preset debe dejar al menos un enemigo en el tracker');
+        enemyId = enemy.id;
+        write
+          .prepare('UPDATE combatants SET hp_current = 27, hp_max = 30, hp_temp = 5, ac = 15 WHERE id = ?')
+          .run(enemyId);
+      } finally {
+        write.close();
+      }
+
       // El estado inicial de combate llega en la respuesta de room:join, ya con
       // la vista que corresponde a cada rol.
       const dmSocket = await connectSocket(server, dmCookie);
@@ -183,32 +207,30 @@ test(
       const dmState = await joinRoom(dmSocket, campaignId);
       const playerState = await joinRoom(playerSocket, campaignId);
 
-      const dmEnemies = dmState.combat.combatants.filter((c) => c.kind === 'enemigo');
-      assert.ok(dmEnemies.length >= 1, 'el preset debe dejar al menos un enemigo en el tracker');
-      const dmEnemy = dmEnemies[0];
-
-      // El DM ve las estadísticas ocultas del enemigo.
-      assert.equal(typeof dmEnemy.hpCurrent, 'number', 'el DM debe ver el HP actual del enemigo');
-      assert.equal(typeof dmEnemy.hpMax, 'number', 'el DM debe ver el HP máximo del enemigo');
-      assert.equal(typeof dmEnemy.ac, 'number', 'el DM debe ver la CA del enemigo');
+      // El DM ve las estadísticas ocultas del enemigo con sus valores exactos.
+      const dmEnemy = dmState.combat.combatants.find((c) => c.id === enemyId);
+      assert.ok(dmEnemy, 'el DM debe ver al enemigo en el tracker');
+      assert.equal(dmEnemy.kind, 'enemigo');
+      assert.equal(dmEnemy.hpCurrent, 27, 'el DM debe ver el HP actual exacto del enemigo');
+      assert.equal(dmEnemy.hpMax, 30, 'el DM debe ver el HP máximo del enemigo');
+      assert.equal(dmEnemy.hpTemp, 5, 'el DM debe ver los PG temporales del enemigo');
+      assert.equal(dmEnemy.ac, 15, 'el DM debe ver la CA del enemigo');
 
       // El jugador ve al MISMO enemigo en el orden de iniciativa (público: el
       // orden de turnos y el nombre siempre lo han sido)…
-      const playerEnemy = playerState.combat.combatants.find((c) => c.id === dmEnemy.id);
+      const playerEnemy = playerState.combat.combatants.find((c) => c.id === enemyId);
       assert.ok(playerEnemy, 'el jugador debe ver al enemigo en el orden de turnos');
       assert.equal(playerEnemy.name, dmEnemy.name, 'el nombre del enemigo es público');
       assert.equal(playerEnemy.initiative, dmEnemy.initiative, 'el total de iniciativa es público');
 
-      // …pero NUNCA su HP/CA exactos ni el desglose que delata su ficha.
-      assert.equal(playerEnemy.hpCurrent, undefined, 'el HP del enemigo no debe llegar al jugador');
-      assert.equal(playerEnemy.hpMax, undefined, 'el HP máximo del enemigo no debe llegar al jugador');
-      assert.equal(playerEnemy.ac, undefined, 'la CA del enemigo no debe llegar al jugador');
-      assert.equal(playerEnemy.hpTemp, undefined, 'los PG temporales del enemigo no deben llegar al jugador');
-      assert.equal(
-        playerEnemy.initiativeRoll,
-        undefined,
-        'el desglose de iniciativa (d20 + DES) del enemigo es privado del DM'
-      );
+      // …pero el contrato es que esas claves NUNCA se asignan a la vista del
+      // jugador: no basta con que valgan undefined, no deben existir siquiera.
+      for (const secret of ['hpCurrent', 'hpMax', 'hpTemp', 'ac', 'initiativeRoll', 'monsterIndex', 'overrides']) {
+        assert.ok(
+          !(secret in playerEnemy),
+          `el jugador no debe recibir "${secret}" del enemigo (fuga de datos)`
+        );
+      }
     } finally {
       await server.stop();
     }
