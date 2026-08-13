@@ -305,11 +305,13 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
 
 - [ ] **Estabilización y producción reproducible**
   - [x] La creación de un escenario prepara mapa, enemigos e iniciativas sin arrancar un turno huérfano antes de que llegue el grupo; prueba HTTP aislada sobre SQLite temporal
+  - [x] Matriz de privacidad sobre servidor real: tiradas ocultas, HP/CA de enemigos, trampas, niebla de guerra y archivo narrativo/media privada; 115/115 pruebas de servidor activas, sin huecos omitidos
   - [x] Dependencias vulnerables actualizadas (`socket.io-parser` 4.2.7, `body-parser` 1.20.6 y React Router 7.18.2) y auditoría limpia
   - [x] Build Docker con `npm ci`, imagen inmutable por commit, metadatos OCI y `/api/health` con versión/SHA/migración/estado de almacenamiento
   - [x] Workflow manual con tests, build, auditoría, backup consistente de SQLite y medios, smoke de web+BD+Socket.IO y rollback automático del código
   - [x] Monitor externo desde GitHub Actions cada 30 minutos y manual de restauración en `deploy/README.md`
-  - [ ] Primer despliegue versionado: verificar en el VPS el backup generado, el SHA del health, el monitor y un simulacro controlado de rollback/restauración antes de cerrar la fase
+  - [x] Primer despliegue versionado: backup verificado en el VPS, SHA exacto en health y smoke externo completo
+  - [ ] Ejecutar un simulacro controlado de rollback y restauración de una copia en un entorno aislado antes de cerrar la fase
 
 - [ ] **Fase 27 — Efectos elementales por tipo de daño** ⚠️ **HOMEBREW: esto NO es 5e clásico**
   - **Aviso de reglas**: en 5e RAW el tipo de daño **no lleva ningún efecto asociado** — el fuego no quema, el frío no ralentiza, el ácido no corroe. Un conjuro solo aplica un estado si su propio texto lo dice. Todo lo de esta fase es una capa añadida por encima del SRD, y por eso debe ser **activable por campaña** (apagada por defecto) y quedar dicho en el chat cuando se dispare, para que nadie confunda una regla de la casa con una del manual. El resto de la app sigue siendo RAW
