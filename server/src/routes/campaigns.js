@@ -858,7 +858,6 @@ campaignsRouter.get('/:id/mapa-activo', (req, res) => {
   if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
 
   const activeMapId = getActiveMapId(req.params.id);
-  const activeMap = activeMapId ? getMap(req.params.id, activeMapId) : null;
   const map = activeMapId ? getMap(req.params.id, activeMapId) : null;
   if (!map) return res.json({ map: null });
 
@@ -906,6 +905,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
   }
 
   const activeMapId = getActiveMapId(req.params.id);
+  const activeMap = activeMapId ? getMap(req.params.id, activeMapId) : null;
   const token = activeMapId
     ? db
         .prepare('SELECT * FROM map_character_tokens WHERE map_id = ? AND character_id = ?')
