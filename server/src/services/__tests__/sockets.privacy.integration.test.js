@@ -60,6 +60,71 @@ async function setupCampaignWithPlayer() {
   return { server, dmCookie, playerCookie, campaignId };
 }
 
+// Monta una escaramuza CON preset: trae enemigos revelados en el tracker y un
+// tablero activo con salas, base realista para las filas de mapa.
+async function setupPresetSkirmish() {
+  const server = await startTestServer();
+  const dmCookie = await registerUser(server.baseUrl, { username: 'dm-mapa', displayName: 'DM Mapa' });
+  const playerCookie = await registerUser(server.baseUrl, {
+    username: 'jugador-mapa',
+    displayName: 'Jugador Mapa',
+  });
+  const presets = await apiFetch(server.baseUrl, dmCookie, 'GET', '/api/campaigns/escaramuzas/predefinidas');
+  assert.equal(presets.status, 200);
+  assert.ok(presets.body.presets.length >= 1, 'debe haber al menos un preset de escaramuza');
+  const created = await apiFetch(server.baseUrl, dmCookie, 'POST', '/api/campaigns', {
+    campaignType: 'escaramuza',
+    presetId: presets.body.presets[0].id,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const joined = await apiFetch(server.baseUrl, playerCookie, 'POST', '/api/campaigns/join', {
+    code: created.body.campaign.inviteCode,
+  });
+  assert.equal(joined.status, 201, JSON.stringify(joined.body));
+  return { server, dmCookie, playerCookie, campaignId: created.body.campaign.id };
+}
+
+// Sobre el tablero activo del preset, siembra por escritura directa a la BD
+// (mismo enfoque que la fila del HP): una sala REVELADA con una trampa oculta y
+// un cofre visible, y una sala SIN REVELAR con un enemigo. Devuelve el mapa que
+// entrega /mapa-activo a cada rol (serializeFullMap para el DM,
+// serializeMapForPlayer para el jugador).
+async function seedMapPrivacyFixture() {
+  const { server, dmCookie, playerCookie, campaignId } = await setupPresetSkirmish();
+  const write = new Database(path.join(server.dataDir, 'tri-dnd.db'));
+  try {
+    write.pragma('busy_timeout = 5000');
+    const mapId = write
+      .prepare('SELECT active_map_id AS id FROM game_tables WHERE campaign_id = ?')
+      .get(campaignId)?.id;
+    assert.ok(mapId, 'el preset debe dejar un tablero activo');
+    const floorId = write
+      .prepare('SELECT id FROM map_floors WHERE map_id = ? ORDER BY position, id LIMIT 1')
+      .get(mapId).id;
+    const insertRoom = write.prepare(
+      'INSERT INTO map_rooms (floor_id, name, x, y, width, height, revealed) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    const insertToken = write.prepare(
+      `INSERT INTO map_tokens
+         (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
+          success_consequence, failure_consequence, consequence_scope, perception_dc, vision_radius, loot)
+       VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, '', '', 'player', ?, 6, '[]')`
+    );
+    const revealedRoomId = Number(insertRoom.run(floorId, 'SALA-VISIBLE', 50, 50, 3, 3, 1).lastInsertRowid);
+    insertToken.run(revealedRoomId, 'trampa', 'TRAMPA-OCULTA', 51, 51, 1, 10);
+    insertToken.run(revealedRoomId, 'objeto', 'COFRE-VISIBLE', 52, 52, 0, null);
+    const secretRoomId = Number(insertRoom.run(floorId, 'SALA-SECRETA', 60, 60, 3, 3, 0).lastInsertRowid);
+    insertToken.run(secretRoomId, 'enemigo', 'ACECHADOR-SECRETO', 61, 61, 0, null);
+  } finally {
+    write.close();
+  }
+  const dmMap = (await apiFetch(server.baseUrl, dmCookie, 'GET', `/api/campaigns/${campaignId}/mapa-activo`)).body.map;
+  const playerMap = (
+    await apiFetch(server.baseUrl, playerCookie, 'GET', `/api/campaigns/${campaignId}/mapa-activo`)
+  ).body.map;
+  return { server, dmMap, playerMap };
+}
+
 test('una tirada oculta del DM llega al DM pero nunca al jugador', { timeout: 30000 }, async () => {
   const { server, dmCookie, playerCookie, campaignId } = await setupCampaignWithPlayer();
   try {
@@ -237,35 +302,157 @@ test(
   }
 );
 
-test(
-  'una trampa oculta no aparece en el estado del mapa del jugador',
-  {
-    skip: 'pendiente: coloca una trampa hidden=1 y compara el mapa que recibe cada rol',
-  },
-  async () => {
-    // El jugador solo debería "descubrirla" vía percepcion:buscar; sin eso, el
-    // marcador de la trampa no debe llegar a su socket.
-  }
-);
+test('una trampa oculta no aparece en el mapa del jugador', { timeout: 30000 }, async () => {
+  const { server, dmMap, playerMap } = await seedMapPrivacyFixture();
+  try {
+    const dmTokens = dmMap.tokens.map((t) => t.name);
+    const playerTokens = playerMap.tokens.map((t) => t.name);
 
-test(
-  'un token en niebla de guerra no llega al socket del jugador sin visión',
-  {
-    skip: 'pendiente: coloca un token en sala no revelada y fuera de línea de visión',
-  },
-  async () => {
-    // Con la sala sin revelar y sin línea de visión, el token enemigo no debe
-    // estar en el mapa que recibe el jugador, aunque sí en el del DM.
-  }
-);
+    // El DM ve la trampa oculta y el cofre visible de la misma sala revelada.
+    assert.ok(dmTokens.includes('TRAMPA-OCULTA'), 'el DM ve la trampa oculta');
+    assert.ok(dmTokens.includes('COFRE-VISIBLE'), 'el DM ve el cofre');
 
-test(
-  'el archivo narrativo privado del DM nunca se sirve a un jugador',
-  {
-    skip: 'pendiente: intenta leer /api/campaigns/:id/archivo y su media como jugador',
-  },
-  async () => {
-    // Como jugador, GET del archivo narrativo y de su media privada debe dar
-    // 403/404; como DM, 200.
+    // El jugador ve el cofre (control positivo: la sala está revelada) pero
+    // NUNCA la trampa oculta, filtrada por su flag hidden en el servidor.
+    assert.ok(
+      playerTokens.includes('COFRE-VISIBLE'),
+      'el jugador ve el marcador visible de la sala revelada'
+    );
+    assert.ok(!playerTokens.includes('TRAMPA-OCULTA'), 'la trampa oculta no debe llegar al jugador');
+  } finally {
+    await server.stop();
   }
-);
+});
+
+test('un enemigo en una sala sin revelar (niebla de guerra) no llega al jugador', { timeout: 30000 }, async () => {
+  const { server, dmMap, playerMap } = await seedMapPrivacyFixture();
+  try {
+    const dmRooms = dmMap.floors.flatMap((f) => f.rooms).map((r) => r.name);
+    const playerRooms = playerMap.floors.flatMap((f) => f.rooms).map((r) => r.name);
+
+    // El DM ve la sala sin revelar y a su enemigo.
+    assert.ok(dmRooms.includes('SALA-SECRETA'), 'el DM ve la sala sin revelar');
+    assert.ok(
+      dmMap.tokens.some((t) => t.name === 'ACECHADOR-SECRETO'),
+      'el DM ve al enemigo de la sala secreta'
+    );
+
+    // El jugador ve la sala revelada (control positivo) pero la niebla de guerra
+    // le oculta la sala sin revelar y a todo lo que hay dentro.
+    assert.ok(playerRooms.includes('SALA-VISIBLE'), 'el jugador ve la sala revelada');
+    assert.ok(!playerRooms.includes('SALA-SECRETA'), 'la sala sin revelar no debe llegar al jugador');
+    assert.ok(
+      !playerMap.tokens.some((t) => t.name === 'ACECHADOR-SECRETO'),
+      'el enemigo de una sala sin revelar no debe llegar al jugador'
+    );
+  } finally {
+    await server.stop();
+  }
+});
+
+test('el archivo narrativo privado del DM nunca se sirve a un jugador', { timeout: 30000 }, async () => {
+  const server = await startTestServer();
+  try {
+    const dmCookie = await registerUser(server.baseUrl, {
+      username: 'dm-archivo',
+      displayName: 'DM Archivo',
+    });
+    const playerCookie = await registerUser(server.baseUrl, {
+      username: 'jugador-archivo',
+      displayName: 'Jugador Archivo',
+    });
+
+    // El archivo narrativo solo existe en campañas, no en escaramuzas.
+    const created = await apiFetch(server.baseUrl, dmCookie, 'POST', '/api/campaigns', {
+      campaignType: 'campana',
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const campaignId = created.body.campaign.id;
+    const joined = await apiFetch(server.baseUrl, playerCookie, 'POST', '/api/campaigns/join', {
+      code: created.body.campaign.inviteCode,
+    });
+    assert.equal(joined.status, 201, JSON.stringify(joined.body));
+
+    // El DM crea una entrada PRIVADA y otra PUBLICADA para el grupo.
+    const secret = await apiFetch(
+      server.baseUrl,
+      dmCookie,
+      'POST',
+      `/api/campaigns/${campaignId}/archivo/nodos`,
+      { kind: 'entrada', title: 'SECRETO-DM', visibility: 'private' }
+    );
+    assert.equal(secret.status, 201, JSON.stringify(secret.body));
+    const secretNodeId = secret.body.node.id;
+    const shared = await apiFetch(
+      server.baseUrl,
+      dmCookie,
+      'POST',
+      `/api/campaigns/${campaignId}/archivo/nodos`,
+      { kind: 'entrada', title: 'PUBLICO-GRUPO', visibility: 'players' }
+    );
+    assert.equal(shared.status, 201, JSON.stringify(shared.body));
+
+    // Un bloque de imagen dentro de la entrada privada, con su imagen subida
+    // (PNG mínimo de 1×1). Su media vive fuera de /uploads: solo la API la sirve.
+    const block = await apiFetch(
+      server.baseUrl,
+      dmCookie,
+      'POST',
+      `/api/campaigns/${campaignId}/archivo/nodos/${secretNodeId}/bloques`,
+      { type: 'imagen' }
+    );
+    assert.equal(block.status, 201, JSON.stringify(block.body));
+    const blockId = block.body.block.id;
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    const upload = await fetch(
+      `${server.baseUrl}/api/campaigns/${campaignId}/archivo/bloques/${blockId}/imagen`,
+      { method: 'PATCH', headers: { Cookie: dmCookie, 'Content-Type': 'image/png' }, body: png }
+    );
+    assert.equal(upload.status, 200, await upload.text());
+
+    // Listado del archivo: el DM ve su entrada privada; el jugador solo la
+    // publicada, y no puede editar.
+    const dmArchive = await apiFetch(server.baseUrl, dmCookie, 'GET', `/api/campaigns/${campaignId}/archivo`);
+    const playerArchive = await apiFetch(
+      server.baseUrl,
+      playerCookie,
+      'GET',
+      `/api/campaigns/${campaignId}/archivo`
+    );
+    const dmTitles = dmArchive.body.nodes.map((n) => n.title);
+    const playerTitles = playerArchive.body.nodes.map((n) => n.title);
+    assert.ok(dmTitles.includes('SECRETO-DM'), 'el DM ve su entrada privada');
+    assert.ok(playerTitles.includes('PUBLICO-GRUPO'), 'el jugador ve la entrada publicada (control positivo)');
+    assert.ok(!playerTitles.includes('SECRETO-DM'), 'la entrada privada no debe aparecer en el archivo del jugador');
+    assert.equal(playerArchive.body.canEdit, false, 'el jugador no puede editar el archivo');
+
+    // La búsqueda tampoco filtra la entrada privada hacia el jugador.
+    const playerSearch = await apiFetch(
+      server.baseUrl,
+      playerCookie,
+      'GET',
+      `/api/campaigns/${campaignId}/archivo/buscar?q=SECRETO`
+    );
+    assert.ok(
+      !playerSearch.body.results.some((n) => n.title === 'SECRETO-DM'),
+      'la búsqueda del jugador no debe revelar la entrada privada'
+    );
+
+    // La imagen privada: 200 para el DM, 404 para el jugador.
+    const dmImage = await fetch(
+      `${server.baseUrl}/api/campaigns/${campaignId}/archivo/bloques/${blockId}/imagen`,
+      { headers: { Cookie: dmCookie } }
+    );
+    assert.equal(dmImage.status, 200, 'el DM puede ver su propia imagen privada');
+    const playerImage = await fetch(
+      `${server.baseUrl}/api/campaigns/${campaignId}/archivo/bloques/${blockId}/imagen`,
+      { headers: { Cookie: playerCookie } }
+    );
+    assert.equal(playerImage.status, 404, 'la imagen de una entrada privada no debe servirse a un jugador');
+  } finally {
+    await server.stop();
+  }
+});
