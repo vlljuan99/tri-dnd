@@ -262,8 +262,9 @@ export function ensureCharacterTokens(map, campaignId) {
 // Al revelarse salas del mapa activo, sus enemigos visibles entran al
 // tracker de iniciativa (una sola vez por marcador, enlazados por
 // map_token_id). HP y CA salen del compendio SRD si el marcador tiene
-// monster_index. Devuelve cuántos combatientes se añadieron.
-export function spawnRoomEnemies(campaignId, roomIds) {
+// monster_index. `startCombat=false` permite preparar un escenario antes de
+// que haya PJ sin crear un turno huérfano entre enemigos.
+export function spawnRoomEnemies(campaignId, roomIds, { startCombat = true } = {}) {
   if (!roomIds.length) return 0;
   const placeholders = roomIds.map(() => '?').join(', ');
   const enemies = db
@@ -351,7 +352,7 @@ export function spawnRoomEnemies(campaignId, roomIds) {
   }
   if (discovered.length) discoverCreatures(campaignId, discovered);
   let startedCombat = false;
-  if (added > 0) {
+  if (added > 0 && startCombat) {
     // Encuentro nuevo: si la mesa había vuelto a modo libre (p. ej. tras
     // caer el último enemigo), un enemigo nuevo reactiva los turnos con
     // iniciativas frescas; si ya estaba en turnos, solo arranca si no había orden

@@ -3,17 +3,60 @@ name: Deploy to Hetzner
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-hetzner
   cancel-in-progress: false
 
+env:
+  APP_URL: https://tridnd.167-233-99-156.sslip.io
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build source tarball
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Instalar dependencias reproducibles
+        run: |
+          npm ci
+          npm ci --prefix server
+          npm ci --prefix client
+
+      - name: Pruebas y build
+        run: |
+          npm test
+          npm run build --prefix client
+
+      - name: Pruebas E2E en Chromium
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Auditoría de dependencias de producción
+        run: |
+          npm audit --omit=dev --audit-level=high --prefix server
+          npm audit --omit=dev --audit-level=high --prefix client
+
+      - name: Preparar metadatos de versión
+        run: |
+          APP_VERSION=$(node -p "require('./package.json').version")
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Empaquetar fuentes verificadas
         run: |
           tar --exclude='./.git' \
               --exclude='./.github' \
@@ -25,47 +68,62 @@ jobs:
               --exclude='./server/.env' \
               --exclude='./deploy/server-compose.yml' \
               --exclude='./deploy/build-on-server.sh' \
+              --exclude='./deploy/rollback.sh' \
               --exclude='./deploy/tridnd.caddy' \
               -czf "${RUNNER_TEMP}/src.tar.gz" .
 
-      - name: Setup SSH agent
+      - name: Preparar SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.HETZNER_SSH_KEY }}
 
-      - name: Trust host key
+      - name: Verificar host
         run: ssh-keyscan -H 167.233.99.156 >> ~/.ssh/known_hosts
 
-      - name: Upload tarball + deploy files
+      - name: Subir artefacto y scripts de operación
         run: |
           scp "${RUNNER_TEMP}/src.tar.gz" root@167.233.99.156:/opt/tridnd/src.tar.gz
           scp deploy/server-compose.yml root@167.233.99.156:/opt/tridnd/docker-compose.yml
           scp deploy/build-on-server.sh root@167.233.99.156:/opt/tridnd/build-on-server.sh
+          scp deploy/rollback.sh root@167.233.99.156:/opt/tridnd/rollback.sh
           scp deploy/tridnd.caddy root@167.233.99.156:/opt/tilestudio/sites/tridnd.caddy
 
-      - name: Build image and restart container
+      - name: Backup, build inmutable y reinicio
+        id: deploy
         run: |
           ssh root@167.233.99.156 \
-            'chmod +x /opt/tridnd/build-on-server.sh && /opt/tridnd/build-on-server.sh'
+            "chmod +x /opt/tridnd/build-on-server.sh /opt/tridnd/rollback.sh && \
+             TRIDND_IMAGE_TAG='${GITHUB_SHA}' \
+             TRIDND_GIT_SHA='${GITHUB_SHA}' \
+             TRIDND_APP_VERSION='${APP_VERSION}' \
+             TRIDND_BUILD_TIME='${BUILD_TIME}' \
+             /opt/tridnd/build-on-server.sh"
 
-      - name: Reload Caddy
+      - name: Recargar Caddy
         run: |
           ssh root@167.233.99.156 \
             'docker exec tilestudio-caddy-1 caddy reload --config /etc/caddy/Caddyfile'
 
-      # ── Smoke test — verify the app is up after deploy ────────────
-      # Retries for up to 60 s to allow the container to finish starting.
-      - name: Smoke test
+      # Comprueba frontend, SQLite, revisión desplegada y handshake real de
+      # Socket.IO. Reintenta durante 60 s mientras termina de arrancar.
+      - name: Smoke test versionado
         run: |
           for i in $(seq 1 6); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://tridnd.167-233-99-156.sslip.io/)
-            HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://tridnd.167-233-99-156.sslip.io/api/health)
-            if [ "$STATUS" = "200" ] && [ "$HEALTH" = "200" ]; then
-              echo "Smoke test passed (attempt $i): / → $STATUS, /api/health → $HEALTH"
+            HOME_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "$APP_URL/" || true)
+            HEALTH_BODY=$(curl -fsS "$APP_URL/api/health" || true)
+            SOCKET_BODY=$(curl -fsS "$APP_URL/socket.io/?EIO=4&transport=polling" || true)
+            COMMIT=$(jq -r '.commit // empty' <<<"$HEALTH_BODY" 2>/dev/null || true)
+            DB_OK=$(jq -r '.database.ok // false' <<<"$HEALTH_BODY" 2>/dev/null || true)
+            if [[ "$HOME_STATUS" == "200" && "$COMMIT" == "$GITHUB_SHA" && "$DB_OK" == "true" && "$SOCKET_BODY" == 0* ]]; then
+              echo "Smoke test correcto (intento $i): $COMMIT"
               exit 0
             fi
-            echo "Attempt $i: / → $STATUS, /api/health → $HEALTH — retrying in 10 s..."
+            echo "Intento $i: /=$HOME_STATUS commit=$COMMIT db=$DB_OK socket=${SOCKET_BODY:0:1}"
             sleep 10
           done
-          echo "Smoke test FAILED after 60 s"
+          echo "El smoke test no validó la nueva versión"
           exit 1
+
+      - name: Rollback automático del código si falla el smoke test
+        if: ${{ failure() && steps.deploy.outcome == 'success' }}
+        run: ssh root@167.233.99.156 '/opt/tridnd/rollback.sh'

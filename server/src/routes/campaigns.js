@@ -28,6 +28,9 @@ import { buildWallSet } from '../services/walls.js';
 import { fireRevealEvents } from '../services/events.js';
 import { resolveFluidMovement } from '../services/fluidEffects.js';
 import { resolveHazardMovement } from '../services/hazardZones.js';
+import { resolveSkirmishSource, seedSkirmishMap } from '../services/skirmishes.js';
+import { listSkirmishPresets } from '../services/skirmishPresets.js';
+import { getTemplateData, saveTemplate, serializeTemplate, snapshotMap } from '../services/templates.js';
 import { campaignBestiary } from '../services/bestiary.js';
 import { serializeEvent } from './events.js';
 import {
@@ -141,6 +144,26 @@ campaignsRouter.post('/', (req, res) => {
   if (requestedName.length > 80) return res.status(400).json({ error: 'El nombre admite hasta 80 caracteres' });
   const defaultName = campaignType === 'campana' ? 'Nueva campaña' : 'Nueva escaramuza';
 
+  // Una escaramuza puede nacer de un escenario de fábrica (presetId) o de una
+  // plantilla de escaramuza propia (templateId); si no llega ninguno se siembra
+  // el tablero mínimo de siempre.
+  const presetId = typeof req.body?.presetId === 'string' ? req.body.presetId : null;
+  const templateId = req.body?.templateId;
+  if ((presetId || templateId !== undefined) && campaignType !== 'escaramuza') {
+    return res.status(400).json({ error: 'Solo una escaramuza puede partir de un escenario o plantilla' });
+  }
+  if (presetId && templateId !== undefined) {
+    return res.status(400).json({ error: 'Elige un escenario predefinido o una plantilla, no las dos' });
+  }
+  let template = null;
+  if (templateId !== undefined) {
+    if (!Number.isInteger(templateId)) return res.status(400).json({ error: 'Plantilla no válida' });
+    template = getTemplateData(req.user.id, templateId, 'escaramuza');
+    if (!template) return res.status(404).json({ error: 'Plantilla de escaramuza no encontrada' });
+  }
+  const source = resolveSkirmishSource({ presetId, template });
+  if (source.error) return res.status(404).json({ error: source.error });
+
   const create = db.transaction(() => {
     const info = db
       .prepare(
@@ -149,7 +172,7 @@ campaignsRouter.post('/', (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       .run(
-        requestedName || defaultName,
+        requestedName || source.name || defaultName,
         req.user.id,
         generateInviteCode(),
         hasWorldMap ? 1 : 0,
@@ -164,9 +187,16 @@ campaignsRouter.post('/', (req, res) => {
 
     if (campaignType === 'campana') {
       seedDefaultNarrativeSections(id);
+    } else if (source.mapData) {
+      // Escenario de fábrica o plantilla propia: el tablero entra completo,
+      // con sus salas de inicio abiertas y sus enemigos en el tracker.
+      seedSkirmishMap(id, req.user.id, source.mapData, { name: source.mapData.name });
+      if (source.maxPlayers) {
+        db.prepare('UPDATE campaigns SET max_players = ? WHERE id = ?').run(source.maxPlayers, id);
+      }
     } else {
-      // La escaramuza es deliberadamente inmediata: nace completa y con un
-      // tablero mínimo activo, sin pasar por el asistente ni por el archivo.
+      // La escaramuza en blanco es deliberadamente inmediata: nace completa y
+      // con un tablero mínimo activo, sin asistente ni archivo.
       const mapInfo = db.prepare("INSERT INTO maps (campaign_id, name) VALUES (?, 'Escaramuza')").run(id);
       const mapId = Number(mapInfo.lastInsertRowid);
       const floorInfo = db
@@ -206,6 +236,50 @@ campaignsRouter.post('/join', (req, res) => {
     req.user.id
   );
   res.status(201).json({ campaign: serializeCampaign(row, 'jugador') });
+});
+
+// Catálogo de escenarios de fábrica para el Hub. Va antes que `/:id` para que
+// Express no lo confunda con el detalle de una campaña.
+campaignsRouter.get('/escaramuzas/predefinidas', (_req, res) => {
+  res.json({ presets: listSkirmishPresets() });
+});
+
+// Guardar una escaramuza como plantilla propia reutilizable: se fotografía su
+// mapa activo entero (plantas, salas con todas sus capas, puertas y
+// marcadores) y queda en la biblioteca del DM como tipo 'escaramuza'.
+campaignsRouter.post('/:id/guardar-plantilla', (req, res) => {
+  const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (campaign.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM puede guardar esta escaramuza como plantilla' });
+  }
+  if (campaign.campaign_type !== 'escaramuza') {
+    return res.status(400).json({ error: 'Solo una escaramuza se puede guardar como escenario' });
+  }
+  const mapId = getActiveMapId(campaign.id);
+  const map = mapId ? getMap(campaign.id, mapId) : null;
+  if (!map) return res.status(400).json({ error: 'Esta partida no tiene ningún tablero activo que guardar' });
+
+  // El snapshot no recuerda qué salas estaban reveladas (una plantilla del DM
+  // se estampa siempre a oscuras), así que la escaramuza marca las suyas para
+  // que al instanciarla vuelva a abrir exactamente las mismas.
+  const data = snapshotMap(map);
+  const revealedByRoom = db
+    .prepare(
+      `SELECT room.id, room.revealed, floor.position FROM map_rooms room
+       JOIN map_floors floor ON floor.id = room.floor_id
+       WHERE floor.map_id = ? ORDER BY floor.position, floor.id, room.id`
+    )
+    .all(map.id);
+  let cursor = 0;
+  for (const floor of data.floors ?? []) {
+    for (const room of floor.rooms ?? []) {
+      room.revealed = Boolean(revealedByRoom[cursor]?.revealed);
+      cursor += 1;
+    }
+  }
+  const template = saveTemplate(req.user.id, 'escaramuza', req.body?.name ?? campaign.name, data);
+  res.status(201).json({ template: serializeTemplate(template) });
 });
 
 campaignsRouter.get('/:id', (req, res) => {

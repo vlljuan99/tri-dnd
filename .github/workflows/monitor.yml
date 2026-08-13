@@ -1,0 +1,26 @@
+name: Monitor production
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  availability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar web, base de datos y Socket.IO
+        env:
+          APP_URL: https://tridnd.167-233-99-156.sslip.io
+        run: |
+          HOME_STATUS=$(curl --retry 2 --retry-delay 3 -sS -o /dev/null -w "%{http_code}" "$APP_URL/")
+          HEALTH_BODY=$(curl --retry 2 --retry-delay 3 -fsS "$APP_URL/api/health")
+          SOCKET_BODY=$(curl --retry 2 --retry-delay 3 -fsS "$APP_URL/socket.io/?EIO=4&transport=polling")
+          jq -e '.ok == true and .database.ok == true and (.database.migration | type == "number")' <<<"$HEALTH_BODY"
+          [[ "$HOME_STATUS" == "200" ]]
+          [[ "$SOCKET_BODY" == 0* ]]
+          echo "TriDnD disponible: $(jq -r '.commit') · migración $(jq -r '.database.migration')"

@@ -22,7 +22,7 @@ export default function ParchmentShell({ children }) {
         <div className="flex items-center gap-6">
           <h1 className="font-display text-xl font-bold tracking-wider">TriDnD</h1>
           <nav className="flex gap-4">
-            <NavLink to="/" end className={navClass}>Campañas</NavLink>
+            <NavLink to="/campanas" className={navClass}>Campañas</NavLink>
             <NavLink to="/personajes" className={navClass}>Personajes</NavLink>
             <NavLink to="/compendio" className={navClass}>Compendio</NavLink>
           </nav>

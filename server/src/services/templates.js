@@ -9,7 +9,10 @@ import { normalizeFluidEffects } from './fluidRules.js';
 // borrar mapas solo borra filas, nunca archivos, así que el snapshot no
 // necesita copiarlas. Las salas siempre se instancian sin revelar.
 
-export const TEMPLATE_KINDS = new Set(['sala', 'mapa', 'ciudad', 'enemigo']);
+// 'escaramuza' guarda el mismo snapshot que 'mapa' (un tablero entero), pero
+// se cataloga aparte porque su destino es crear una partida completa desde el
+// Hub, no añadir un mapa más a una campaña ya abierta.
+export const TEMPLATE_KINDS = new Set(['sala', 'mapa', 'ciudad', 'enemigo', 'escaramuza']);
 
 // ---- Snapshot ----
 
@@ -391,7 +394,7 @@ function buildMeta(kind, data) {
   if (kind === 'sala') {
     return { width: data.width, height: data.height, tokens: (data.tokens ?? []).length };
   }
-  if (kind === 'mapa') {
+  if (kind === 'mapa' || kind === 'escaramuza') {
     const rooms = (data.floors ?? []).reduce((n, f) => n + (f.rooms ?? []).length, 0);
     const tokens = (data.floors ?? []).reduce(
       (n, f) => n + (f.rooms ?? []).reduce((m, r) => m + (r.tokens ?? []).length, 0),
@@ -426,7 +429,7 @@ function buildMeta(kind, data) {
 
 function previewFor(kind, data) {
   if (kind === 'sala') return data.backgroundUrl ?? null;
-  if (kind === 'mapa') {
+  if (kind === 'mapa' || kind === 'escaramuza') {
     for (const floor of data.floors ?? []) {
       for (const room of floor.rooms ?? []) {
         if (room.backgroundUrl) return room.backgroundUrl;

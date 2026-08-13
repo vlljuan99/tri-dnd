@@ -1,6 +1,6 @@
 # Hoja de ruta de TriDnD
 
-Desarrollo por fases, confirmando con el usuario entre fases (ver contexto completo en [CLAUDE.md](CLAUDE.md)). Alcance actual: **solo local**, sin despliegue.
+Desarrollo por fases, confirmando con el usuario entre fases (ver contexto completo en [CLAUDE.md](CLAUDE.md)). El desarrollo cotidiano es local y existe una beta privada desplegada; publicar una revisión sigue siendo una fase explícita y manual.
 
 ## Completadas
 
@@ -33,7 +33,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 
 - [x] **Fase 7 (resto)** — Herramientas de mesa sobre el tablero
   - Ping compartido (doble clic, socket efímero), regla de medir (casillas/pies, regla 5e), cruzar puertas pisando el umbral (abre, revela, teletransporta; entre plantas por escaleras/portales), selector de planta en el tablero, velocidad del personaje visible, dado flotante arrastrable, y el jugador nunca pierde de vista la sala donde está su personaje (el DM ve atenuado lo no revelado)
-  - Pospuesto a la fase de pulido (14): pathing automático que rodea obstáculos y dibujo libre del DM
+  - [x] Pathing automático que rodea obstáculos (implementado después con Dijkstra, terreno, paredes y elevación). Sigue pendiente el dibujo libre del DM
 
 - [x] **Fase 8** — Obstáculos, trampas y niebla de guerra
   - **Obstáculos por sala** (migración v12): se pintan en el editor, bloquean el paso y se ven como bloques en el tablero 3D
@@ -138,7 +138,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
   - **Configuración del DM** (migración v36): CD de Percepción por trampa y radio de visión/detección por NPC o enemigo, conservados también en plantillas
   - **Capa de visión**: al seleccionar un NPC/enemigo, el DM puede mostrar su alcance real sobre el tablero; respeta obstáculos, paredes y puertas cerradas
 
-- [ ] **Fase 11 (en curso)** — Buscador de compendio + comandos de chat (`/r 1d20+4`)
+- [x] **Fase 11** — Buscador de compendio + comandos de chat (`/r 1d20+4`)
   - [x] **Buscador general** (`/compendio`, `GET /api/srd/buscar`): consulta conjunta con filtros de hechizos, monstruos, equipo y condiciones, incluye objetos/hechizos propios, indicador EN y detalle de cada resultado
   - [x] **Búsqueda profunda y facetas** (migración v48, `srd_fts`): FTS5 aplana recursivamente toda la prosa del `data` (acciones y rasgos de monstruo, rasgos de clase, reglas, propiedades…), añade nombres traducidos de referencias relacionadas, pliega acentos, admite prefijos y ordena por BM25. El buscador transversal filtra además hechizos por nivel/escuela/clase, monstruos por VD/tipo y objetos mágicos por rareza
   - [x] **Referencias del compendio en el chat** (migración v50, `chat_messages.srd_references`): autocompletado con `@` en la mesa, chips inline persistentes que abren el detalle compartido y botón «Compartir en la mesa» desde `/compendio` (selector si hay varias mesas en vivo). El servidor valida claves y rangos contra el SRD público; las entradas privadas del DM nunca se aceptan como referencia
@@ -158,7 +158,7 @@ Desarrollo por fases, confirmando con el usuario entre fases (ver contexto compl
 
 - [ ] **Fase 13** — Aplicar la dirección de diseño y atmósfera de forma consistente en toda la app
   - Auditoría visual completa: paleta nocturna de mesa vs. paleta cálida de campamento, tipografías (Cinzel/Alegreya/JetBrains Mono), evitar clichés genéricos de IA
-  - Explicación de atributos al pasar el ratón (hover) en la ficha de personaje
+  - [x] Explicación de atributos y estadísticas mediante `StatTooltip`, accesible también con foco/táctil
   - Música ambiental asociada a casillas o situaciones del tablero, con **integración con Spotify**: el DM enlaza su cuenta (Premium, OAuth) y la mesa controla remotamente el dispositivo Spotify que ya tenga activo (play/pausa/playlist/volumen) — no requiere que la partida sea presencial, el sonido llega por donde el DM ya lo esté compartiendo (Discord u otro)
   - Sonido de "BRUH" al sacar una pifia (grabar a Dani)
 
@@ -250,7 +250,7 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
   - **Mesa**: `WorldMapView` pinta la capa actual (`current_world_map_id`) con glifo por tipo (⚔ 🏰 ⛺ ❗) y botón «← Volver a {padre}» (`POST /mundo/volver`, solo DM); viajar a una ciudad muestra su lore y mete al grupo en el submapa («Entrar al mapa»), viajar a un pin oculto lo revela y dispara sus eventos como mensaje ⚑ en el chat (oculto solo-DM si el evento lo es)
   - El pin `campamento` abre la escena de campamento de la Fase 9 («Acampar» tras su lore)
 
-- [ ] **Exploración v2 — presencia, descubrimiento y rutas** (extiende el «Mapa de mundo por capas»). Decisiones de producto cerradas con el usuario (jul-2026): hoy la exploración es 100% pasiva para el jugador (el pin está `disabled` salvo para el DM en `WorldMapView`), todos los pins no-ocultos se ven desde el inicio (sin sensación de descubrimiento) y viajar es teletransporte instantáneo. Se cierra dando **voz al jugador sin quitarle el control al DM**, haciendo que **el mapa se ilumine al recorrerlo** y convirtiendo el viaje en **caminos con coste y eventos**. Tres cortes, entregables por separado:
+- [x] **Exploración v2 — presencia, descubrimiento y rutas** (extiende el «Mapa de mundo por capas»). Decisiones de producto cerradas con el usuario (jul-2026): da voz al jugador sin quitarle el control al DM, ilumina el mapa al recorrerlo y convierte el viaje en caminos con coste y eventos. Tres cortes entregados por separado:
   - [x] **Corte A — Presencia y descubrimiento** (autónomo, sin rutas; se ve en mesa enseguida):
     - **Ping de mundo**: el jugador deja de tener el pin `disabled`; pulsar lanza un ping efímero en coordenadas `%` sobre la imagen de la capa actual (`current_world_map_id`), visible para todo el grupo — mismo patrón que `mapa:ping` del tablero (socket efímero, sin tocar la BD). Si cae sobre un pin se etiqueta con su nombre («Aldo señala → Puerto Negro»). El DM sigue siendo el único que viaja.
     - **Visitada + penumbra**: nueva columna `world_locations.visited` (migración v46), marcada en servidor al viajar (`world.js`, handler `viajar`); no es secreto, viaja a todos. En `WorldMapView`: no visitadas atenuadas, visitadas nítidas, actual en dorado (como hoy). NO se elige niebla real: los nombres siempre son visibles, solo cambia el énfasis.
@@ -262,7 +262,8 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
   - [x] **Corte C — Coste y eventos en ruta** (migración v52):
     - **Reloj de campaña en jornadas (días)**: contador acumulado que avanza el `cost` de cada ruta recorrida; **solo narrativo** por ahora (se muestra en cabecera/diario, sin ganchos mecánicos de descanso/raciones — eso queda para fase futura).
     - **Eventos en ruta**: `event_links` extendido con `target_type='ruta'` (mismo precedente que `'ubicacion'` de la fase del mapa por capas, sin tocar el CHECK de `dm_events`); se disparan **al recorrer** la arista, no al llegar, con el patrón un-solo-uso rearmable. Se cuelgan desde Gestión junto al resto de enlaces de evento.
-  - **Pulido asociado** (no bloquea; se retoma tras el Corte A): zoom/paneo del mapa de mundo (hoy la imagen es `max-h` fijo, mala en móvil y en mapas grandes), ilustración/miniatura del tablero en `LoreScreen` (hoy solo texto sobre fondo noche), y persistir el progreso del flujo de pantallas que hoy vive en refs (`loreSeenRef`/`seenLocationRef` en `CampaignGamePage`) y se pierde al recargar.
+
+- [ ] **Pulido de exploración**: zoom/paneo del mapa de mundo (hoy la imagen es `max-h` fijo, mala en móvil y en mapas grandes), ilustración/miniatura del tablero en `LoreScreen` y persistir el progreso del flujo de pantallas que hoy vive en refs (`loreSeenRef`/`seenLocationRef` en `CampaignGamePage`) y se pierde al recargar.
 
 - [x] **Biblioteca de plantillas del DM** — salas, dungeons enteros, ciudades y enemigos configurados, reutilizables entre campañas
   - **Modelo** (migración v35, `dm_templates` por usuario, como `custom_items`/`dm_events`): `kind` (`sala`/`mapa`/`ciudad`/`enemigo`, validado en ruta), `data` (snapshot JSON, `services/templates.js`), `preview_url` y `meta` (resumen precalculado para listados). Las imágenes se referencian por URL de `/uploads/maps` — borrar mapas nunca borra archivos, así que no se copian
@@ -290,6 +291,26 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
   - **Corte 2 — Selectores**: las clases/razas personalizadas aparecen en los selectores del asistente y de la ficha junto al SRD, agrupadas por «Del DM de la campaña» y «De tu biblioteca», con índice sintético `custom:<id>` (patrón Fase 15).
   - **Corte 3 — Cálculo en la ficha**: la característica efectiva conserva base + bono racial con desglose; la característica de lanzamiento sale del `data` de la clase; velocidad, salvaciones y destrezas automáticas se sincronizan al elegir; resistencias y sentidos se muestran como etiquetas, y las resistencias raciales también intervienen en la resolución de daño del servidor. Los rasgos narrativos se muestran aparte sin fingir automatización.
 
+- [x] **Zona de campañas con secciones y escaramuzas predefinidas**
+  - **Submenú del Hub**: `/` era una sola columna con scroll donde convivían crear campaña, escaramuza rápida, unirse con código y las dos listas. Ahora la zona vive en `/campanas` con sub-navegación propia (mismo patrón que el Taller) y cinco secciones: **Campañas**, **Escaramuzas**, **Escenarios**, **Donde juego** y **Crear o unirse**. `features/hub/` (layout + secciones + `sections.js`), con el listado pedido una sola vez en el layout y repartido por contexto: cambiar de pestaña no vuelve a llamar a la API. `pages/HubPage.jsx` desaparece
+  - **Rutas**: las secciones son segmentos **estáticos** a propósito (`/campanas/escenarios`, `/campanas/crear`…). Dos rutas dinámicas hermanas se pisarían con `/campanas/:id`; como React Router prioriza lo estático y los ids son numéricos, conviven sin ambigüedad. `/` redirige a `/campanas`, así que todos los «← Hub» de la app siguen funcionando. Test en `features/hub/__tests__/sections.test.js`
+  - **Borradores**: decisión del usuario — no tienen sección propia. Se quedan en «Campañas» con su distintivo y un filtro Todas/Listas/En borrador, para que una campaña no cambie de sitio justo al terminar de prepararla
+  - **Escenarios de fábrica** (`services/skirmishPresets.js`): tres escaramuzas completas para **hasta 6 jugadores**, definidas en código (la geometría se genera; además `server/data/` es el volumen del despliegue y habría que copiarlas a mano como pasó con las traducciones). Usan toda la capacidad del editor —salas, obstáculos, terreno difícil, paredes por arista, elevación, luces, fluidos, puertas con CD, trampas ocultas, botín, clima y hora— y enemigos del SRD con sus estadísticas:
+    - **Emboscada en el Paso del Cuervo** (nivel 3-4): desfiladero generado columna a columna, repisas a +1/+2 para los arqueros, barro, red oculta, lluvia al atardecer. 10 enemigos
+    - **La Cripta Anegada** (nivel 4-5): tres estancias, visión individual de noche, agua estancada con foso hundido, puerta atrancada CD 14 y un wight en el sagrario. 9 enemigos en oleadas
+    - **La Fundición del Puente Ígneo** (nivel 6-7): fosa de lava de lado a lado cruzada por una pasarela de dos casillas, dos plantas unidas por escalera, salamandra al fondo. 7 enemigos
+  - **Instanciación** (`services/skirmishes.js`): reutiliza `instantiateMap` de la biblioteca de plantillas, revela las salas de inicio (una plantilla del DM se estampa siempre a oscuras; una escaramuza no), deja el tablero como mapa activo y mete a los enemigos visibles en el tracker con la iniciativa ya tirada vía `spawnRoomEnemies`. **No arranca el combate**: al crearla todavía no hay ningún PJ en la mesa, así que el DM pulsa «Añadir grupo» cuando llegan los suyos
+  - **Escenarios propios**: nuevo tipo de plantilla `escaramuza` en `dm_templates` (sin migración: `kind` nunca tuvo CHECK). `POST /campaigns/:id/guardar-plantilla` fotografía el tablero activo entero y marca qué salas estaban reveladas para reproducirlas al instanciar; `POST /campaigns` acepta `presetId` o `templateId`
+  - Pendiente futuro: imágenes de fondo para los escenarios de fábrica (hoy son geometría pura) y poder compartir un escenario propio con otro DM
+
+- [ ] **Estabilización y producción reproducible**
+  - [x] La creación de un escenario prepara mapa, enemigos e iniciativas sin arrancar un turno huérfano antes de que llegue el grupo; prueba HTTP aislada sobre SQLite temporal
+  - [x] Dependencias vulnerables actualizadas (`socket.io-parser` 4.2.7, `body-parser` 1.20.6 y React Router 7.18.2) y auditoría limpia
+  - [x] Build Docker con `npm ci`, imagen inmutable por commit, metadatos OCI y `/api/health` con versión/SHA/migración/estado de almacenamiento
+  - [x] Workflow manual con tests, build, auditoría, backup consistente de SQLite y medios, smoke de web+BD+Socket.IO y rollback automático del código
+  - [x] Monitor externo desde GitHub Actions cada 30 minutos y manual de restauración en `deploy/README.md`
+  - [ ] Primer despliegue versionado: verificar en el VPS el backup generado, el SHA del health, el monitor y un simulacro controlado de rollback/restauración antes de cerrar la fase
+
 - [ ] **Fase 27 — Efectos elementales por tipo de daño** ⚠️ **HOMEBREW: esto NO es 5e clásico**
   - **Aviso de reglas**: en 5e RAW el tipo de daño **no lleva ningún efecto asociado** — el fuego no quema, el frío no ralentiza, el ácido no corroe. Un conjuro solo aplica un estado si su propio texto lo dice. Todo lo de esta fase es una capa añadida por encima del SRD, y por eso debe ser **activable por campaña** (apagada por defecto) y quedar dicho en el chat cuando se dispare, para que nadie confunda una regla de la casa con una del manual. El resto de la app sigue siendo RAW
   - **Mapa propuesto** (a afinar con el usuario): fuego → *quemado* (1d4 al inicio del turno, salvación de DES para apagarlo); frío → *congelado* (velocidad a la mitad, sin reacción); relámpago → *electrocutado* (sin reacciones 1 ronda); ácido → *corroído* (−1 CA mientras dure); psíquico → *aturdido* si falla salvación de SAB; radiante → *cegado* 1 ronda; necrótico → máximo de PG reducido. Veneno y trueno reutilizan las condiciones RAW que ya existen (*envenenado*, *ensordecido*), así que esas dos sí son de manual
@@ -302,8 +323,8 @@ Arco nuevo, independiente de la pista de pulido 12–14 (la Fase 14, "pruebas co
 
 ## Despliegue
 
-- [x] **Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights): contenedor único `tridnd:latest` (`Dockerfile` en la raíz, build multi-stage: cliente Vite + servidor Express sirviendo `client/dist`), tras el Caddy compartido de `/opt/tilestudio` vía red `tilestudio_default`. Datos persistidos en volumen `/opt/tridnd/data` (SQLite + uploads + `translations/es.json`, este último copiado al volumen porque el bind mount tapa lo empaquetado en la imagen). URL provisional sin dominio propio: `https://tridnd.167-233-99-156.sslip.io`. Archivos de despliegue en `deploy/` (`server-compose.yml`, `build-on-server.sh`, `tridnd.caddy`); redeploy manual por ahora (subir `src.tar.gz` + `./build-on-server.sh` en el servidor), sin GitHub Actions todavía a diferencia de friendlyflights
+- [x] **Desplegado en el VPS Hetzner compartido** (mismo host que tilestudio/teacherflow/friendlyflights): contenedor único tras el Caddy compartido de `/opt/tilestudio`, vía red `tilestudio_default`. Datos persistidos en `/opt/tridnd/data`; URL provisional `https://tridnd.167-233-99-156.sslip.io`. El workflow `Deploy to Hetzner` se lanza a mano, verifica la revisión y publica una imagen `tridnd:<commit-sha>` con backup previo y rollback; ver `deploy/README.md`
 
 ## Fuera de alcance por ahora
 
-- **Dominio propio y despliegue automático (GitHub Actions)** — de momento solo hay IP/sslip.io y redeploy manual; se añadirá cuando el usuario lo pida.
+- **Dominio propio y despliegue automático en cada push** — de momento hay IP/sslip.io y GitHub Actions bajo `workflow_dispatch`; la publicación deliberadamente no ocurre con cada cambio.
