@@ -5,14 +5,18 @@ import { campaignTypeOf, isDraft } from '../sections.js';
 // que cambia es la puerta principal (el Taller para el DM, la mesa para el
 // jugador) y el detalle que se muestra debajo.
 export default function CampaignCard({ campaign, compact = false, onDelete, onLeave, extra = null }) {
-  const isDm = campaign.role === 'dm';
+  const isSolo = Boolean(campaign.soloMode);
+  const isDm = campaign.role === 'dm' && !isSolo;
+  const isOwner = Boolean(campaign.owner || isDm);
   const isCampaign = campaignTypeOf(campaign) === 'campana';
   const draft = isDraft(campaign);
 
   // Una sola puerta para el DM: el Taller. Dentro está todo (identidad,
   // lore, mundo, reparto, mapas, eventos y jugadores).
   const primaryHref = isDm ? `/campanas/${campaign.id}/taller` : `/campanas/${campaign.id}`;
-  const primaryLabel = isDm
+  const primaryLabel = isSolo
+    ? 'Jugar en solitario'
+    : isDm
     ? draft
       ? 'Continuar preparación'
       : 'Abrir el taller'
@@ -42,7 +46,7 @@ export default function CampaignCard({ campaign, compact = false, onDelete, onLe
       </div>
 
       <p className="mt-1 text-sm text-ink/70">
-        {isDm ? 'Eres el DM' : 'Jugador'} · {isCampaign ? 'Campaña' : 'Escaramuza'}
+        {isSolo ? 'Director automático' : isDm ? 'Eres el DM' : 'Jugador'} · {isCampaign ? 'Campaña' : 'Escaramuza'}
         {campaign.maxPlayers ? ` · ${campaign.maxPlayers} plazas` : ''}
         {isDm && (
           <>
@@ -88,7 +92,7 @@ export default function CampaignCard({ campaign, compact = false, onDelete, onLe
           )}
           {extra}
         </div>
-        {isDm ? (
+        {isOwner ? (
           <button
             type="button"
             onClick={() => onDelete(campaign)}

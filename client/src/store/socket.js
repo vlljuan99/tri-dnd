@@ -28,7 +28,7 @@ export const useRoom = create((set, get) => ({
   online: [],
   joinError: null,
   removedCampaignId: null,
-  combat: { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
+  combat: { active: false, round: 1, turnId: null, enemyAiEnabled: false, combatants: [], opportunities: [] },
   // Sube cada vez que el servidor avisa de que ACABA de empezar el combate
   // (arranque manual del DM o automático al descubrir enemigos): la mesa lo
   // observa para mostrar el cartel de aviso a pantalla unos segundos.
@@ -183,7 +183,7 @@ export const useRoom = create((set, get) => ({
         campaignName: resp.campaignName,
         messages: resp.messages,
         online: resp.members,
-        combat: resp.combat ?? { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
+        combat: resp.combat ?? { active: false, round: 1, turnId: null, enemyAiEnabled: false, combatants: [], opportunities: [] },
       });
     });
   },
@@ -199,7 +199,7 @@ export const useRoom = create((set, get) => ({
       isLive: false,
       messages: [],
       online: [],
-      combat: { active: false, round: 1, turnId: null, combatants: [], opportunities: [] },
+      combat: { active: false, round: 1, turnId: null, enemyAiEnabled: false, combatants: [], opportunities: [] },
       worldTravel: null,
       spellAims: [],
       spellFx: [],
@@ -420,6 +420,15 @@ export const useRoom = create((set, get) => ({
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) => socket.emit('combat:toggle-mode', { campaignId, rerollAll }, resolve));
+  },
+
+  /** Activa o pausa los enemigos automáticos (DM o propietario de un escenario solitario). */
+  setEnemyAi(enabled) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) =>
+      socket.emit('combat:set-enemy-ai', { campaignId, enabled: Boolean(enabled) }, resolve)
+    );
   },
 
   /** Marca la reacción ('reaccion') o la acción adicional ('adicional') como gastada. */

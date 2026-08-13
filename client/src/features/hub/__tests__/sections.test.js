@@ -29,9 +29,10 @@ test('el reparto separa lo que diriges de lo que juegas', () => {
     { id: 3, role: 'dm', campaignType: 'escaramuza', status: 'draft' },
     { id: 4, role: 'jugador', campaignType: 'campana' },
     { id: 5, role: 'jugador', campaignType: 'escaramuza' },
+    { id: 6, role: 'jugador', owner: true, soloMode: true, campaignType: 'escaramuza' },
   ]);
   assert.deepEqual(groups.campanas.map((c) => c.id), [1]);
-  assert.deepEqual(groups.escaramuzas.map((c) => c.id), [2, 3]);
+  assert.deepEqual(groups.escaramuzas.map((c) => c.id), [2, 3, 6]);
   // Donde juegas entran ambas: como jugador no distingues preparación
   assert.deepEqual(groups.ajenas.map((c) => c.id), [4, 5]);
 });

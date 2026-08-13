@@ -44,7 +44,7 @@ async function stopChild(child) {
   ]);
 }
 
-test('crear un escenario prepara enemigos sin arrancar un turno huérfano', { timeout: 30000 }, async () => {
+test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout: 30000 }, async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tridnd-skirmish-'));
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -72,7 +72,7 @@ test('crear un escenario prepara enemigos sin arrancar un turno huérfano', { ti
     assert.equal(health.commit, 'sha-prueba');
     assert.equal(health.version, 'prueba');
     assert.equal(health.database.ok, true);
-    assert.equal(health.database.migration, 64);
+    assert.equal(health.database.migration, 66);
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
@@ -83,24 +83,72 @@ test('crear un escenario prepara enemigos sin arrancar un turno huérfano', { ti
     const cookie = register.headers.get('set-cookie')?.split(';')[0];
     assert.ok(cookie, 'el registro debe crear la cookie de sesión');
 
+    const setupDatabase = new Database(path.join(dataDir, 'tri-dnd.db'));
+    const characterIds = [];
+    try {
+      const userId = setupDatabase.prepare("SELECT id FROM users WHERE username = 'dm-integracion'").get().id;
+      for (const name of ['Alda', 'Borin', 'Cira']) {
+        const character = setupDatabase
+          .prepare(
+            `INSERT INTO characters (user_id, name, level, hp_max, hp_current, ac, status, kind)
+             VALUES (?, ?, 4, 36, 36, 16, 'complete', 'pj')`
+          )
+          .run(userId, name);
+        characterIds.push(Number(character.lastInsertRowid));
+      }
+    } finally {
+      setupDatabase.close();
+    }
+
     const presetsResponse = await fetch(`${baseUrl}/api/campaigns/escaramuzas/predefinidas`, {
       headers: { Cookie: cookie },
     });
     assert.equal(presetsResponse.status, 200);
     const { presets } = await presetsResponse.json();
     assert.equal(presets.length, 3);
+    assert.ok(presets.every((preset) => preset.soloMode === true));
+
+    const missingCharacter = await fetch(`${baseUrl}/api/campaigns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ campaignType: 'escaramuza', presetId: presets[0].id }),
+    });
+    assert.equal(missingCharacter.status, 400, 'un escenario sin DM no debe nacer sin aventurero');
 
     const campaigns = [];
-    for (const preset of presets) {
+    for (const [index, preset] of presets.entries()) {
       const createResponse = await fetch(`${baseUrl}/api/campaigns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ campaignType: 'escaramuza', presetId: preset.id }),
+        body: JSON.stringify({
+          campaignType: 'escaramuza',
+          presetId: preset.id,
+          characterId: characterIds[index],
+        }),
       });
       const createBody = await createResponse.text();
       assert.equal(createResponse.status, 201, createBody);
       const { campaign } = JSON.parse(createBody);
-      campaigns.push(campaign);
+      assert.equal(campaign.role, 'jugador');
+      assert.equal(campaign.owner, true);
+      assert.equal(campaign.soloMode, true);
+      assert.equal(campaign.inviteCode, null);
+      const playerMapResponse = await fetch(
+        `${baseUrl}/api/campaigns/${campaign.id}/mapa-activo`,
+        { headers: { Cookie: cookie } }
+      );
+      assert.equal(playerMapResponse.status, 200);
+      const playerMap = (await playerMapResponse.json()).map;
+      assert.ok(playerMap?.floors?.length, 'el aventurero debe recibir el tablero');
+      assert.ok(
+        playerMap.floors.flatMap((floor) => floor.rooms).every((room) => room.notes === ''),
+        'ni el propietario técnico debe recibir notas privadas del mapa'
+      );
+      const forbiddenAdmin = await fetch(`${baseUrl}/api/campaigns/${campaign.id}/mapas`, {
+        headers: { Cookie: cookie },
+      });
+      assert.equal(forbiddenAdmin.status, 403, 'el modo solitario no debe conservar acceso al editor del DM');
+      campaigns.push({ ...campaign, characterId: characterIds[index] });
     }
 
     const database = new Database(path.join(dataDir, 'tri-dnd.db'), { readonly: true });
@@ -108,10 +156,10 @@ test('crear un escenario prepara enemigos sin arrancar un turno huérfano', { ti
       let totalPreparedEnemies = 0;
       for (const campaign of campaigns) {
         const table = database
-          .prepare('SELECT combat_active, combat_turn_id, active_map_id FROM game_tables WHERE campaign_id = ?')
+          .prepare('SELECT combat_active, combat_turn_id, active_map_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
           .get(campaign.id);
         const combatants = database
-          .prepare('SELECT initiative_source FROM combatants WHERE campaign_id = ? ORDER BY id')
+          .prepare('SELECT kind, character_id, initiative_source FROM combatants WHERE campaign_id = ? ORDER BY id')
           .all(campaign.id);
         const visibleEnemies = database
           .prepare(
@@ -125,11 +173,32 @@ test('crear un escenario prepara enemigos sin arrancar un turno huérfano', { ti
           .get(campaign.id).total;
 
         assert.equal(table.combat_active, 1, 'el modo por turnos sigue preparado por defecto');
-        assert.equal(table.combat_turn_id, null, 'ningún enemigo debe actuar antes de que llegue el grupo');
+        assert.equal(table.enemy_ai_enabled, 1, 'los escenarios de fábrica deben activar la IA enemiga');
+        assert.ok(table.combat_turn_id, 'el orden debe tener un turno activo desde el inicio');
         assert.ok(table.active_map_id, 'el escenario debe quedar como tablero activo');
-        assert.equal(combatants.length, visibleEnemies, 'cada enemigo visible debe entrar una vez al tracker');
+        assert.equal(combatants.length, visibleEnemies + 1, 'el tracker debe contener enemigos y el PJ elegido');
         assert.ok(combatants.every((entry) => entry.initiative_source === 'auto'));
-        totalPreparedEnemies += combatants.length;
+        assert.ok(
+          combatants.some((entry) => entry.kind === 'pj' && entry.character_id === campaign.characterId),
+          'el PJ elegido debe entrar en iniciativa'
+        );
+        const character = database.prepare('SELECT campaign_id FROM characters WHERE id = ?').get(campaign.characterId);
+        assert.equal(character.campaign_id, campaign.id);
+        const persistedCampaign = database
+          .prepare('SELECT solo_mode, lore, objectives FROM campaigns WHERE id = ?')
+          .get(campaign.id);
+        assert.equal(persistedCampaign.solo_mode, 1);
+        assert.ok(persistedCampaign.lore, 'el director debe presentar la situación inicial');
+        assert.ok(JSON.parse(persistedCampaign.objectives).length >= 2, 'la prueba necesita objetivos públicos');
+        const intro = database
+          .prepare("SELECT body FROM chat_messages WHERE campaign_id = ? AND type = 'system' ORDER BY id LIMIT 1")
+          .get(campaign.id);
+        assert.match(intro?.body ?? '', /^Director automático:/);
+        const token = database
+          .prepare('SELECT id FROM map_character_tokens WHERE map_id = ? AND character_id = ?')
+          .get(table.active_map_id, campaign.characterId);
+        assert.ok(token, 'el PJ elegido debe aparecer en el tablero');
+        totalPreparedEnemies += combatants.filter((entry) => entry.kind === 'enemigo').length;
       }
       assert.ok(totalPreparedEnemies > 0, 'el catálogo debe incluir encuentros preparados');
     } finally {

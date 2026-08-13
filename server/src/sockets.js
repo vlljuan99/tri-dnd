@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { parseCookie } from 'cookie';
 import { db } from './db.js';
 import { JWT_SECRET, COOKIE_NAME } from './config.js';
-import { getMembership, countPlayers } from './routes/campaigns.js';
+import { getMembership, countPlayers, isSoloCampaign } from './routes/campaigns.js';
 import {
   bindCampaignMemberEvicter,
   bindCombatBroadcaster,
@@ -50,6 +50,7 @@ import {
   deactivateTurnMode,
   trySpendAction,
   trySpendMonsterAttack,
+  trySpendEnemyMovement,
   tryUseBonusAction,
   tryUseReaction,
   trySpecialAction,
@@ -73,8 +74,8 @@ import {
 import { buildMultiattackPlans, parseMultiattackState } from './services/monsterActions.js';
 import { sanitizeChatReferences, standaloneChatReference } from './services/chatReferences.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './services/serverDice.js';
-import { resolveFluidTurnEnd } from './services/fluidEffects.js';
-import { resolveHazardTurnStart } from './services/hazardZones.js';
+import { resolveFluidMovement, resolveFluidTurnEnd } from './services/fluidEffects.js';
+import { resolveHazardMovement, resolveHazardTurnStart } from './services/hazardZones.js';
 import { bossActionsFor, syncBossResources, useBossAction } from './services/bossActions.js';
 import { discoverCreatures } from './services/bestiary.js';
 import {
@@ -89,6 +90,9 @@ import {
   spellAreaCells,
   spellDamageNotation,
 } from './services/spellAreas.js';
+import { buildElevationMap, buildWalkableGrid } from './services/pathfinding.js';
+import { buildWallSet } from './services/walls.js';
+import { decideEnemyTurn, normalizeEnemyAttacks } from './services/enemyAi.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
@@ -274,13 +278,16 @@ function narrateInitiativeRolls(campaignId, rolls) {
 
 function combatStateFor(campaignId, { isDm = false, userId = null } = {}) {
   const table = db
-    .prepare('SELECT combat_active, combat_round, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+    .prepare(
+      'SELECT combat_active, combat_round, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?'
+    )
     .get(campaignId);
   const round = table?.combat_round ?? 1;
   return {
     active: Boolean(table?.combat_active),
     round,
     turnId: table?.combat_turn_id ?? null,
+    enemyAiEnabled: Boolean(table?.enemy_ai_enabled),
     combatants: orderedCombatants(campaignId).map((r) => combatantView(r, { isDm, round })),
     opportunities: opportunitiesForViewer(campaignId, { isDm, userId }),
   };
@@ -1019,6 +1026,12 @@ function validateAttackMode(roll, effects) {
 }
 
 export function setupSockets(io) {
+  // Una sola jugada pendiente por campaña aunque haya varios sockets unidos.
+  // El temporizador corto deja que la interfaz pinte el turno y permite al DM
+  // pausarlo o adelantarlo antes de que la IA actúe.
+  const enemyAiTimers = new Map();
+  const enemyAiRunning = new Set();
+
   bindConditionExpirationNotifier((campaignId, expirations) => {
     emitConditionExpirations(campaignId, expirations);
   });
@@ -1110,8 +1123,14 @@ export function setupSockets(io) {
   // los servicios: firmados por el DM de la campaña y, si el evento es
   // oculto, filtrados igual que una tirada oculta (solo DM/autor los reciben)
   bindChatPoster((campaignId, { body, hidden, userId }) => {
-    const dmUserId = db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id;
+    const campaign = db
+      .prepare('SELECT dm_user_id, solo_mode FROM campaigns WHERE id = ?')
+      .get(campaignId);
+    const dmUserId = campaign?.dm_user_id;
     if (!dmUserId) return;
+    // En modo sin DM no existe un receptor legítimo para una nota secreta
+    // del director. Las consecuencias privadas con autor sí llegan a ese PJ.
+    if (campaign.solo_mode && hidden && userId == null) return;
     const senderId = userId ?? dmUserId;
     const message = insertMessage({ campaignId, userId: senderId, type: 'system', body, hidden });
     broadcastMessage(campaignId, message, { senderId, dmUserId });
@@ -1143,6 +1162,7 @@ export function setupSockets(io) {
         members: onlineMembers(campaignId),
         combat: combatStateFor(campaignId, { isDm: membership.role === 'dm', userId: user.id }),
       });
+      scheduleEnemyAiTurn(campaignId);
     });
 
     socket.on('room:leave', ({ campaignId }) => {
@@ -1432,6 +1452,7 @@ export function setupSockets(io) {
       ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
       if (detail) narrateInitiativeRolls(campaignId, [{ name: cleanName, kind: cleanKind, ...detail }]);
+      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1522,6 +1543,7 @@ export function setupSockets(io) {
       ensureTurnStarted(campaignId);
       broadcastCombat(campaignId);
       narrateInitiativeRolls(campaignId, rolls);
+      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1640,6 +1662,7 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       notifyCombatStarted(campaignId);
       narrateInitiativeRolls(campaignId, rolls);
+      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1699,6 +1722,349 @@ export function setupSockets(io) {
       };
     }
 
+    function enemyTurnContext(campaignId, combatant) {
+      const mapId = getActiveMapId(campaignId);
+      if (!mapId || !combatant?.map_token_id) return null;
+      const attacker = db
+        .prepare(
+          `SELECT token.*, room.floor_id
+           FROM map_tokens token
+           JOIN map_rooms room ON room.id = token.room_id
+           JOIN map_floors floor ON floor.id = room.floor_id
+           WHERE token.id = ? AND floor.map_id = ?`
+        )
+        .get(combatant.map_token_id, mapId);
+      if (!attacker) return null;
+
+      const map = db.prepare('SELECT * FROM maps WHERE id = ?').get(mapId);
+      const rooms = db.prepare('SELECT * FROM map_rooms WHERE floor_id = ?').all(attacker.floor_id);
+      const doors = db.prepare('SELECT * FROM map_doors WHERE map_id = ?').all(mapId);
+      const targets = db
+        .prepare(
+          `SELECT character.id, character.name,
+                  character.hp_current AS hpCurrent, character.hp_max AS hpMax,
+                  token.x, token.y, token.room_id AS roomId, room.floor_id AS floorId
+           FROM characters character
+           JOIN map_character_tokens token
+             ON token.character_id = character.id AND token.map_id = ?
+           JOIN map_rooms room ON room.id = token.room_id
+           WHERE character.campaign_id = ? AND character.hp_current > 0
+             AND room.floor_id = ?`
+        )
+        .all(mapId, campaignId, attacker.floor_id);
+
+      const occupied = new Set();
+      for (const token of db
+        .prepare(
+          `SELECT token.x, token.y FROM map_tokens token
+           JOIN map_rooms room ON room.id = token.room_id
+           JOIN map_floors floor ON floor.id = room.floor_id
+           WHERE floor.map_id = ? AND room.floor_id = ?`
+        )
+        .all(mapId, attacker.floor_id)) {
+        occupied.add(`${token.x},${token.y}`);
+      }
+      for (const token of db
+        .prepare(
+          `SELECT token.x, token.y FROM map_character_tokens token
+           JOIN map_rooms room ON room.id = token.room_id
+           WHERE token.map_id = ? AND room.floor_id = ?`
+        )
+        .all(mapId, attacker.floor_id)) {
+        occupied.add(`${token.x},${token.y}`);
+      }
+
+      return {
+        map,
+        mapId,
+        attacker,
+        rooms,
+        doors,
+        targets,
+        occupied,
+        walkable: buildWalkableGrid(rooms, map?.fluid_effects),
+        walls: buildWallSet(rooms, doors),
+        elevation: buildElevationMap(rooms),
+      };
+    }
+
+    function moveEnemyWithAi(campaignId, combatant, context, decision) {
+      if (!decision.moveCost || !decision.path?.length) return { ok: true, moved: false };
+      const destination = decision.destination;
+      const room = context.rooms.find(
+        (candidate) =>
+          destination.x >= candidate.x && destination.x < candidate.x + candidate.width &&
+          destination.y >= candidate.y && destination.y < candidate.y + candidate.height
+      );
+      if (!room) return { ok: false, error: 'La IA no encuentra una sala de destino válida' };
+      const spend = trySpendEnemyMovement(campaignId, context.attacker.id, decision.moveCost);
+      if (!spend.ok) return spend;
+
+      db.prepare('UPDATE map_tokens SET room_id = ?, x = ?, y = ? WHERE id = ?').run(
+        room.id,
+        destination.x,
+        destination.y,
+        context.attacker.id
+      );
+      const positions = decision.path.map((position) => ({
+        floorId: context.attacker.floor_id,
+        x: position.x,
+        y: position.y,
+      }));
+      resolveFluidMovement({
+        campaignId,
+        mapId: context.mapId,
+        targetKind: 'marcador',
+        targetId: context.attacker.id,
+        positions,
+      });
+      resolveHazardMovement({
+        campaignId,
+        mapId: context.mapId,
+        targetKind: 'marcador',
+        targetId: context.attacker.id,
+        positions,
+      });
+      touchMap(context.mapId);
+      notifyCampaignMap(campaignId);
+      postSystemMessage(
+        campaignId,
+        `${combatant.name} avanza ${decision.moveCost} ${decision.moveCost === 1 ? 'casilla' : 'casillas'} hacia ${decision.target.name}.`
+      );
+      return { ok: true, moved: true };
+    }
+
+    function publishEnemyRoll(campaignId, roll) {
+      const message = insertMessage({
+        campaignId,
+        userId: null,
+        type: 'roll',
+        body: JSON.stringify(roll),
+      });
+      io.to(roomName(campaignId)).emit('chat:new', message);
+    }
+
+    function performEnemyAiAttacks(campaignId, combatant, tokenId, data, firstAttack, firstTarget) {
+      const attacks = normalizeEnemyAttacks(data, jsonValue(combatant.overrides, {}));
+      if (!firstAttack || !firstTarget || attacks.length === 0) return { attacks: 0 };
+      const plans = buildMultiattackPlans(data);
+      const initialPlan = plans.find((plan) =>
+        plan.actions.some((entry) => entry.actionName.toLowerCase() === firstAttack.name.toLowerCase())
+      );
+      let planId = initialPlan?.id ?? null;
+      let attackName = firstAttack.name;
+      let target = firstTarget;
+      let count = 0;
+
+      while (attackName && target && count < 20) {
+        const currentCombatant = db
+          .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
+          .get(combatant.id, campaignId);
+        if (!currentCombatant || (Number.isInteger(currentCombatant.hp_current) && currentCombatant.hp_current <= 0)) break;
+        const normalized = attacks.find((attack) => attack.name.toLowerCase() === attackName.toLowerCase());
+        const actionData = monsterAction(data, attackName);
+        if (!normalized || !actionData) break;
+        const liveTarget = db.prepare('SELECT hp_current FROM characters WHERE id = ?').get(target.id);
+        if (!liveTarget || liveTarget.hp_current <= 0) break;
+
+        const resolved = resolveCombatTargetFromMarker(
+          campaignId,
+          tokenId,
+          { kind: 'personaje', id: target.id },
+          { geometry: normalized.geometry }
+        );
+        if (resolved.error) break;
+        const effects = attackEffectsFor(currentCombatant, resolved, {
+          melee: !normalized.geometry.ranged,
+          manualAdvantage: 'none',
+        });
+        if (effects.blocked) break;
+        const spend = trySpendMonsterAttack(campaignId, currentCombatant.id, {
+          actionName: attackName,
+          planId,
+          plans,
+        });
+        if (!spend.ok) break;
+
+        const attackRoll = buildServerD20Roll({
+          bonus: normalized.bonus,
+          advantage: effects.advantage,
+          label: `${actionData.name} · IA enemiga`,
+          actorName: currentCombatant.name,
+        });
+        const naturalCrit = attackRoll.crit;
+        const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= resolved.ac);
+        const critical = hit && (naturalCrit || effects.autoCrit);
+        publishEnemyRoll(
+          campaignId,
+          critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll
+        );
+        emitAttackVisual(campaignId, resolved, { hit, crit: critical });
+        postSystemMessage(
+          campaignId,
+          hit
+            ? `${currentCombatant.name} ataca a ${resolved.name} con ${actionData.name}: impacta${critical ? ' (crítico)' : ''}.`
+            : `${currentCombatant.name} ataca a ${resolved.name} con ${actionData.name}: falla${attackRoll.fumble ? ' (pifia)' : ''}.`
+        );
+
+        if (hit && normalized.damage.length) {
+          const magical = monsterUsesMagicalAttacks(data);
+          const damageRoll = buildServerDamageRoll({
+            components: normalized.damage.map((component) => ({
+              ...component,
+              magical,
+              silvered: false,
+              adamantine: false,
+            })),
+            crit: critical,
+            label: `Daño de ${actionData.name}`,
+            actorName: currentCombatant.name,
+          });
+          publishEnemyRoll(campaignId, damageRoll.roll);
+          const applied = applyCombatDamage(campaignId, resolved, damageRoll, {
+            source: 'attack',
+            critical,
+          });
+          postSystemMessage(campaignId, applied.body);
+          const mapId = getActiveMapId(campaignId);
+          if (mapId) touchMap(mapId);
+          notifyCampaignMap(campaignId);
+        }
+
+        count += 1;
+        const remaining = spend.multiattackState?.remaining ?? [];
+        attackName = remaining[0]?.actionName ?? null;
+        planId = spend.multiattackState?.planId ?? null;
+      }
+      return { attacks: count };
+    }
+
+    function runEnemyAiTurn(campaignId, combatant) {
+      const context = enemyTurnContext(campaignId, combatant);
+      if (!context) return { acted: false, reason: 'sin mapa' };
+      if (!context.targets.length) {
+        postSystemMessage(campaignId, `${combatant.name} no encuentra ningún PJ consciente al que atacar.`);
+        return { acted: false, reason: 'sin objetivos' };
+      }
+      const data = monsterData(combatant.monster_index ?? context.attacker.monster_index);
+      if (!data) {
+        postSystemMessage(campaignId, `${combatant.name} no tiene estadísticas de combate disponibles; la IA pasa su turno.`);
+        return { acted: false, reason: 'sin estadísticas' };
+      }
+      const overrides = jsonValue(combatant.overrides, {});
+      const speedFeet = Number.isInteger(overrides.speed)
+        ? overrides.speed
+        : monsterSpeedFeet(combatant.monster_index) ?? 30;
+      const maxMove = Math.max(0, Math.floor(speedFeet / 5) - (combatant.moved_squares ?? 0));
+      const decision = decideEnemyTurn({
+        attacker: context.attacker,
+        targets: context.targets,
+        monsterData: data,
+        overrides,
+        walkable: context.walkable,
+        walls: context.walls,
+        elevation: context.elevation,
+        rooms: context.rooms,
+        doors: context.doors,
+        occupied: context.occupied,
+        maxMove,
+      });
+      if (!decision) return { acted: false, reason: 'sin jugada' };
+      const movement = moveEnemyWithAi(campaignId, combatant, context, decision);
+      if (!movement.ok) return { acted: false, reason: movement.error };
+
+      const stillStanding = db
+        .prepare('SELECT hp_current FROM combatants WHERE id = ?')
+        .get(combatant.id);
+      if (Number.isInteger(stillStanding?.hp_current) && stillStanding.hp_current <= 0) {
+        return { acted: movement.moved, reason: 'derrotado durante el movimiento' };
+      }
+      const attacks = performEnemyAiAttacks(
+        campaignId,
+        combatant,
+        context.attacker.id,
+        data,
+        decision.attack,
+        decision.target
+      );
+      return { acted: movement.moved || attacks.attacks > 0 };
+    }
+
+    function cancelEnemyAiTurn(campaignId) {
+      const key = Number(campaignId);
+      const timer = enemyAiTimers.get(key);
+      if (timer) clearTimeout(timer);
+      enemyAiTimers.delete(key);
+    }
+
+    function scheduleEnemyAiTurn(campaignId, delay = 700) {
+      const key = Number(campaignId);
+      if (!Number.isInteger(key) || enemyAiTimers.has(key) || enemyAiRunning.has(key)) return;
+      const table = db
+        .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
+        .get(key);
+      if (!table?.combat_active || !table.enemy_ai_enabled || !table.combat_turn_id) return;
+      const active = db
+        .prepare("SELECT * FROM combatants WHERE id = ? AND campaign_id = ? AND kind = 'enemigo'")
+        .get(table.combat_turn_id, key);
+      if (!active || (Number.isInteger(active.hp_current) && active.hp_current <= 0)) return;
+      if (
+        isSoloCampaign(key) &&
+        !orderedCombatants(key).some((combatant) => combatant.kind === 'pj' && combatantTakesTurn(combatant))
+      ) {
+        db.prepare('UPDATE game_tables SET enemy_ai_enabled = 0 WHERE campaign_id = ?').run(key);
+        postSystemMessage(
+          key,
+          'La aventura se detiene: no queda ningún aventurero capaz de continuar. Recupera a tu personaje antes de reanudar el director.'
+        );
+        broadcastCombat(key);
+        return;
+      }
+
+      enemyAiTimers.set(
+        key,
+        setTimeout(() => {
+          enemyAiTimers.delete(key);
+          enemyAiRunning.add(key);
+          try {
+            const currentTable = db
+              .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
+              .get(key);
+            if (
+              !currentTable?.combat_active || !currentTable.enemy_ai_enabled ||
+              currentTable.combat_turn_id !== active.id
+            ) return;
+            runEnemyAiTurn(key, active);
+            const afterAction = db
+              .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
+              .get(key);
+            if (
+              afterAction?.combat_active && afterAction.enemy_ai_enabled &&
+              afterAction.combat_turn_id === active.id
+            ) {
+              const advanced = advanceTurn(key);
+              emitConditionExpirations(key, advanced.expiredConditions);
+              if (advanced.fluidChanged) notifyCampaignMap(key);
+            }
+            broadcastCombat(key);
+          } catch (error) {
+            console.error('[ia-enemiga] no se pudo resolver el turno', error);
+            db.prepare('UPDATE game_tables SET enemy_ai_enabled = 0 WHERE campaign_id = ?').run(key);
+            postSystemMessage(
+              key,
+              isSoloCampaign(key)
+                ? 'El director automático se ha pausado por un error. Puedes reanudarlo desde la mesa.'
+                : 'La IA enemiga no pudo resolver este turno. El DM conserva el control manual.'
+            );
+            broadcastCombat(key);
+          } finally {
+            enemyAiRunning.delete(key);
+            scheduleEnemyAiTurn(key);
+          }
+        }, delay)
+      );
+    }
+
     socket.on('combat:next', ({ campaignId }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede avanzar el turno' });
@@ -1708,6 +2074,7 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       emitConditionExpirations(campaignId, result.expiredConditions);
       if (result.fluidChanged) notifyCampaignMap(campaignId);
+      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1735,6 +2102,7 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       emitConditionExpirations(campaignId, result.expiredConditions);
       if (result.fluidChanged) notifyCampaignMap(campaignId);
+      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1994,7 +2362,45 @@ export function setupSockets(io) {
       // Cartel de aviso tras difundir el estado, para que ya tenga el orden
       if (turningOn) io.to(roomName(campaignId)).emit('combat:started');
       narrateInitiativeRolls(campaignId, rolls);
+      if (turningOn) scheduleEnemyAiTurn(campaignId);
+      else cancelEnemyAiTurn(campaignId);
       cb?.({ ok: true, active: turningOn });
+    });
+
+    // Automatización optativa y reversible. Solo cambia quién resuelve los
+    // turnos de enemigos; todas las reglas, tiradas y daños siguen pasando por
+    // las mismas validaciones del servidor que cuando los controla el DM.
+    socket.on('combat:set-enemy-ai', ({ campaignId, enabled }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      const campaign = db
+        .prepare('SELECT dm_user_id, solo_mode FROM campaigns WHERE id = ?')
+        .get(campaignId);
+      const ownsSoloGame = Boolean(
+        membership && campaign?.solo_mode && campaign.dm_user_id === user.id
+      );
+      if (membership?.role !== 'dm' && !ownsSoloGame) {
+        return cb?.({ error: 'No puedes controlar el director automático de esta partida' });
+      }
+      if (typeof enabled !== 'boolean') return cb?.({ error: 'Estado de IA no válido' });
+
+      db.prepare('UPDATE game_tables SET enemy_ai_enabled = ? WHERE campaign_id = ?').run(
+        enabled ? 1 : 0,
+        campaignId
+      );
+      if (enabled) scheduleEnemyAiTurn(campaignId, 350);
+      else cancelEnemyAiTurn(campaignId);
+      postSystemMessage(
+        campaignId,
+        enabled
+          ? campaign?.solo_mode
+            ? 'Director automático reanudado.'
+            : 'IA enemiga activada.'
+          : campaign?.solo_mode
+            ? 'Director automático pausado.'
+            : 'IA enemiga pausada: el DM recupera el control.'
+      );
+      broadcastCombat(campaignId);
+      cb?.({ ok: true, enabled });
     });
 
     // Cuántas iniciativas conservaría "respetar las existentes": el diálogo
@@ -2013,6 +2419,7 @@ export function setupSockets(io) {
       db.prepare(
         'UPDATE game_tables SET combat_active = 0, combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?'
       ).run(campaignId);
+      cancelEnemyAiTurn(campaignId);
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha terminado' });
       io.to(roomName(campaignId)).emit('chat:new', note);

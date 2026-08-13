@@ -104,6 +104,11 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
     if (resp?.error) toastError(resp.error);
   }
 
+  async function toggleEnemyAi() {
+    const response = await room.setEnemyAi(!combat.enemyAiEnabled);
+    if (response?.error) toastError(response.error);
+  }
+
   function submitAdd(e) {
     e.preventDefault();
     const name = form.name.trim();
@@ -152,6 +157,21 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
         </h2>
         {isDm && (
           <div className="flex gap-1">
+            <button
+              onClick={toggleEnemyAi}
+              title={
+                combat.enemyAiEnabled
+                  ? 'Pausa los turnos automáticos: el DM recupera el control de los enemigos'
+                  : 'Los enemigos se moverán y atacarán solos durante su turno'
+              }
+              className={`rounded-sm border px-2 py-0.5 text-xs ${
+                combat.enemyAiEnabled
+                  ? 'border-ember bg-ember/15 text-ember'
+                  : 'border-bone/25 text-bone/60 hover:text-bone'
+              }`}
+            >
+              IA {combat.enemyAiEnabled ? 'activa' : 'pausada'}
+            </button>
             {!combat.active ? (
               <button
                 onClick={askTurnMode}

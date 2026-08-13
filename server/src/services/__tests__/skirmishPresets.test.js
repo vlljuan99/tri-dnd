@@ -19,12 +19,15 @@ function roomCells(room) {
   };
 }
 
-test('el catálogo expone tres escaramuzas para seis jugadores', () => {
+test('el catálogo expone tres escaramuzas sin DM para un aventurero', () => {
   const list = listSkirmishPresets();
   assert.equal(list.length, 3);
   for (const entry of list) {
-    assert.equal(entry.players, 6);
+    assert.equal(entry.players, 1);
     assert.ok(entry.name && entry.summary && entry.suggestedLevel);
+    assert.match(entry.previewUrl, /^\/skirmishes\/.+\.webp$/);
+    assert.equal(entry.enemyAi, true);
+    assert.equal(entry.soloMode, true);
     assert.ok(entry.enemies > 0, `${entry.id} no tiene enemigos`);
     assert.equal(getSkirmishPreset(entry.id)?.id, entry.id);
   }
@@ -104,7 +107,7 @@ test('los marcadores están en casillas jugables y no se pisan entre sí', () =>
   }
 });
 
-test('hay sitio para los seis jugadores en una sala revelada', () => {
+test('hay sitio de aparición para el aventurero en una sala revelada', () => {
   for (const preset of SKIRMISH_PRESETS) {
     const revealed = preset.map.floors.flatMap((floor) => floor.rooms).filter((room) => room.revealed);
     assert.ok(revealed.length > 0, `${preset.id}: ninguna sala empieza revelada`);
