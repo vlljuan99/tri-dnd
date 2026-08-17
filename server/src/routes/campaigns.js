@@ -193,7 +193,7 @@ campaignsRouter.post('/', (req, res) => {
       .prepare(
         `SELECT id FROM characters
           WHERE id = ? AND user_id = ? AND kind = 'pj'
-            AND status = 'complete' AND campaign_id IS NULL`
+            AND status = 'complete' AND campaign_id IS NULL AND hp_max > 0`
       )
       .get(characterId, req.user.id);
     if (!soloCharacter) {
@@ -242,13 +242,20 @@ campaignsRouter.post('/', (req, res) => {
       }
       if (soloCharacter) {
         db.prepare('UPDATE characters SET campaign_id = ? WHERE id = ?').run(id, soloCharacter.id);
+        // Es una prueba autocontenida, no una continuación de la aventura
+        // anterior: el PJ entra recuperado aunque su ficha estuviera a 0 PG.
+        db.prepare(
+          `UPDATE characters
+              SET hp_current = hp_max, hp_temp = 0, updated_at = datetime('now')
+            WHERE id = ?`
+        ).run(soloCharacter.id);
         const map = getMap(id, seeded.mapId);
         ensureCharacterTokens(map, id);
-        ensureCombatantForCharacter(id, soloCharacter.id);
+        ensureCombatantForCharacter(id, soloCharacter.id, { firstTurn: true });
         db.prepare(
           `INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden)
            VALUES (?, NULL, 'system', ?, 0)`
-        ).run(id, `Director automático: ${source.briefing}`);
+        ).run(id, `Director automático: ${source.briefing} Entras con todos tus PG y tienes el primer turno.`);
       }
     } else {
       // La escaramuza en blanco es deliberadamente inmediata: nace completa y

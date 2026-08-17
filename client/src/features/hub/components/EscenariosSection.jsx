@@ -85,7 +85,8 @@ export default function EscenariosSection() {
         setTemplates(templateResponse.templates ?? []);
         const available = (characterResponse.characters ?? []).filter(
           (character) =>
-            character.kind === 'pj' && character.status === 'complete' && character.campaign_id == null
+            character.kind === 'pj' && character.status === 'complete' &&
+            character.campaign_id == null && character.hp_max > 0
         );
         setCharacters(available);
         setCharacterId((current) => current || (available[0] ? String(available[0].id) : ''));
@@ -119,7 +120,7 @@ export default function EscenariosSection() {
           <label className="mb-4 block rounded-md border border-ochre/25 bg-parchment-100/60 p-3 text-sm text-ink/70">
             <span className="font-display text-base text-ink">Personaje para la prueba</span>
             <span className="mt-0.5 block text-xs text-ink/50">
-              Entrará directamente al tablero con visión de jugador. El sistema llevará enemigos, turnos y revelaciones.
+              Entrará con todos sus PG y tendrá el primer turno. El sistema llevará enemigos, turnos y revelaciones.
             </span>
             <select
               value={characterId}

@@ -2,6 +2,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { canMoveToken } from '../domain/permissions.js';
+import { sceneLighting } from '../domain/weather.js';
 import AimOverlay from './AimOverlay.jsx';
 import MapDoor from './MapDoor.jsx';
 import MapFloor from './MapFloor.jsx';
@@ -12,7 +13,7 @@ import MovementRange from './MovementRange.jsx';
 import PingMarker from './PingMarker.jsx';
 import SpellFx from './SpellFx.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
-import WeatherLayer, { sceneLighting } from './WeatherLayer.jsx';
+import WeatherLayer from './WeatherLayer.jsx';
 
 const HAZARD_COLORS = {
   fuego: '#ff6a2a',

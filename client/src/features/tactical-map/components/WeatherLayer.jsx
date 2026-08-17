@@ -1,22 +1,6 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-
-const TIME_COLORS = {
-  amanecer: '#392b2a',
-  dia: '#14110f',
-  atardecer: '#2b1c20',
-  noche: '#070a13',
-};
-
-export function sceneLighting(map, hasLights) {
-  const time = map.timeOfDay ?? 'dia';
-  const nightFactor = time === 'noche' ? 0.34 : time === 'atardecer' || time === 'amanecer' ? 0.68 : 1;
-  return {
-    background: TIME_COLORS[time] ?? TIME_COLORS.dia,
-    ambient: (hasLights ? 0.6 : 0.95) * nightFactor,
-    directional: (hasLights ? 0.45 : 0.7) * nightFactor,
-  };
-}
+import { weatherFog } from '../domain/weather.js';
 
 function Precipitation({ map, type }) {
   const pointsRef = useRef(null);
@@ -62,18 +46,10 @@ function Precipitation({ map, type }) {
 
 export default function WeatherLayer({ map }) {
   const weather = map.weather ?? 'despejado';
+  const fog = weatherFog(map);
   return (
     <>
-      {(weather === 'niebla' || weather === 'lluvia') && (
-        <fog
-          attach="fog"
-          args={[
-            weather === 'niebla' ? '#6e7471' : '#283039',
-            weather === 'niebla' ? 8 - (map.weatherIntensity ?? 0.55) * 4 : 20,
-            weather === 'niebla' ? 28 - (map.weatherIntensity ?? 0.55) * 10 : 55,
-          ]}
-        />
-      )}
+      {fog && <fog attach="fog" args={[fog.color, fog.near, fog.far]} />}
       {(weather === 'lluvia' || weather === 'nieve') && <Precipitation map={map} type={weather} />}
     </>
   );
