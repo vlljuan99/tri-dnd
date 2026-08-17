@@ -87,13 +87,15 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     const characterIds = [];
     try {
       const userId = setupDatabase.prepare("SELECT id FROM users WHERE username = 'dm-integracion'").get().id;
-      for (const name of ['Alda', 'Borin', 'Cira']) {
+      for (const [index, name] of ['Alda', 'Borin', 'Cira'].entries()) {
         const character = setupDatabase
           .prepare(
-            `INSERT INTO characters (user_id, name, level, hp_max, hp_current, ac, status, kind)
-             VALUES (?, ?, 4, 36, 36, 16, 'complete', 'pj')`
+            `INSERT INTO characters (user_id, name, level, hp_max, hp_current, hp_temp, ac, status, kind)
+             VALUES (?, ?, 4, 36, ?, ?, 16, 'complete', 'pj')`
           )
-          .run(userId, name);
+          // La primera ficha reproduce el caso real: quedó inconsciente y con
+          // PG temporales en una partida anterior antes de volver al Hub.
+          .run(userId, name, index === 0 ? 0 : 36, index === 0 ? 8 : 0);
         characterIds.push(Number(character.lastInsertRowid));
       }
     } finally {
@@ -159,7 +161,7 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
           .prepare('SELECT combat_active, combat_turn_id, active_map_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
           .get(campaign.id);
         const combatants = database
-          .prepare('SELECT kind, character_id, initiative_source FROM combatants WHERE campaign_id = ? ORDER BY id')
+          .prepare('SELECT id, kind, character_id, initiative_source FROM combatants WHERE campaign_id = ? ORDER BY id')
           .all(campaign.id);
         const visibleEnemies = database
           .prepare(
@@ -178,12 +180,17 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
         assert.ok(table.active_map_id, 'el escenario debe quedar como tablero activo');
         assert.equal(combatants.length, visibleEnemies + 1, 'el tracker debe contener enemigos y el PJ elegido');
         assert.ok(combatants.every((entry) => entry.initiative_source === 'auto'));
-        assert.ok(
-          combatants.some((entry) => entry.kind === 'pj' && entry.character_id === campaign.characterId),
-          'el PJ elegido debe entrar en iniciativa'
+        const playerCombatant = combatants.find(
+          (entry) => entry.kind === 'pj' && entry.character_id === campaign.characterId
         );
-        const character = database.prepare('SELECT campaign_id FROM characters WHERE id = ?').get(campaign.characterId);
+        assert.ok(playerCombatant, 'el PJ elegido debe entrar en iniciativa');
+        assert.equal(table.combat_turn_id, playerCombatant.id, 'el PJ debe tener siempre el primer turno');
+        const character = database
+          .prepare('SELECT campaign_id, hp_current, hp_max, hp_temp FROM characters WHERE id = ?')
+          .get(campaign.characterId);
         assert.equal(character.campaign_id, campaign.id);
+        assert.equal(character.hp_current, character.hp_max, 'el escenario debe recuperar al PJ por completo');
+        assert.equal(character.hp_temp, 0, 'los PG temporales de otra partida no deben heredarse');
         const persistedCampaign = database
           .prepare('SELECT solo_mode, lore, objectives FROM campaigns WHERE id = ?')
           .get(campaign.id);

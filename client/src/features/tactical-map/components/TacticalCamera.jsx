@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import { TACTICAL_CAMERA_DISTANCE } from '../domain/weather.js';
 
 const DEFAULT_ZOOM = 52;
 const MIN_ZOOM = 24;
 const MAX_ZOOM = 120;
-const CAMERA_HEIGHT = 60;
 // Inclinación inicial de la cámara respecto a la vertical (debe coincidir
 // con el escalón inicial de TILT_STEPS_DEG en TacticalMap, 26°). El comando
 // 'tilt' trae el ángulo elegido en radianes (0 = cenital puro) y 'rotate'
@@ -59,9 +59,9 @@ export default function TacticalCamera({ map, command }) {
     const sinA = Math.sin(azimuth);
     const cosA = Math.cos(azimuth);
     camera.position.set(
-      targetRef.current.x + CAMERA_HEIGHT * sinT * sinA,
-      CAMERA_HEIGHT * cosT,
-      targetRef.current.z + CAMERA_HEIGHT * sinT * cosA
+      targetRef.current.x + TACTICAL_CAMERA_DISTANCE * sinT * sinA,
+      TACTICAL_CAMERA_DISTANCE * cosT,
+      targetRef.current.z + TACTICAL_CAMERA_DISTANCE * sinT * cosA
     );
     camera.up.set(-sinA * cosT, sinT, -cosA * cosT);
     camera.lookAt(targetRef.current.x, 0, targetRef.current.z);

@@ -263,7 +263,7 @@ export function deactivateTurnMode(campaignId) {
 // Añade un personaje al tracker si aún no está (mismo patrón que los
 // enemigos al revelarse su sala): tira iniciativa si el modo ya está activo,
 // y arranca el turno si el tracker estaba vacío. Devuelve true si lo insertó.
-export function ensureCombatantForCharacter(campaignId, characterId) {
+export function ensureCombatantForCharacter(campaignId, characterId, { firstTurn = false } = {}) {
   const existing = db
     .prepare("SELECT id FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
     .get(campaignId, characterId);
@@ -279,7 +279,7 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
   const detail = table?.combat_active
     ? rollInitiativeDetailed({ kind: 'pj', character_id: characterId })
     : null;
-  db.prepare(
+  const inserted = db.prepare(
     `INSERT INTO combatants (campaign_id, character_id, kind, name, initiative,
      initiative_source, initiative_d20, initiative_mod, death_state)
      VALUES (?, ?, 'pj', ?, ?, ?, ?, ?, ?)`
@@ -293,7 +293,15 @@ export function ensureCombatantForCharacter(campaignId, characterId) {
     detail?.modifier ?? null,
     character.hp_current <= 0 ? DEATH_STATES.DYING : DEATH_STATES.NORMAL
   );
-  ensureTurnStarted(campaignId);
+
+  // Los escenarios preparados sin DM conceden la apertura al aventurero. La
+  // iniciativa se conserva y seguirá ordenando los turnos posteriores; solo
+  // evitamos que la IA actúe antes de que el jugador haya podido hacer nada.
+  if (firstTurn && table?.combat_active) {
+    startTurnFor(campaignId, Number(inserted.lastInsertRowid), 1);
+  } else {
+    ensureTurnStarted(campaignId);
+  }
   return detail ? { inserted: true, name: character.name, ...detail } : { inserted: true };
 }
 
