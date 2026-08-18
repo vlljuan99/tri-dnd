@@ -4,6 +4,22 @@ La producción usa una imagen Docker inmutable por revisión: `tridnd:<commit-sh
 El archivo `/opt/tridnd/.deploy.env` registra qué imagen debe ejecutar Compose y
 `/api/health` confirma la misma revisión, la versión y la migración de SQLite.
 
+## Compendio del SRD en producción
+
+El catálogo (`srd_entries`) y la progresión de clase (`class_levels`) **no viajan
+en la imagen**: viven en la base del volumen persistente. Tras un despliegue que
+añada categorías, traducciones o progresión hay que sincronizar en el servidor:
+
+```bash
+ssh root@167.233.99.156 'docker exec -w /app/server tridnd-app npm run sync-srd'
+```
+
+Las traducciones (`server/data/translations/es.json`) sí son código versionado,
+pero `server/data` es el punto de montaje del volumen y tapa lo que trae la
+imagen; por eso el workflow las copia al volumen en cada despliegue, antes de
+construir. Si se sincroniza sin esa copia, se aplican las traducciones antiguas.
+
+
 ## Despliegue normal
 
 El workflow manual `Deploy to Hetzner` es la única vía normal:

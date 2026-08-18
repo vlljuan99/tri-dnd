@@ -80,8 +80,14 @@ jobs:
       - name: Verificar host
         run: ssh-keyscan -H 167.233.99.156 >> ~/.ssh/known_hosts
 
-      - name: Subir artefacto y scripts de operación
+      # Las traducciones del SRD son código versionado, pero viven bajo
+      # `server/data/`, que en el servidor es el volumen persistente y tapa lo
+      # que trae la imagen. Sin este paso, un `sync-srd` en producción aplica
+      # el es.json del primer despliegue y las traducciones nuevas no llegan.
+      - name: Subir artefacto, traducciones y scripts de operación
         run: |
+          ssh root@167.233.99.156 'mkdir -p /opt/tridnd/data/translations'
+          scp server/data/translations/es.json root@167.233.99.156:/opt/tridnd/data/translations/es.json
           scp "${RUNNER_TEMP}/src.tar.gz" root@167.233.99.156:/opt/tridnd/src.tar.gz
           scp deploy/server-compose.yml root@167.233.99.156:/opt/tridnd/docker-compose.yml
           scp deploy/build-on-server.sh root@167.233.99.156:/opt/tridnd/build-on-server.sh
