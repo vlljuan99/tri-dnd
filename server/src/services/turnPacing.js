@@ -79,11 +79,16 @@ export function createPacer(env = process.env) {
   return {
     factor,
     ms: (name, options = {}) => beatMs(name, { ...options, factor }),
+    // El temporizador NO se desreferencia (`unref`): un temporizador sin
+    // referencia deja morir el bucle de eventos con la promesa a medias, y
+    // entonces `await pacer.wait(...)` no resuelve nunca. Como mucho son 1,6 s
+    // de espera, así que retener el proceso ese rato no es problema; una
+    // secuencia de turno colgada sí lo sería.
     wait(name, options = {}) {
       const ms = beatMs(name, { ...options, factor });
       if (ms <= 0) return Promise.resolve();
       return new Promise((resolve) => {
-        setTimeout(resolve, ms).unref?.();
+        setTimeout(resolve, ms);
       });
     },
   };

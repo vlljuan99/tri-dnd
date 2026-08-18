@@ -58,3 +58,12 @@ test('el marcador de ritmo espera de verdad cuando está encendido', async () =>
   await pacer.wait('caminata', { cells: 4 });
   assert.ok(Date.now() - started >= espera - 15, `esperó ${Date.now() - started}ms, esperaba ~${espera}ms`);
 });
+
+test('la espera resuelve aunque no haya nada más vivo en el proceso', async () => {
+  // Regresión: el temporizador se desreferenciaba con `unref`, así que si la
+  // espera era lo único pendiente el bucle de eventos moría con la promesa sin
+  // resolver («Promise resolution is still pending»). Un turno a medias.
+  const pacer = createPacer({ TRIDND_TURN_PACE: '0.02' });
+  await pacer.wait('entreAtaques');
+  assert.ok(true, 'la promesa resolvió');
+});
