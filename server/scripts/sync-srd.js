@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { db, runMigrations } from '../src/db.js';
 import { SRD_CATEGORY_KEYS } from '../src/services/srdShape.js';
 import { rebuildSrdFts } from '../src/services/srdSearch.js';
+import { classLevelRow } from '../src/services/classProgression.js';
 
 runMigrations();
 
@@ -124,6 +125,59 @@ async function syncCategory(category) {
   }));
 }
 
+// Progresión de clase (Fase C): dentro de la clase, `class_levels` llega como
+// una URL sin expandir, así que se descarga aparte. Va a su propia tabla —
+// no al compendio— para no ensuciar el buscador (ver la migración v71).
+// Re-ejecutable: la clave primaria (clase, nivel) hace que se sobrescriba en
+// vez de duplicar.
+const upsertClassLevel = db.prepare(`
+  INSERT INTO class_levels (class_index, level, prof_bonus, ability_score_bonuses,
+    cantrips_known, spells_known, spell_slots, class_specific)
+  VALUES (@classIndex, @level, @profBonus, @abilityScoreBonuses,
+    @cantripsKnown, @spellsKnown, @spellSlots, @classSpecific)
+  ON CONFLICT (class_index, level) DO UPDATE SET
+    prof_bonus = excluded.prof_bonus,
+    ability_score_bonuses = excluded.ability_score_bonuses,
+    cantrips_known = excluded.cantrips_known,
+    spells_known = excluded.spells_known,
+    spell_slots = excluded.spell_slots,
+    class_specific = excluded.class_specific
+`);
+
+async function syncClassLevels() {
+  const classes = db.prepare("SELECT idx FROM srd_entries WHERE category = 'classes' ORDER BY idx").all();
+  process.stdout.write(`  progresión de clase: ${classes.length} clases`);
+
+  let levels = 0;
+  const { errors } = await mapWithConcurrencySettled(classes, CONCURRENCY, async ({ idx }) => {
+    const entries = await fetchJson(`${BASE}/api/2014/classes/${idx}/levels`);
+    if (!Array.isArray(entries)) throw new Error(`respuesta inesperada en ${idx}/levels`);
+    db.transaction(() => {
+      for (const entry of entries) {
+        // Las entradas de subclase (si algún día llegan por aquí) no son
+        // progresión de la clase base y se quedan fuera.
+        if (entry.subclass || !Number.isInteger(entry.level)) continue;
+        const row = classLevelRow(entry);
+        if (!row.classIndex) row.classIndex = idx;
+        upsertClassLevel.run({
+          ...row,
+          spellSlots: JSON.stringify(row.spellSlots),
+          classSpecific: JSON.stringify(row.classSpecific),
+        });
+        levels++;
+      }
+    })();
+    return true;
+  });
+
+  console.log(` — ${levels} niveles guardados${errors.length ? `; ${errors.length} clases fallidas` : ''}`);
+  return errors.map(({ item, error }) => ({
+    category: 'class-levels',
+    index: item?.idx ?? 'desconocido',
+    message: error.message,
+  }));
+}
+
 async function main() {
   console.log(`Sincronizando el catálogo completo del SRD 5e 2014 desde ${BASE}…`);
   const failures = [];
@@ -135,6 +189,13 @@ async function main() {
       failures.push({ category, index: '*', message: error.message });
       console.error(`  ${category}: no se pudo sincronizar (${error.message})`);
     }
+  }
+
+  try {
+    failures.push(...(await syncClassLevels()));
+  } catch (error) {
+    failures.push({ category: 'class-levels', index: '*', message: error.message });
+    console.error(`  progresión de clase: no se pudo sincronizar (${error.message})`);
   }
 
   const counts = db
@@ -161,7 +222,10 @@ async function main() {
     db.prepare("DELETE FROM meta WHERE key = 'srd_last_sync_error'").run();
   })();
   rebuildSrdFts();
-  console.log(`Listo: ${total} entradas en ${counts.length} categorías del compendio (índice de búsqueda reconstruido).`);
+  const classLevels = db.prepare('SELECT COUNT(*) AS n FROM class_levels').get().n;
+  console.log(
+    `Listo: ${total} entradas en ${counts.length} categorías del compendio + ${classLevels} niveles de clase (índice de búsqueda reconstruido).`
+  );
 }
 
 main().catch((error) => {

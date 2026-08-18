@@ -1,4 +1,5 @@
-import { ABILITIES, abilityModifier, formatModifier, estimateHitPoints, proficiencyBonus, CLASS_NAMES } from '../../lib/dnd.js';
+import { ABILITIES, SKILLS, abilityModifier, formatModifier, estimateHitPoints, proficiencyBonus, CLASS_NAMES } from '../../lib/dnd.js';
+import { computeArmorClass, SLOT_LABELS } from '../../lib/equipment.js';
 import { validateIdentidad } from './StepIdentidad.jsx';
 import { validateClase } from './StepClase.jsx';
 import { validateRaza } from './StepRaza.jsx';
@@ -47,7 +48,7 @@ export default function StepResumen({ char, classDetail, classDisplayName, raceN
   const conMod = abilityModifier(char.abilities.con);
   const dexMod = abilityModifier(char.abilities.dex);
   const hpMax = classDetail ? estimateHitPoints(classDetail.hit_die, conMod, char.level) : char.hp_max;
-  const ac = 10 + dexMod;
+  const ac = computeArmorClass(char);
   const campaign = campaigns.find((c) => c.id === char.campaign_id);
 
   return (
@@ -89,14 +90,35 @@ export default function StepResumen({ char, classDetail, classDisplayName, raceN
       <HelpBlock title="¿De dónde salen los puntos de golpe y la clase de armadura?">
         Puntos de golpe = dado de golpe de {classDisplayName ?? CLASS_NAMES[char.class_index] ?? 'tu clase'} + modificador
         de Constitución ({formatModifier(conMod)}), y un poco más por cada nivel adicional. Clase de
-        armadura = 10 + modificador de Destreza ({formatModifier(dexMod)}); cambiará si luego
-        equipas una armadura.
+        armadura = 10 + modificador de Destreza ({formatModifier(dexMod)}) sin armadura, o la que
+        marque la armadura equipada en el paso de Equipo.
       </HelpBlock>
+
+      {char.inventory.length > 0 && (
+        <div>
+          <p className="mb-1 text-xs uppercase tracking-wider text-bone/50">Equipo inicial</p>
+          <ul className="space-y-0.5 text-sm text-bone/70">
+            {char.inventory.map((item) => (
+              <li key={item.id}>
+                {item.name}
+                {item.qty > 1 ? ` ×${item.qty}` : ''}
+                {item.slot ? ` — ${SLOT_LABELS[item.slot]}` : ' — mochila'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {char.skill_proficiencies.length > 0 && (
         <div>
           <p className="mb-1 text-xs uppercase tracking-wider text-bone/50">Habilidades</p>
-          <p className="text-sm text-bone/70">{char.skill_proficiencies.join(', ')}</p>
+          {/* En la ficha se guarda el índice del SRD ('athletics'); aquí se
+              enseña el nombre en español, como en el paso de competencias. */}
+          <p className="text-sm text-bone/70">
+            {char.skill_proficiencies
+              .map((index) => SKILLS.find((skill) => skill.index === index)?.name ?? index)
+              .join(', ')}
+          </p>
         </div>
       )}
       {char.other_proficiencies.length > 0 && (

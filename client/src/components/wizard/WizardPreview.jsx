@@ -1,4 +1,5 @@
 import { ABILITIES, abilityModifier, formatModifier, PRIMARY_ABILITY, estimateHitPoints } from '../../lib/dnd.js';
+import { computeArmorClass } from '../../lib/equipment.js';
 import StatTooltip from '../StatTooltip.jsx';
 
 /**
@@ -14,9 +15,8 @@ export default function WizardPreview({ char, classDisplayName, raceName, classD
   const primary = classDetail?.spellcasting?.spellcasting_ability?.index ??
     (char.class_index ? PRIMARY_ABILITY[char.class_index] : null);
   const conMod = abilityModifier(char.abilities.con);
-  const dexMod = abilityModifier(char.abilities.dex);
   const hpEstimate = classDetail ? estimateHitPoints(classDetail.hit_die, conMod, char.level) : char.hp_max;
-  const acEstimate = 10 + dexMod;
+  const acEstimate = computeArmorClass(char);
 
   return (
     <div className="space-y-3 text-bone">

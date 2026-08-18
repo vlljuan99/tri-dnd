@@ -79,6 +79,13 @@ export function seedSkirmishMap(
   return { mapId, revealedRoomIds, enemies };
 }
 
+/** Nivel inicial que declara un escenario: el extremo bajo de «3-4», o 1. */
+export function suggestedLevelFloor(suggested) {
+  const match = /\d+/.exec(String(suggested ?? ''));
+  const level = match ? Number(match[0]) : 1;
+  return Math.max(1, Math.min(20, level));
+}
+
 /**
  * Snapshot de mapa a instanciar y ajustes de la campaña, a partir de lo que
  * pidió el cliente: un escenario de fábrica (`presetId`) o una plantilla de
@@ -96,6 +103,10 @@ export function resolveSkirmishSource({ presetId, template }) {
       soloMode: preset.soloMode === true,
       briefing: preset.briefing,
       objectives: preset.objectives,
+      // Fase D: el escenario declara su nivel recomendado como texto
+      // («3-4»); la mesa se monta con el extremo bajo como nivel inicial. Un
+      // PJ que ya existe entra con el suyo y no se recalcula.
+      startingLevel: suggestedLevelFloor(preset.suggestedLevel),
     };
   }
   if (template) {

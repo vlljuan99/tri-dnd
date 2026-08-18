@@ -2,14 +2,8 @@ import { db } from '../db.js';
 import { conditionsPreventActions, parseConditions } from './combatRules.js';
 import { gridDistance, monsterAttackGeometry, weaponGeometry } from './combatGeometry.js';
 import { hasLineOfSight } from './vision.js';
-
-function abilityModifier(score) {
-  return Math.floor((Number(score) - 10) / 2);
-}
-
-function proficiencyBonus(level) {
-  return 2 + Math.floor((Math.max(1, Number(level) || 1) - 1) / 4);
-}
+import { abilityModifier, proficiencyBonus } from '../rules/abilities.js';
+import { isProficientWithWeapon } from '../rules/proficiency.js';
 
 function json(value, fallback) {
   try {
@@ -38,7 +32,7 @@ export function characterOpportunityOptions(character) {
   const abilities = json(character.abilities, {});
   const options = [];
   for (const item of inventory) {
-    if (!item?.equipped || !item.weapon) continue;
+    if (!item?.weapon || (item.slot !== 'mano-principal' && item.slot !== 'mano-secundaria')) continue;
     const data = equipmentData(item.srdIndex);
     const geometry = weaponGeometry(item.weapon, data);
     if (geometry.ranged) continue;
@@ -46,10 +40,14 @@ export function characterOpportunityOptions(character) {
     const strength = abilityModifier(abilities.str ?? 10);
     const dexterity = abilityModifier(abilities.dex ?? 10);
     const ability = properties.has('finesse') && dexterity > strength ? dexterity : strength;
+    const weaponCategory = item.weapon.weaponCategory ?? data?.weapon_category ?? null;
+    const proficient =
+      character.kind === 'boss' ||
+      isProficientWithWeapon(json(character.weapon_proficiencies, []), item.srdIndex, weaponCategory);
     options.push({
       id: `arma:${item.id}`,
       name: item.name,
-      attackBonus: ability + proficiencyBonus(character.level),
+      attackBonus: ability + (proficient ? proficiencyBonus(character.level) : 0),
       reach: geometry.reach,
       damage: [
         {

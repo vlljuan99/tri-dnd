@@ -14,6 +14,7 @@ import {
 import { notifyCombatVisual, postSystemMessage } from './liveMap.js';
 import { dropLootMarker, rollLoot } from './loot.js';
 import { buildServerD20Roll, buildServerDamageRoll } from './serverDice.js';
+import { armorPenaltyAppliesTo } from '../rules/proficiency.js';
 import { endCombatIfNoEnemiesLeft, recordDamageAtZero, startDeathSaves } from './turnEconomy.js';
 import { isMassiveDamage } from './combatLifecycle.js';
 
@@ -112,6 +113,21 @@ export function environmentalSavingThrowBonus(target, ability) {
   );
   if (Number.isFinite(Number(explicit?.value))) return Number(explicit.value);
   return abilityModifier(data?.[SCORE_KEYS[ability]] ?? 10);
+}
+
+/**
+ * Desventaja ambiental: un personaje con armadura o escudo sin competencia la
+ * arrastra a TODA salvación de FUE o DES, no solo a los ataques (Fase B, cabo
+ * pendiente). Los enemigos y marcadores del DM no pasan por esa regla.
+ */
+export function environmentalSaveAdvantage(target, ability) {
+  if (target.kind !== 'personaje') return 'none';
+  const character = {
+    kind: target.character.kind,
+    inventory: jsonValue(target.character.inventory, []),
+    armor_proficiencies: jsonValue(target.character.armor_proficiencies, []),
+  };
+  return armorPenaltyAppliesTo(character, ability) ? 'disadvantage' : 'none';
 }
 
 function damageProfile(target) {
@@ -269,6 +285,7 @@ function resolveTypes(campaignId, target, effects, types, trigger) {
     if (effect.saveAbility) {
       const roll = buildServerD20Roll({
         bonus: environmentalSavingThrowBonus(target, effect.saveAbility),
+        advantage: environmentalSaveAdvantage(target, effect.saveAbility),
         label: `Salvación contra ${FLUID_LABELS[type]}`,
         actorName: target.name,
       });

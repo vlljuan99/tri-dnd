@@ -14,10 +14,16 @@ function clamp(value, min, max) {
 export function sceneLighting(map, hasLights) {
   const time = map.timeOfDay ?? 'dia';
   const nightFactor = time === 'noche' ? 0.34 : time === 'atardecer' || time === 'amanecer' ? 0.68 : 1;
+  // La hora sigue marcando el objetivo, pero ninguna escena visible cae por
+  // debajo de este suelo. Las antorchas suman una pequeña base global y sus
+  // pointLight aportan después las pozas cálidas locales: nunca oscurecen el
+  // ambiente por el mero hecho de existir.
+  const ambientTarget = 0.95 * nightFactor + (hasLights ? 0.05 : 0);
+  const directionalTarget = 0.7 * nightFactor + (hasLights ? 0.03 : 0);
   return {
     background: TIME_COLORS[time] ?? TIME_COLORS.dia,
-    ambient: (hasLights ? 0.6 : 0.95) * nightFactor,
-    directional: (hasLights ? 0.45 : 0.7) * nightFactor,
+    ambient: Math.max(0.56, ambientTarget),
+    directional: Math.max(0.42, directionalTarget),
   };
 }
 

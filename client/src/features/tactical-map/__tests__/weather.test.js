@@ -40,3 +40,13 @@ test('la iluminación nocturna es más tenue que la diurna', () => {
   assert.ok(night.ambient < day.ambient);
   assert.ok(night.directional < day.directional);
 });
+
+test('la noche con antorchas conserva un suelo mínimo y las luces nunca restan ambiente', () => {
+  const withoutLights = sceneLighting({ timeOfDay: 'noche' }, false);
+  const withLights = sceneLighting({ timeOfDay: 'noche' }, true);
+
+  assert.equal(withLights.ambient, 0.56);
+  assert.equal(withLights.directional, 0.42);
+  assert.ok(withLights.ambient >= withoutLights.ambient);
+  assert.ok(withLights.directional >= withoutLights.directional);
+});

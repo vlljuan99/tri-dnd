@@ -16,14 +16,10 @@ function parseJson(value, fallback) {
   }
 }
 
-export function abilityModifier(score) {
-  return Math.floor(((Number.isFinite(score) ? score : 10) - 10) / 2);
-}
-
-export function proficiencyBonus(level) {
-  const safeLevel = Number.isInteger(level) && level > 0 ? level : 1;
-  return 2 + Math.floor((safeLevel - 1) / 4);
-}
+// Única definición real en rules/abilities.js (Fase B); se reexporta para no
+// tocar los sitios que ya importan estas dos funciones desde aquí.
+export { abilityModifier, proficiencyBonus } from '../rules/abilities.js';
+import { abilityModifier, proficiencyBonus } from '../rules/abilities.js';
 
 /**
  * CD de la salvación al recibir daño concentrando: 10, o la mitad del daño

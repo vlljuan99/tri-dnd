@@ -4,6 +4,8 @@ Mesa de juego virtual para D&D 5e pensada para un grupo de amigos: fichas de per
 
 **Estado**: beta privada avanzada. Ya están operativos el taller y archivo del DM, fichas semiautomáticas, compendio en español, mapas de mundo y tácticos, niebla de guerra filtrada en servidor, combate por turnos, conjuros, eventos, botín, plantillas y escaramuzas preparadas. El cierre real sigue siendo el pulido y la prueba completa con el grupo; consulta [ROADMAP.md](ROADMAP.md) para el detalle.
 
+**Documentación**: [ROADMAP.md](ROADMAP.md) (estado e historial), [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) (visión de producto, dominios y backlog arquitectónico) y [docs/VERTICAL-SLICE.md](docs/VERTICAL-SLICE.md) (el objetivo de desarrollo en curso). El motor de reglas usa **D&D 5e edición 2014 (SRD 5.1)**.
+
 ## Stack
 
 - **Frontend**: React + Vite, Tailwind CSS, Zustand, Framer Motion, react-three-fiber (mapa táctico 3D)
@@ -74,6 +76,7 @@ La operación y recuperación están documentadas en [deploy/README.md](deploy/R
 
 ```
 tri-dnd/
+├── docs/              # Visión y arquitectura, y el alcance de la rebanada vertical en curso
 ├── client/            # Frontend React (Vite + Tailwind)
 │   └── src/
 │       ├── pages/       # Pantallas generales (acceso, personajes, compendio…)

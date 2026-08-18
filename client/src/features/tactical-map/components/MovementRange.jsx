@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { cellGroundY } from '../domain/elevation.js';
 
 function OverlayCell({ col, row, gridSize, color, opacity, y, animated, index }) {
   const meshRef = useRef(null);
@@ -31,7 +32,17 @@ function OverlayCell({ col, row, gridSize, color, opacity, y, animated, index })
 // Overlay de casillas sobre el suelo, sin capturar clics. Se usa para el
 // área de movimiento del combatiente activo (verde musgo), el camino de la
 // vista previa de movimiento (dorado) y el terreno difícil (ocre).
-export default function MovementRange({ cells, gridSize, color = '#5e8c4a', opacity = 0.28, y = 0.018, animated = false }) {
+export default function MovementRange({
+  cells,
+  gridSize,
+  color = '#5e8c4a',
+  opacity = 0.28,
+  y = 0.018,
+  animated = false,
+  // Relieve del tablero: sobre una cornisa el overlay se pinta a la altura de
+  // la plataforma; a ras de suelo quedaría tapado por ella.
+  elevation = null,
+}) {
   if (!cells?.length) return null;
   return (
     <group>
@@ -44,7 +55,7 @@ export default function MovementRange({ cells, gridSize, color = '#5e8c4a', opac
           gridSize={gridSize}
           color={color}
           opacity={opacity}
-          y={y}
+          y={y + cellGroundY(elevation, col, row)}
           animated={animated}
         />
       ))}

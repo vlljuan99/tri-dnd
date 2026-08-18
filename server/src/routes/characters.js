@@ -6,9 +6,19 @@ import { requireAuth } from '../auth.js';
 import { AVATAR_UPLOADS_DIR } from '../config.js';
 import { extensionForMimeType } from '../utils/uploads.js';
 import { generateAvatarImage } from '../services/avatarImageGeneration.js';
-import { notifyCampaignMap, notifyCombat, notifyCombatVisual } from '../services/liveMap.js';
+import { notifyCampaignMap, notifyCombat, notifyCombatVisual, postSystemMessage } from '../services/liveMap.js';
 import { resetDeathSaves, startDeathSaves } from '../services/turnEconomy.js';
 import { DEATH_STATES } from '../services/combatLifecycle.js';
+import { computeArmorClass, validateInventory } from '../rules/equipment.js';
+import { combatProficienciesForClass } from '../services/classProficiencies.js';
+import {
+  canLevelUp,
+  grantedLevelFor,
+  levelHistory,
+  levelUpCharacter,
+  levelUpPreview,
+} from '../services/leveling.js';
+import { restStateFor, spendHitDice } from '../services/rest.js';
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -18,6 +28,8 @@ const JSON_FIELDS = [
   'abilities',
   'save_proficiencies',
   'skill_proficiencies',
+  'weapon_proficiencies',
+  'armor_proficiencies',
   'inventory',
   'spells',
   'other_proficiencies',
@@ -84,7 +96,62 @@ charactersRouter.get('/:id', (req, res) => {
   if (row.kind === 'boss' && row.user_id !== req.user.id) {
     return res.status(404).json({ error: 'Personaje no encontrado' });
   }
-  res.json({ character: serialize(row), editable: row.user_id === req.user.id });
+  // La ficha viaja con su estado de nivel (Fase D): hasta dónde ha concedido
+  // la campaña, qué ganaría al subir y qué subidas lleva. Solo su dueño lo
+  // necesita — a un compañero no le hace falta el detalle.
+  const own = row.user_id === req.user.id;
+  res.json({
+    character: serialize(row),
+    editable: own,
+    leveling: own && row.kind === 'pj'
+      ? {
+          grantedLevel: grantedLevelFor(row),
+          canLevelUp: canLevelUp(row),
+          preview: levelUpPreview(row),
+          history: levelHistory(row.id),
+        }
+      : null,
+    // Estado de descanso (Fase F): dados de golpe disponibles y su dado.
+    rest: own && row.kind === 'pj' ? restStateFor(row) : null,
+  });
+});
+
+// Gastar dados de golpe para curarse (Fase F). Es la mitad del descanso corto
+// que decide cada jugador: el servidor comprueba cuántos quedan, cuánto cura
+// cada uno y que no se pase de los PG máximos.
+charactersRouter.post('/:id/dados-de-golpe', (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+  const result = spendHitDice(row.id, req.body?.rolls);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+
+  const updated = db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id);
+  if (updated.campaign_id) {
+    notifyCampaignMap(updated.campaign_id);
+    notifyCombat(updated.campaign_id);
+  }
+  res.json({ character: serialize(updated), healed: result.healed, hitDice: result.hitDice });
+});
+
+// Subir de nivel (Fase D): solo hasta donde el DM haya concedido, y con los
+// PG por el camino que elija el jugador — valor fijo (por defecto en la mesa)
+// o tirada del dado de golpe.
+charactersRouter.post('/:id/subir-nivel', (req, res) => {
+  const row = getOwned(req, res);
+  if (!row) return;
+  const { hpMethod = 'fijo', hpRoll = null, abilityIncreases = null } = req.body ?? {};
+  const result = levelUpCharacter(row.id, { hpMethod, hpRoll, abilityIncreases });
+  if (!result.ok) return res.status(400).json({ error: result.error });
+
+  const updated = db.prepare('SELECT * FROM characters WHERE id = ?').get(row.id);
+  if (updated.campaign_id) {
+    // La mesa ve el cambio sin recargar: PG nuevos en las barras y nivel
+    // nuevo en el tracker.
+    notifyCampaignMap(updated.campaign_id);
+    notifyCombat(updated.campaign_id);
+    postSystemMessage(updated.campaign_id, `${updated.name} sube a nivel ${updated.level}.`);
+  }
+  res.json({ character: serialize(updated), gained: result.gained, history: levelHistory(row.id) });
 });
 
 // Subida de una foto propia como icono del personaje. Se envía como binario
@@ -157,15 +224,25 @@ const UPDATABLE = {
   hp_max: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
   hp_current: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
   hp_temp: (v) => Number.isInteger(v) && v >= 0 && v <= 999,
+  // Para un PJ, la CA la calcula el servidor a partir del inventario
+  // (ac_override fuerza un valor manual); solo las fichas del DM (jefe,
+  // enemigo, PNJ) siguen escribiendo `ac` directamente, ver el PUT abajo.
   ac: (v) => Number.isInteger(v) && v >= 0 && v <= 40,
+  ac_override: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 40),
   speed: (v) => Number.isInteger(v) && v >= 0 && v <= 300,
   darkvision: (v) => Number.isInteger(v) && v >= 0 && v <= 30,
   abilities: (v) =>
     v && typeof v === 'object' && ABILITY_KEYS.every((k) => Number.isInteger(v[k]) && v[k] >= 1 && v[k] <= 30),
   save_proficiencies: (v) => Array.isArray(v) && v.every((s) => ABILITY_KEYS.includes(s)),
   skill_proficiencies: (v) => Array.isArray(v) && v.every((s) => typeof s === 'string'),
+  // Competencia real de armas/armaduras (Fase B): tokens del compendio
+  // ("simple-weapons", "dagger", "light-armor", "all-armor"...), resueltos
+  // por el asistente desde la clase y guardados aquí para que el servidor
+  // valide el ataque sin volver a consultar el SRD.
+  weapon_proficiencies: (v) => Array.isArray(v) && v.every((s) => typeof s === 'string') && JSON.stringify(v).length < 5000,
+  armor_proficiencies: (v) => Array.isArray(v) && v.every((s) => typeof s === 'string') && JSON.stringify(v).length < 2000,
   other_proficiencies: (v) => Array.isArray(v) && v.every((s) => typeof s === 'string') && JSON.stringify(v).length < 5000,
-  inventory: (v) => Array.isArray(v) && JSON.stringify(v).length < 50000,
+  inventory: (v) => validateInventory(v),
   spells: (v) => v && typeof v === 'object' && JSON.stringify(v).length < 50000,
   features: (v) => typeof v === 'string' && v.length <= 20000,
   notes: (v) => typeof v === 'string' && v.length <= 20000,
@@ -226,6 +303,20 @@ charactersRouter.put('/:id', (req, res) => {
     if (key === 'dm_category' && row.kind !== 'boss') {
       return res.status(400).json({ error: 'Solo las fichas del DM se pueden clasificar así' });
     }
+    if (key === 'ac' && row.kind !== 'boss') {
+      return res.status(400).json({
+        error: 'La CA de un personaje jugador se calcula sola a partir del equipo; usa "ac_override" para forzarla',
+      });
+    }
+    // Fase D: el nivel de un PJ no lo escribe nadie a mano. Lo fija la
+    // campaña como nivel inicial mientras la ficha es un borrador y lo sube
+    // el jugador desde «Subir de nivel» cuando el DM lo concede. Solo las
+    // fichas del DM (jefe, enemigo, PNJ) lo conservan editable.
+    if (key === 'level' && row.kind !== 'boss') {
+      return res.status(400).json({
+        error: 'El nivel de un personaje jugador lo fija su campaña: súbelo desde «Subir de nivel»',
+      });
+    }
     if (key === 'campaign_id' && value !== null) {
       const member = db
         .prepare('SELECT 1 FROM campaign_members WHERE campaign_id = ? AND user_id = ?')
@@ -241,6 +332,57 @@ charactersRouter.put('/:id', (req, res) => {
     return res.status(400).json({
       error: 'Faltan datos obligatorios (nombre, clase, raza o nivel) para completar el personaje',
     });
+  }
+
+  // Competencia de armas/armaduras derivada (Fase B): la concede la clase, no
+  // el cliente. El asistente las manda para poder pintarlas mientras rellena
+  // la ficha, pero aquí se vuelven a resolver desde el compendio; si no, un
+  // PUT a mano bastaría para ser competente con todo. Las fichas del DM
+  // (jefe/enemigo/PNJ) no pasan por el asistente y quedan como estén.
+  if (row.kind !== 'boss' && ['class_index', 'weapon_proficiencies', 'armor_proficiencies'].some((k) => k in plainUpdates)) {
+    const classIndex = 'class_index' in plainUpdates ? plainUpdates.class_index : row.class_index;
+    const { weaponProficiencies, armorProficiencies } = combatProficienciesForClass(classIndex);
+    for (const [key, value] of [
+      ['weapon_proficiencies', weaponProficiencies],
+      ['armor_proficiencies', armorProficiencies],
+    ]) {
+      plainUpdates[key] = value;
+      if (!updates.includes(`${key} = ?`)) {
+        updates.push(`${key} = ?`);
+        values.push(JSON.stringify(value));
+      } else {
+        values[updates.indexOf(`${key} = ?`)] = JSON.stringify(value);
+      }
+    }
+  }
+
+  // Nivel inicial derivado (Fase D): mientras la ficha de un PJ es un
+  // borrador, su nivel es el que fija su campaña. Un personaje ya terminado
+  // NO se recalcula al entrar en otra mesa: llega con el suyo, y solo sube
+  // por milestone.
+  if (row.kind !== 'boss' && row.status !== 'complete' && 'campaign_id' in plainUpdates) {
+    const campaign = plainUpdates.campaign_id
+      ? db.prepare('SELECT starting_level FROM campaigns WHERE id = ?').get(plainUpdates.campaign_id)
+      : null;
+    const startingLevel = campaign?.starting_level ?? 1;
+    if (startingLevel !== row.level) {
+      plainUpdates.level = startingLevel;
+      updates.push('level = ?');
+      values.push(startingLevel);
+    }
+  }
+
+  // CA derivada (Fase A): cualquier cambio que pueda afectarla se recalcula
+  // en el servidor, nunca se confía en lo que mande el cliente.
+  if (row.kind !== 'boss' && ['inventory', 'abilities', 'ac_override'].some((k) => k in plainUpdates)) {
+    const computedAc = computeArmorClass({
+      abilities: plainUpdates.abilities ?? JSON.parse(row.abilities),
+      inventory: plainUpdates.inventory ?? JSON.parse(row.inventory),
+      ac_override: 'ac_override' in plainUpdates ? plainUpdates.ac_override : row.ac_override,
+    });
+    plainUpdates.ac = computedAc;
+    updates.push('ac = ?');
+    values.push(computedAc);
   }
 
   db.prepare(
@@ -272,6 +414,12 @@ charactersRouter.put('/:id', (req, res) => {
     ['hp_current', 'hp_max', 'ac', 'name', 'speed', 'darkvision'].some((k) => k in plainUpdates)
   ) {
     notifyCampaignMap(updated.campaign_id);
+  }
+  // Equiparse una armadura en plena mesa cambia la CA derivada: el chip del
+  // HUD la lee del combatiente, así que hay que reenviar también el combate
+  // (la resolución del ataque ya usaba la CA viva de la ficha).
+  if (updated.campaign_id && updated.ac !== row.ac) {
+    notifyCombat(updated.campaign_id);
   }
   res.json({ character: serialize(updated) });
 });

@@ -8,6 +8,7 @@ import {
   spellSaveDC,
 } from '../../../lib/dnd.js';
 import { castSpellRoll } from '../../../lib/spellcasting.js';
+import { wearingUnproficientArmor } from '../../../lib/proficiency.js';
 import { useRoom } from '../../../store/socket.js';
 import WeaponRow from '../../../components/WeaponRow.jsx';
 import StatTooltip from '../../../components/StatTooltip.jsx';
@@ -46,7 +47,9 @@ export default function CharacterQuickView({ characterId, onClose }) {
     onRoll(roll);
   }
 
-  const weapons = char?.inventory.filter((i) => i.weapon && i.equipped) ?? [];
+  const weapons =
+    char?.inventory.filter((i) => i.weapon && (i.slot === 'mano-principal' || i.slot === 'mano-secundaria')) ?? [];
+  const armorPenalty = char ? wearingUnproficientArmor(char) : false;
   const preparedSpells = char
     ? (char.spells.known ?? []).filter((s) => (char.spells.prepared ?? []).includes(s.index))
     : [];
@@ -138,7 +141,8 @@ export default function CharacterQuickView({ characterId, onClose }) {
                         {spell.attackType && (
                           <button
                             onClick={() => castSpell(spell, 'attack')}
-                            className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold hover:bg-gold/10"
+                            disabled={armorPenalty}
+                            className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold hover:bg-gold/10 disabled:opacity-30"
                           >
                             Ataque
                           </button>
@@ -146,7 +150,8 @@ export default function CharacterQuickView({ characterId, onClose }) {
                         {spell.hasDamage && (
                           <button
                             onClick={() => castSpell(spell, 'damage')}
-                            className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10"
+                            disabled={armorPenalty}
+                            className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10 disabled:opacity-30"
                           >
                             Daño
                           </button>

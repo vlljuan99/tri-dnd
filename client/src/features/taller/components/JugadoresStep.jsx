@@ -28,6 +28,20 @@ export default function JugadoresStep({ progress }) {
     }
   }
 
+  async function grantLevel() {
+    setBusy(true);
+    setError('');
+    try {
+      const { grantedLevel } = await api(`/campaigns/${campaign.id}/nivel`, { method: 'POST' });
+      setCampaign((current) => ({ ...current, grantedLevel }));
+      await refreshOverview?.();
+    } catch (e) {
+      setError(e.message || 'No se pudo conceder el nivel.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirmAction() {
     if (!confirmation) return;
     setBusy(true);
@@ -100,6 +114,36 @@ export default function JugadoresStep({ progress }) {
           {error}
         </p>
       )}
+
+      {/* Fase D: el nivel del grupo lo concede el DM por milestone. Conceder
+          no toca ninguna ficha — cada jugador completa su subida cuando
+          quiera— y quien esté en la mesa lo ve sin recargar. */}
+      <section className="mt-6 rounded-md border border-gold/20 bg-night-900/70 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-wider text-bone/50">Nivel del grupo</p>
+            <p className="mt-1 font-display text-2xl text-gold">{campaign.grantedLevel ?? 1}</p>
+            <p className="mt-1 text-xs text-bone/45">
+              Los personajes nuevos entran de nivel {campaign.startingLevel ?? 1}. Por milestone: sin XP.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={grantLevel}
+            disabled={busy || (campaign.grantedLevel ?? 1) >= 20}
+            className="rounded-sm bg-gold px-4 py-2 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90 disabled:opacity-40"
+          >
+            {(campaign.grantedLevel ?? 1) >= 20
+              ? 'Nivel máximo alcanzado'
+              : `Conceder nivel ${(campaign.grantedLevel ?? 1) + 1}`}
+          </button>
+        </div>
+        {playerCharacters.some((character) => character.level < (campaign.grantedLevel ?? 1)) && (
+          <p className="mt-3 text-xs text-ochre">
+            Hay fichas pendientes de subir: cada jugador lo hace desde su hoja de personaje.
+          </p>
+        )}
+      </section>
 
       <section className="mt-6">
         <h3 className="mb-3 font-display text-lg tracking-wide text-gold">El grupo</h3>

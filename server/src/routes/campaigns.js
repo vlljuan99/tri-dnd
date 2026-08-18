@@ -18,10 +18,14 @@ import {
   postSystemMessage,
   evictCampaignMember,
   notifyBestiary,
+  notifyCampaignLevel,
+  notifyCampaignWorld,
 } from '../services/liveMap.js';
 import { ensureCombatantForCharacter, trySpendMovement, trySpendAction } from '../services/turnEconomy.js';
 import { listCustomRows, serializeCustomEntry } from '../services/customLibrary.js';
 import { lootMarkerInto } from '../services/loot.js';
+import { grantCampaignLevel } from '../services/leveling.js';
+import { restCampaign, setCampaignClock } from '../services/rest.js';
 import { buildWalkableGrid, findPath, buildElevationMap } from '../services/pathfinding.js';
 import { queueOpportunityAttacks } from '../services/opportunityAttacks.js';
 import { buildWallSet } from '../services/walls.js';
@@ -109,6 +113,16 @@ function serializeCampaign(row, role, userId) {
     worldMapUrl: row.world_map_url ?? null,
     campaignType: row.campaign_type ?? (row.has_world_map ? 'campana' : 'escaramuza'),
     elapsedDays: row.elapsed_days ?? 0,
+    // Fase D: nivel con el que se crean los personajes de esta mesa y hasta
+    // dónde ha concedido el DM. Públicos: el grupo necesita saber a qué nivel
+    // juega y si le toca subir.
+    startingLevel: row.starting_level ?? 1,
+    // Reloj de campaña (Fase F): capacidad opcional, apagada por defecto. Con
+    // ella apagada el cliente no pinta ningún control temporal.
+    clockEnabled: Boolean(row.clock_enabled),
+    dayMinutes: row.day_minutes ?? 480,
+    grantedLevel: row.granted_level ?? 1,
+    levelMode: row.level_mode ?? 'milestone',
     status: row.status,
     wizardStep: row.wizard_step,
   };
@@ -191,7 +205,7 @@ campaignsRouter.post('/', (req, res) => {
     }
     soloCharacter = db
       .prepare(
-        `SELECT id FROM characters
+        `SELECT id, level FROM characters
           WHERE id = ? AND user_id = ? AND kind = 'pj'
             AND status = 'complete' AND campaign_id IS NULL AND hp_max > 0`
       )
@@ -203,12 +217,16 @@ campaignsRouter.post('/', (req, res) => {
     return res.status(400).json({ error: 'Solo los escenarios con director automático aceptan un personaje inicial' });
   }
 
+  const startingLevel = source.startingLevel ?? 1;
+  const soloCharacterLevel = soloCharacter?.level ?? null;
+
   const create = db.transaction(() => {
     const info = db
       .prepare(
         `INSERT INTO campaigns
-           (name, dm_user_id, invite_code, has_world_map, campaign_type, status, solo_mode, lore, objectives)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (name, dm_user_id, invite_code, has_world_map, campaign_type, status, solo_mode, lore, objectives,
+            starting_level, granted_level)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         requestedName || source.name || defaultName,
@@ -219,7 +237,13 @@ campaignsRouter.post('/', (req, res) => {
         campaignType === 'campana' ? 'draft' : 'complete',
         source.soloMode ? 1 : 0,
         source.briefing ?? '',
-        JSON.stringify(source.objectives ?? [])
+        JSON.stringify(source.objectives ?? []),
+        // Fase D: un escenario de fábrica arranca en su nivel recomendado; el
+        // resto de mesas, en el 1 hasta que el DM diga otra cosa. Si el PJ que
+        // entra ya es de nivel mayor, el techo concedido sube con él (nunca se
+        // le baja de nivel).
+        startingLevel,
+        Math.max(startingLevel, soloCharacterLevel ?? 1)
       );
     const id = Number(info.lastInsertRowid);
     db.prepare("INSERT INTO campaign_members (campaign_id, user_id, role) VALUES (?, ?, 'dm')").run(id, req.user.id);
@@ -391,7 +415,7 @@ campaignsRouter.patch('/:id', (req, res) => {
 
   const {
     name, description, artStyle, lore, objectives, maxPlayers, hasWorldMap,
-    campaignType, status, wizardStep,
+    campaignType, status, wizardStep, startingLevel, clockEnabled,
   } = req.body ?? {};
   const sets = [];
   const values = [];
@@ -438,6 +462,29 @@ campaignsRouter.patch('/:id', (req, res) => {
     sets.push('max_players = ?');
     values.push(maxPlayers ?? null);
   }
+  if (startingLevel !== undefined) {
+    if (!(Number.isInteger(startingLevel) && startingLevel >= 1 && startingLevel <= 20)) {
+      return res.status(400).json({ error: 'El nivel inicial debe estar entre 1 y 20' });
+    }
+    sets.push('starting_level = ?');
+    values.push(startingLevel);
+    // El nivel concedido nunca puede quedar por debajo del inicial: si la
+    // mesa arranca en 3, nadie debería tener pendiente «subir» hasta 3.
+    if (startingLevel > row.granted_level) {
+      sets.push('granted_level = ?');
+      values.push(startingLevel);
+    }
+  }
+  // El reloj también se puede ajustar desde el asistente de la campaña, no
+  // solo desde la mesa (Fase F): nace apagado y encenderlo no cambia ninguna
+  // regla, solo hace visible el tiempo.
+  if (clockEnabled !== undefined) {
+    if (typeof clockEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'La opción de reloj no es válida' });
+    }
+    sets.push('clock_enabled = ?');
+    values.push(clockEnabled ? 1 : 0);
+  }
   if (hasWorldMap !== undefined) {
     if (typeof hasWorldMap !== 'boolean') {
       return res.status(400).json({ error: 'La opción de mapa de mundo no es válida' });
@@ -483,6 +530,83 @@ campaignsRouter.patch('/:id', (req, res) => {
 
 // Invalida el código anterior al instante. No hace falta guardar un historial:
 // solo el valor único actual permite que una cuenta nueva se una.
+// Conceder un nivel al grupo (Fase D). No toca ninguna ficha: sube el techo
+// de la campaña y cada jugador completa su subida cuando quiera. El aviso
+// llega por socket a quien esté en la mesa, sin recargar.
+campaignsRouter.post('/:id/nivel', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id !== req.user.id || row.solo_mode) {
+    return res.status(403).json({ error: 'Solo el DM concede niveles' });
+  }
+
+  const { level } = req.body ?? {};
+  if (level !== undefined && level !== null && !Number.isInteger(level)) {
+    return res.status(400).json({ error: 'Nivel no válido' });
+  }
+  const result = grantCampaignLevel(row.id, level ?? null);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+
+  if (result.grantedLevel !== result.previousLevel) {
+    notifyCampaignLevel(row.id, result.grantedLevel);
+    postSystemMessage(row.id, `El grupo alcanza el nivel ${result.grantedLevel}. Subid vuestras fichas cuando queráis.`);
+  }
+  res.json({ grantedLevel: result.grantedLevel });
+});
+
+// Descanso de mesa (Fase F). Lo declara quien dirige y afecta al grupo
+// entero: ocho horas son ocho horas para todos, no ocho por jugador. Los
+// dados de golpe los gasta cada jugador desde su ficha, aparte.
+//
+// Con el reloj apagado el descanso hace exactamente lo mismo sin tocar el
+// tiempo: ninguna regla depende de esa capacidad.
+campaignsRouter.post('/:id/descanso', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  const membership = getMembership(row.id, req.user.id);
+  if (!membership) return res.status(403).json({ error: 'No perteneces a esta campaña' });
+  // En una escaramuza sin DM la cuenta juega sola: puede declarar su propio
+  // descanso. En una mesa con DM, lo declara el DM.
+  if (!row.solo_mode && row.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'El descanso lo declara el DM' });
+  }
+
+  const tipo = req.body?.tipo;
+  const result = restCampaign(row.id, tipo);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+
+  const recuperados = result.restored.length;
+  postSystemMessage(
+    row.id,
+    tipo === 'largo'
+      ? `El grupo hace un descanso largo${recuperados ? `: ${recuperados} ficha${recuperados === 1 ? '' : 's'} al máximo` : ''}.`
+      : 'El grupo hace un descanso corto.'
+  );
+  notifyCampaignMap(row.id);
+  notifyCombat(row.id);
+  // El contador de jornadas lo pinta el mapa de mundo cuando la campaña lo
+  // tiene: si el descanso ha cruzado de día, hay que refrescarlo también.
+  if (result.clock?.daysCrossed) notifyCampaignWorld(row.id);
+  res.json({ ok: true, tipo, restored: result.restored, clock: result.clock });
+});
+
+// Encender o apagar el reloj de campaña (Fase F). Apagarlo conserva la hora,
+// así que volver a encenderlo no pierde nada.
+campaignsRouter.post('/:id/reloj', (req, res) => {
+  const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
+  if (row.dm_user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Solo el DM ajusta el reloj de la campaña' });
+  }
+  const { enabled } = req.body ?? {};
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Indica si el reloj queda encendido' });
+
+  const result = setCampaignClock(row.id, enabled);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  notifyCampaignMap(row.id);
+  res.json({ clockEnabled: result.clockEnabled, dayMinutes: result.dayMinutes });
+});
+
 campaignsRouter.post('/:id/invitacion/regenerar', (req, res) => {
   const row = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Campaña no encontrada' });
@@ -1063,7 +1187,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
     const moverCombatant = db
       .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
       .get(req.params.id, character.id);
-    const queued = queueOpportunityAttacks({
+    queueOpportunityAttacks({
       campaignId: req.params.id,
       moverKind: 'personaje',
       moverCharacterId: character.id,
@@ -1072,7 +1196,11 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
       floorId: currentRoom.floor_id,
       path: movementPath,
     });
-    if (queued.length || fluidResult.changed || hazardResult.changed) notifyCombat(req.params.id);
+    // Moverse SIEMPRE cambia el tracker: `trySpendMovement` acaba de descontar
+    // las casillas del turno. Avisar solo cuando había ataques de oportunidad o
+    // fluidos dejaba a la mesa con el movimiento intacto en el HUD y el área de
+    // alcance entera, hasta que otro evento refrescaba el combate.
+    notifyCombat(req.params.id);
   } else if (fluidResult.changed || hazardResult.changed) {
     notifyCombat(req.params.id);
   }
@@ -1082,7 +1210,7 @@ campaignsRouter.post('/:id/mapa-activo/personajes/:characterId/mover', (req, res
       notifyCombat(req.params.id);
       notifyBestiary(req.params.id);
     }
-    if (spawned.startedCombat) notifyCombatStarted(req.params.id);
+    if (spawned.encounterStarted) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }
   res.json({ ok: true });
@@ -1182,7 +1310,7 @@ campaignsRouter.post('/:id/puertas/:doorId/abrir', (req, res) => {
       notifyCombat(req.params.id);
       notifyBestiary(req.params.id);
     }
-    if (spawned.startedCombat) notifyCombatStarted(req.params.id);
+    if (spawned.encounterStarted) notifyCombatStarted(req.params.id);
     fireRevealEvents(req.params.id, newlyRevealed);
   }
 
@@ -1237,7 +1365,12 @@ campaignsRouter.post('/:id/marcadores/:tokenId/saquear', (req, res) => {
     Math.max(Math.abs(token.x - charToken.x), Math.abs(token.y - charToken.y)) <= 1;
   if (!adjacent) return res.status(400).json({ error: 'Tienes que estar al lado del botín' });
 
-  const looted = lootMarkerInto(token, character);
+  // La transferencia entera (leer el cofre, escribir la ficha, vaciar el
+  // marcador) ocurre en una única transacción del servidor: el cliente nunca
+  // manda inventarios completos y dos saqueos a la vez no pueden duplicar.
+  const transfer = lootMarkerInto(token.id, character.id);
+  if (!transfer.ok) return res.status(400).json({ error: transfer.error });
+  const looted = transfer.looted;
   const consequence = token.success_consequence || '';
   const consequenceScope = publishMarkerConsequence(
     req.params.id,

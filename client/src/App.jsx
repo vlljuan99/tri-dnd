@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './store/auth.js';
+import { api } from './api.js';
+import { bindUnlock, loadOverrides } from './lib/sfx/index.js';
 import AuthPage from './pages/AuthPage.jsx';
 import HubLayout from './features/hub/pages/HubLayout.jsx';
 import CampanasSection from './features/hub/components/CampanasSection.jsx';
@@ -11,6 +13,7 @@ import DondeJuegoSection from './features/hub/components/DondeJuegoSection.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import BibliotecaPage from './pages/BibliotecaPage.jsx';
 import CompendiumPage from './pages/CompendiumPage.jsx';
+import SoundSettingsPage from './pages/SoundSettingsPage.jsx';
 import CharacterSheetPage from './pages/CharacterSheetPage.jsx';
 import CharacterWizardPage from './pages/CharacterWizardPage.jsx';
 import ParchmentShell from './components/ParchmentShell.jsx';
@@ -51,6 +54,17 @@ function ContextualDiceOverlay() {
 // Taller, las Crónicas y los editores quedan libres de controles de juego.
 function Protected() {
   const { user, loading } = useAuth();
+
+  // Arranque del sonido, una vez por sesión: se queda esperando al primer
+  // gesto del usuario (los navegadores no dejan sonar nada antes) y se trae los
+  // sonidos personalizados de la instalación. Si algo de esto falla, la mesa se
+  // queda en silencio pero nada más se rompe.
+  useEffect(() => {
+    if (!user) return;
+    bindUnlock();
+    loadOverrides(api);
+  }, [user]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-parchment-100 text-ink">
@@ -119,6 +133,14 @@ export default function App() {
           element={
             <ParchmentShell>
               <CompendiumPage />
+            </ParchmentShell>
+          }
+        />
+        <Route
+          path="/configuracion/sonidos"
+          element={
+            <ParchmentShell>
+              <SoundSettingsPage />
             </ParchmentShell>
           }
         />

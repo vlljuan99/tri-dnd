@@ -11,6 +11,7 @@ import StepClase, { validateClase } from '../components/wizard/StepClase.jsx';
 import StepRaza, { validateRaza } from '../components/wizard/StepRaza.jsx';
 import StepCaracteristicas, { validateCaracteristicas } from '../components/wizard/StepCaracteristicas.jsx';
 import StepCompetencias, { validateCompetencias } from '../components/wizard/StepCompetencias.jsx';
+import StepEquipo, { validateEquipo } from '../components/wizard/StepEquipo.jsx';
 import StepResumen from '../components/wizard/StepResumen.jsx';
 
 const STEPS = [
@@ -28,6 +29,12 @@ const STEPS = [
     label: 'Competencias',
     Component: StepCompetencias,
     validate: (char, ctx) => validateCompetencias(char, ctx.classDetail),
+  },
+  {
+    id: 'equipo',
+    label: 'Equipo',
+    Component: StepEquipo,
+    validate: (char, ctx) => validateEquipo(char, ctx.classDetail),
   },
   { id: 'resumen', label: 'Resumen y confirmación', Component: StepResumen, validate: () => ({}) },
 ];
@@ -115,7 +122,13 @@ export default function CharacterWizardPage() {
     if (Object.keys(body).length === 0) return;
     setSaveState('saving');
     try {
-      await api(`/characters/${id}`, { method: 'PUT', body });
+      const { character } = await api(`/characters/${id}`, { method: 'PUT', body });
+      // El servidor manda en los campos derivados (nivel inicial de la
+      // campaña, competencias, CA): se recogen tal cual vuelven en vez de
+      // dejar el borrador local diciendo otra cosa.
+      setChar((current) =>
+        current ? { ...current, level: character.level, ac: character.ac } : current
+      );
       setSaveState('saved');
     } catch {
       setSaveState('error');
@@ -170,6 +183,22 @@ export default function CharacterWizardPage() {
       patch({ save_proficiencies: saves });
     }
   }, [char?.class_index, char?.save_proficiencies, classDetails, patch]);
+
+  // Competencia real de armas/armaduras (Fase B): siempre la fija la clase,
+  // resuelta por el servidor al cargar su detalle (weapon_proficiencies_resolved).
+  useEffect(() => {
+    if (!char?.class_index) return;
+    const detail = classDetails[char.class_index];
+    if (!detail) return;
+    const weaponProf = detail.weapon_proficiencies_resolved ?? [];
+    const armorProf = detail.armor_proficiencies_resolved ?? [];
+    if (
+      JSON.stringify(weaponProf) !== JSON.stringify(char.weapon_proficiencies) ||
+      JSON.stringify(armorProf) !== JSON.stringify(char.armor_proficiencies)
+    ) {
+      patch({ weapon_proficiencies: weaponProf, armor_proficiencies: armorProf });
+    }
+  }, [char?.class_index, char?.weapon_proficiencies, char?.armor_proficiencies, classDetails, patch]);
 
   // Velocidad: siempre la fija la raza elegida
   useEffect(() => {
@@ -268,12 +297,12 @@ export default function CharacterWizardPage() {
     try {
       await flushNow();
       const conMod = abilityModifier(char.abilities.con);
-      const dexMod = abilityModifier(char.abilities.dex);
       const hpMax = Math.max(1, estimateHitPoints(classDetail?.hit_die ?? 8, conMod, char.level));
-      const ac = 10 + dexMod;
+      // La CA la deriva el servidor a partir del inventario (ya aplicada en el
+      // paso de Equipo); aquí solo se cierran PG y estado.
       await api(`/characters/${id}`, {
         method: 'PUT',
-        body: { hp_max: hpMax, hp_current: hpMax, ac, status: 'complete' },
+        body: { hp_max: hpMax, hp_current: hpMax, status: 'complete' },
       });
       localStorage.removeItem('tridnd_sheet_tutorial_seen');
       navigate(`/personajes/${id}?tutorial=1`);

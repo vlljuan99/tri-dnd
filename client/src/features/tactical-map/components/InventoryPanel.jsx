@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../api.js';
 import { useRoom } from '../../../store/socket.js';
+import { availableSlotsFor, equipItem, SLOT_LABELS } from '../../../lib/equipment.js';
 
 /**
  * Panel de inventario del tablero (Fase 8.6), separado del panel de ataque:
  * consultar objetos, armas y equipo de un personaje, y usar los no-armas
  * (pociones, pergaminos...) en tu propio turno. Usar un objeto gasta la
  * acción, igual que atacar — el servidor lo valida y lo aplica.
+ *
+ * Fase E: también se equipa desde aquí. Lo que se saquea de un cofre llega con
+ * sus datos de arma o armadura, así que empuñarlo no debería obligar a salir
+ * del tablero e ir a la ficha. El servidor revalida los slots y recalcula la
+ * CA, como en cualquier otra escritura del inventario.
  */
-export default function InventoryPanel({ token, isOwner, isDm, combat, onClose }) {
+export default function InventoryPanel({ token, isOwner, isDm, combat, onClose, onInventoryChange }) {
   const useItem = useRoom((s) => s.useItem);
   const [char, setChar] = useState(null);
   const [error, setError] = useState('');
@@ -51,6 +57,27 @@ export default function InventoryPanel({ token, isOwner, isDm, combat, onClose }
           ? c.inventory.map((i) => (i.id === item.id ? { ...i, qty: resp.remainingQty } : i))
           : c.inventory.filter((i) => i.id !== item.id),
     }));
+    onInventoryChange?.();
+  }
+
+  // Equipar/desequipar desde la mesa. Se manda el inventario recién leído del
+  // servidor con el cambio aplicado; si el servidor lo rechaza (slot ocupado,
+  // arma a dos manos…) se enseña su error y no se toca el estado local.
+  async function changeSlot(item, slot) {
+    if (!isOwner || busy) return;
+    setBusy(item.id);
+    setError('');
+    try {
+      const { character } = await api(`/characters/${token.characterId}`);
+      const inventory = equipItem(character.inventory, item.id, slot || null);
+      const updated = await api(`/characters/${token.characterId}`, { method: 'PUT', body: { inventory } });
+      setChar(updated.character);
+      onInventoryChange?.();
+    } catch (e) {
+      setError(e.message || 'No se pudo equipar.');
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -82,8 +109,26 @@ export default function InventoryPanel({ token, isOwner, isDm, combat, onClose }
                 {item.name}
                 <span className="ml-1.5 font-mono text-xs text-bone/50">×{item.qty}</span>
                 {item.weapon && <span className="ml-1.5 text-xs text-bone/40">(arma)</span>}
+                {item.slot && (
+                  <span className="ml-1.5 text-xs text-gold/70">{SLOT_LABELS[item.slot]}</span>
+                )}
               </span>
-              {item.weapon ? (
+              {isOwner && availableSlotsFor(item).length > 0 ? (
+                <select
+                  value={item.slot ?? ''}
+                  disabled={busy === item.id}
+                  onChange={(e) => changeSlot(item, e.target.value)}
+                  aria-label={`Dónde llevas ${item.name}`}
+                  className="shrink-0 rounded-sm border border-bone/20 bg-night-950 px-1.5 py-0.5 text-xs text-bone/80 disabled:opacity-40"
+                >
+                  <option value="">Mochila</option>
+                  {availableSlotsFor(item).map((slot) => (
+                    <option key={slot} value={slot}>
+                      {SLOT_LABELS[slot]}
+                    </option>
+                  ))}
+                </select>
+              ) : item.weapon ? (
                 <span className="shrink-0 text-xs text-bone/40">ataca desde tu token</span>
               ) : canUse ? (
                 <button

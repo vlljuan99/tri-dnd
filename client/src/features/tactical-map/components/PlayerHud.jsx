@@ -1,17 +1,230 @@
+import { useEffect, useRef } from 'react';
 import StatTooltip from '../../../components/StatTooltip.jsx';
-import { conditionSymbol, conditionLabel } from '../domain/conditions.js';
+import { conditionLabel, conditionSymbol } from '../domain/conditions.js';
+import { HOTBAR_KEYS, keyLabel, matchShortcut, weaponKey } from '../domain/shortcuts.js';
+import { rangeLabel, targetRangeState } from '../domain/weaponSlots.js';
 
-// Barra de estado permanente del propio personaje (Fase 8.6, pulido):
-// lo que se mira constantemente en tu turno —vida, movimiento restante,
-// si ya has actuado— vive aquí, siempre visible, en vez de mezclado con
-// una lista de tokens que solo tiene sentido cuando hay varios en juego.
+// Hotbar de la mesa (Fase 3 de la reforma del HUD). Tres bloques con una
+// función cada uno, en vez de una fila de botones donde todo pesaba igual:
+//
+//   1. QUIÉN ERES     retrato, PG, CA y estados. Solo se lee.
+//   2. QUÉ TE QUEDA   recursos del turno (movimiento, acción, adicional,
+//                     reacción) y los slots de acción con su icono y su tecla.
+//   3. QUÉ HACES AHORA "Terminar turno", grande y separado del resto para no
+//                     pulsarlo sin querer — o la espera, o la salvación de
+//                     muerte si estás agonizando.
+//
+// Los casos especiales (agonía, muerte, enemigo jugado por el DM, turno ajeno)
+// no añaden botones: quitan los que no pueden funcionar y explican por qué en
+// el tooltip. El estado de "qué puedo hacer" no se decide aquí, llega en
+// `control` desde domain/turnControl.js, la misma verdad que apaga el pad de
+// movimiento y el área de alcance del tablero.
+
+const SLOT_BASE =
+  'group relative grid h-11 w-11 place-items-center rounded-lg border transition disabled:cursor-not-allowed';
+const SLOT_IDLE =
+  'border-bone/15 bg-night-950/80 text-bone/70 hover:border-gold/60 hover:bg-gold/10 hover:text-gold disabled:opacity-25 disabled:hover:border-bone/15 disabled:hover:bg-night-950/80 disabled:hover:text-bone/70';
+const SLOT_ON = 'border-moss/70 bg-moss/20 text-bone shadow-[inset_0_0_12px_rgba(94,140,74,0.25)]';
+
+function Icon({ name }) {
+  const common = {
+    className: 'h-[1.15rem] w-[1.15rem]',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'correr':
+      return <svg {...common}><path d="M13 4.5a1.4 1.4 0 1 0 0-.1Z" /><path d="M9 21l2.5-5-2-2.5.5-4L7 11l-1 3" /><path d="m10 9.5 3.5-1.5 2.5 2 3 .5" /><path d="m13.5 13.5 2 2.5 1.5 4" /></svg>;
+    case 'esquivar':
+      return <svg {...common}><path d="M12 3.5 5 6v5.5c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-2.5Z" /></svg>;
+    case 'destrabarse':
+      return <svg {...common}><path d="M4 12h7m0 0-2.5-2.5M11 12l-2.5 2.5" /><path d="M20 12h-4" /><path d="M14 5.5v13" /></svg>;
+    case 'buscar':
+      return <svg {...common}><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /><path d="M10.5 7.5v6m-3-3h6" /></svg>;
+    case 'conjuros':
+      return <svg {...common}><path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" /><path d="m18 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /></svg>;
+    case 'inventario':
+      return <svg {...common}><path d="M5 8h14l-1 12H6L5 8Z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></svg>;
+    case 'ficha':
+      return <svg {...common}><path d="M6 3h9l4 4v14H6V3Z" /><path d="M15 3v4h4" /><path d="M9 12h6m-6 4h4" /></svg>;
+    case 'notas':
+      return <svg {...common}><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13 7 4 4" /></svg>;
+    case 'melee':
+      return <svg {...common}><path d="M4.5 19.5 14 10" /><path d="M13 4h7v7l-6.5 6.5-7-7L13 4Z" /><path d="m3 21 3-3" /></svg>;
+    case 'distancia':
+      return <svg {...common}><path d="M6 3v18" /><path d="M6 4c7 1.5 11 4.5 13 8-2 3.5-6 6.5-13 8" /><path d="M6 12h14" /></svg>;
+    case 'desarmado':
+      return <svg {...common}><path d="M7 11V7.5a1.5 1.5 0 0 1 3 0V11m0-1V6.5a1.5 1.5 0 0 1 3 0V11m0-1V7.5a1.5 1.5 0 0 1 3 0V13" /><path d="M16 13v-1.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4.6 15a1.6 1.6 0 0 1 2.5-2L9 15" /></svg>;
+    default:
+      return null;
+  }
+}
+
+/** Un slot del hotbar: icono, tecla en la esquina y el porqué en el tooltip. */
+function ActionSlot({ slot }) {
+  const key = HOTBAR_KEYS[slot.key];
+  const detail = slot.disabled ? slot.reason : slot.hint;
+  return (
+    <button
+      type="button"
+      onClick={slot.run}
+      disabled={slot.disabled}
+      aria-keyshortcuts={key}
+      aria-pressed={slot.on ? true : undefined}
+      aria-label={slot.label}
+      title={`${slot.label} · Tecla ${keyLabel(key)}${detail ? ` — ${detail}` : ''}`}
+      className={`${SLOT_BASE} ${slot.on ? SLOT_ON : SLOT_IDLE}`}
+    >
+      <Icon name={slot.icon} />
+      <span
+        aria-hidden="true"
+        className="absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
+      >
+        {keyLabel(key)}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Slot de arma. A diferencia de una acción, un arma no se "usa" desde el
+ * hotbar: se EMPUÑA, y después se pulsa al enemigo. Por eso el slot se queda
+ * encendido mientras apuntas y el tooltip dice el gesto que falta.
+ */
+function WeaponSlot({ slot, index, aiming, range, onAim }) {
+  const key = weaponKey(index);
+  const icon = slot.unarmed ? 'desarmado' : slot.geometry.ranged ? 'distancia' : 'melee';
+  const bonus = slot.attackBonus >= 0 ? `+${slot.attackBonus}` : `${slot.attackBonus}`;
+  const detail = [rangeLabel(slot.geometry), `${bonus} al ataque`, slot.damageLabel]
+    .filter(Boolean)
+    .join(' · ');
+  const stateRing =
+    aiming && range
+      ? range.state === 'alcance'
+        ? 'border-moss bg-moss/25 text-bone shadow-[0_0_14px_rgba(94,140,74,0.45)]'
+        : range.state === 'larga'
+          ? 'border-ochre bg-ochre/20 text-bone shadow-[0_0_14px_rgba(156,111,46,0.4)]'
+          : 'border-blood bg-blood/20 text-bone'
+      : aiming
+        ? 'border-gold bg-gold/20 text-gold shadow-[0_0_14px_rgba(232,195,104,0.45)]'
+        : '';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onAim(slot.id)}
+      aria-keyshortcuts={key ?? undefined}
+      aria-pressed={aiming}
+      aria-label={slot.name}
+      title={`${slot.name}${key ? ` · Tecla ${keyLabel(key)}` : ''} — ${detail}. ${
+        aiming ? 'Pulsa un enemigo para atacarlo (Esc para bajar el arma).' : 'Púlsala para empuñarla y elegir objetivo.'
+      }`}
+      className={`group relative flex h-11 min-w-[3.6rem] max-w-[8rem] flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 transition ${
+        stateRing || SLOT_IDLE
+      }`}
+    >
+      <Icon name={icon} />
+      <span className="max-w-full truncate text-[0.55rem] uppercase tracking-wider text-current/80">
+        {slot.name}
+      </span>
+      {key && (
+        <span
+          aria-hidden="true"
+          className="absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
+        >
+          {keyLabel(key)}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** Recurso del turno: se tacha al gastarlo, como una casilla de la ficha. */
+function ResourceChip({ stat, label, spent }) {
+  return (
+    <StatTooltip
+      stat={stat}
+      className={`font-display text-[0.62rem] uppercase tracking-widest ${
+        spent ? 'text-bone/25 line-through' : 'text-gold/90'
+      }`}
+    >
+      {label}
+    </StatTooltip>
+  );
+}
+
+function DeathSaveDots({ saves }) {
+  return (
+    <span
+      className="flex items-center gap-1"
+      title={`Salvaciones de muerte: ${saves?.successes ?? 0} éxitos, ${saves?.failures ?? 0} fallos`}
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={`s${i}`}
+          className={`h-2 w-2 rounded-full ${i < (saves?.successes ?? 0) ? 'bg-moss' : 'bg-night-950 ring-1 ring-moss/40'}`}
+        />
+      ))}
+      <span className="mx-0.5 text-bone/30">·</span>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={`f${i}`}
+          className={`h-2 w-2 rounded-full ${i < (saves?.failures ?? 0) ? 'bg-blood' : 'bg-night-950 ring-1 ring-blood/40'}`}
+        />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Escucha las teclas del hotbar. La misma tabla que pinta cada slot decide qué
+ * hace cada tecla, así que una no puede prometer lo que la otra no cumple; y
+ * mientras se escribe en el chat no se dispara nada.
+ */
+function useHotbarShortcuts(actions, bindings = HOTBAR_KEYS) {
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  const bindingsRef = useRef(bindings);
+  bindingsRef.current = bindings;
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      const name = matchShortcut(event, bindingsRef.current);
+      if (!name) return;
+      const action = actionsRef.current[name];
+      if (!action || action.disabled || !action.run) return;
+      event.preventDefault();
+      action.run();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+}
+
 export default function PlayerHud({
   token,
   combatant,
+  // Qué puede hacer ahora mismo (domain/turnControl.js): la misma verdad que
+  // apaga el pad de movimiento y el área de alcance en el tablero.
+  control,
   combatActive,
   isMyTurn,
   characterId,
   canSeeNotes,
+  canSearchTraps = false,
+  searching = false,
+  onSearchTraps,
+  // Armas equipadas (domain/weaponSlots.js) y el apuntado en curso: el hotbar
+  // es donde se empuña, el tablero donde se elige a quién.
+  weapons = [],
+  aimingWeaponId = null,
+  onAimWeapon,
+  target = null, // { name, distance, lineOfSight }
   onEndTurn,
   onSpecialAction,
   onDeathSave,
@@ -19,17 +232,21 @@ export default function PlayerHud({
   onOpenInventory,
   onOpenSpells,
   onOpenNotes,
+  notice,
 }) {
-  if (!token) return null;
-
-  const hp = combatant?.hpCurrent ?? token.hp;
-  const hpMax = combatant?.hpMax ?? token.hpMax;
+  const hp = combatant?.hpCurrent ?? token?.hp;
+  const hpMax = combatant?.hpMax ?? token?.hpMax;
   const hpTemp = combatant?.hpTemp ?? 0;
   const ac = combatant?.ac;
-  const speed = combatant?.speed ?? token.speed;
-  // Correr (Dash) dobla el presupuesto de movimiento del turno
-  const budget = Number.isInteger(speed) ? Math.floor(speed / 5) * (combatant?.dashed ? 2 : 1) : null;
-  const remaining = budget != null ? Math.max(0, budget - (combatant?.movedSquares ?? 0)) : null;
+  const speed = combatant?.speed ?? token?.speed;
+  const baseBudget = Number.isInteger(speed) ? Math.floor(speed / 5) : null;
+  const budget = control?.budget ?? null;
+  const remaining = control?.remaining ?? null;
+  const spentMovement = control?.spent ?? 0;
+  const outOfMovement = budget != null && remaining === 0;
+  // Gastarlo todo sigue mereciendo pips (cuenta lo que hiciste); estar
+  // inconsciente o inmovilizado por condiciones, no: ahí no hay turno que gastar.
+  const movementRelevant = !['inconsciente', 'condiciones'].includes(control?.move?.reason);
   const hasHp = Number.isInteger(hp) && Number.isInteger(hpMax) && hpMax > 0;
   const downed = Boolean(combatant?.downed);
   const dying = Boolean(combatant?.dying);
@@ -39,187 +256,347 @@ export default function PlayerHud({
   const conditionTimers = Object.fromEntries(
     (combatant?.timedConditions ?? []).map((timer) => [timer.condition, timer])
   );
-  // Acciones especiales disponibles: solo en tu turno, con la mesa en turnos y
-  // sin estar agonizando; se deshabilitan si ya has gastado la acción.
-  const canAct = Boolean(combatActive && isMyTurn && combatant && !downed);
   const hpRatio = hasHp ? Math.max(0, Math.min(1, hp / hpMax)) : 0;
   const hpColor = hpRatio > 0.5 ? 'bg-moss' : hpRatio > 0.25 ? 'bg-ochre' : 'bg-blood';
-  const gated = Boolean(combatActive && combatant); // movimiento/acción solo tienen sentido con el modo activo
+  // Movimiento/acción solo tienen sentido con el modo por turnos activo
+  const gated = Boolean(combatActive && combatant);
+  const actionUsed = Boolean(combatant?.actionUsed);
+  // Gastar la acción: el motivo viene ya redactado del gate (turno ajeno,
+  // acción gastada, condiciones, inconsciencia) para que el slot apagado
+  // explique por qué lo está en vez de limitarse a no responder.
+  const canAct = Boolean(!downed && (control?.act?.allowed ?? true));
+  const actionReason = control?.act?.message ?? 'Ya has usado tu acción este turno';
+  // Correr/Esquivar/Destrabarse son acciones DEL TURNO: en modo libre el
+  // servidor las rechaza porque no hay turno que gastar.
+  const canSpendTurnAction = canAct && gated;
+
+  const special = (kind, label, icon, on) => ({
+    key: kind,
+    label,
+    icon,
+    on,
+    disabled: !canSpendTurnAction || on,
+    reason: on
+      ? 'Ya está activa este turno'
+      : !combatActive
+        ? 'La mesa está en modo libre: no hay turnos que gastar'
+        : actionReason,
+    hint: `Gasta la acción: ${label}`,
+    run: () => onSpecialAction?.(kind),
+  });
+
+  // Orden fijo: primero lo que gasta el turno, después lo que solo abre un
+  // panel. Un slot que no aplica (un enemigo no tiene ficha) no se pinta.
+  const slots = [
+    combatant && onSpecialAction && special('correr', 'Correr', 'correr', Boolean(combatant.dashed)),
+    combatant && onSpecialAction && special('esquivar', 'Esquivar', 'esquivar', combatant.stance === 'esquivar'),
+    combatant && onSpecialAction && special('destrabarse', 'Destrabar', 'destrabarse', combatant.stance === 'destrabarse'),
+    canSearchTraps && {
+      key: 'buscar',
+      label: 'Buscar trampas',
+      icon: 'buscar',
+      disabled: !canAct || searching,
+      reason: searching ? 'Buscando…' : actionReason,
+      hint: 'Gasta la acción: tirada de Percepción contra lo oculto',
+      run: () => onSearchTraps?.(),
+    },
+    characterId && onOpenSpells && {
+      key: 'conjuros',
+      label: 'Conjuros',
+      icon: 'conjuros',
+      disabled: downed,
+      reason: 'A 0 PG no puedes lanzar conjuros',
+      hint: 'Abre tus trucos y conjuros preparados',
+      run: () => onOpenSpells(),
+    },
+    characterId && {
+      key: 'inventario',
+      label: 'Inventario',
+      icon: 'inventario',
+      disabled: downed,
+      reason: 'A 0 PG no puedes usar objetos',
+      hint: 'Abre tu equipo y objetos',
+      run: () => onOpenInventory?.(),
+    },
+    characterId && {
+      key: 'ficha',
+      label: 'Ficha',
+      icon: 'ficha',
+      // Leer no es actuar: la ficha y las notas siguen abiertas hasta muerto
+      hint: 'Consulta la ficha completa',
+      run: () => onOpenSheet?.(),
+    },
+    canSeeNotes && {
+      key: 'notas',
+      label: 'Notas',
+      icon: 'notas',
+      hint: 'Tus notas privadas de la partida',
+      run: () => onOpenNotes?.(),
+    },
+  ].filter(Boolean);
+
+  const canRollDeathSave = Boolean(dying && isMyTurn && !combatant?.deathSaveRolled && onDeathSave);
+
+  // Armas: solo se ofrecen si el personaje puede pelear. A 0 PG desaparecen
+  // igual que el resto de acciones.
+  const weaponRow = downed ? [] : weapons;
+  const aimingWeapon = weaponRow.find((weapon) => weapon.id === aimingWeaponId) ?? null;
+  // Con un objetivo ya elegido, el propio slot dice si ese golpe llega.
+  const aimRange = aimingWeapon && target
+    ? targetRangeState(target.distance, aimingWeapon.geometry, { lineOfSight: target.lineOfSight })
+    : null;
+
+  const shortcutActions = Object.fromEntries(slots.map((slot) => [slot.key, slot]));
+  weaponRow.slice(0, 4).forEach((weapon, index) => {
+    shortcutActions[`arma-${weapon.id}`] = { run: () => onAimWeapon?.(weapon.id) };
+  });
+  if (isMyTurn && onEndTurn) shortcutActions.terminarTurno = { run: onEndTurn };
+  const bindings = {
+    ...HOTBAR_KEYS,
+    ...Object.fromEntries(weaponRow.slice(0, 4).map((weapon, index) => [`arma-${weapon.id}`, weaponKey(index)])),
+  };
+  useHotbarShortcuts(shortcutActions, bindings);
+
+  if (!token) return null;
 
   return (
-    <div className="pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-1.5 self-start rounded-sm border border-gold/25 bg-night-900/95 px-2.5 py-1.5 text-bone shadow-xl backdrop-blur">
-      <div className="flex items-center gap-2">
-        {token.imageUrl ? (
-          <img src={token.imageUrl} alt="" className="h-10 w-10 rounded-full border border-gold/40 object-cover" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-gold/30 bg-night-950 font-display text-gold/70">
-            {token.name?.[0]?.toUpperCase()}
+    // Se acota el ancho para que el hotbar envuelva en dos filas antes de
+    // pisar el dock de cámara de la esquina inferior izquierda.
+    <div className="pointer-events-auto relative flex w-fit max-w-[min(100%,54rem)] flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-sm border border-gold/25 bg-night-900/95 px-2.5 py-2 text-bone shadow-xl backdrop-blur">
+      {notice?.message && (
+        <div
+          key={notice.id}
+          role="alert"
+          className="pointer-events-none absolute bottom-full left-0 mb-2 max-w-sm animate-[hudNotice_4s_ease-in-out_forwards] rounded-sm border border-blood/60 bg-night-950/95 px-3 py-2 text-sm text-blood shadow-xl backdrop-blur"
+        >
+          {notice.message}
+        </div>
+      )}
+
+      {/* ── 1. Quién eres ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2.5">
+        <div className="relative">
+          {token.imageUrl ? (
+            <img
+              src={token.imageUrl}
+              alt=""
+              className={`h-11 w-11 rounded-full border-2 object-cover ${
+                isMyTurn ? 'border-gold shadow-[0_0_12px_rgba(232,195,104,0.5)]' : 'border-gold/30'
+              } ${dead ? 'grayscale' : ''}`}
+            />
+          ) : (
+            <div
+              className={`flex h-11 w-11 items-center justify-center rounded-full border-2 bg-night-950 font-display text-lg text-gold/70 ${
+                isMyTurn ? 'border-gold shadow-[0_0_12px_rgba(232,195,104,0.5)]' : 'border-gold/30'
+              }`}
+            >
+              {token.name?.[0]?.toUpperCase()}
+            </div>
+          )}
+          {dead && (
+            <span aria-hidden="true" className="absolute inset-0 grid place-items-center text-2xl text-blood/90">
+              ✕
+            </span>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className="max-w-[9rem] truncate font-display text-sm tracking-wide text-gold">{token.name}</span>
+            {ac != null && (
+              <StatTooltip
+                stat="ca"
+                className="shrink-0 rounded-sm border border-bone/15 px-1.5 font-mono text-[0.68rem] text-bone/70"
+              >
+                CA {ac}
+              </StatTooltip>
+            )}
           </div>
-        )}
-        <span className="font-display text-sm tracking-wide text-gold">{token.name}</span>
+
+          {hasHp && (
+            <StatTooltip stat="hp" className="flex items-center gap-1.5">
+              <span className="block h-2.5 w-24 overflow-hidden rounded-sm bg-night-950">
+                <span className={`block h-full ${hpColor}`} style={{ width: `${hpRatio * 100}%` }} />
+              </span>
+              <span className="font-mono text-xs text-bone/70">
+                {hp}/{hpMax}
+              </span>
+              {hpTemp > 0 && <span className="font-mono text-xs text-moss">+{hpTemp}</span>}
+            </StatTooltip>
+          )}
+
+          {/* Estados compactos: el símbolo manda y el nombre vive en el tooltip,
+              para que ocho condiciones no empujen el hotbar fuera de pantalla. */}
+          {(conditions.length > 0 || combatant?.concentration || stable) && (
+            <div className="flex flex-wrap items-center gap-1">
+              {combatant?.concentration && (
+                <span
+                  title={`Concentrándose en ${combatant.concentration}: recibir daño obliga a una salvación de Constitución`}
+                  className="rounded-sm border border-gold/50 bg-gold/10 px-1 text-[0.6rem] text-gold"
+                >
+                  ◎
+                </span>
+              )}
+              {stable && (
+                <span title="Estabilizado: a 0 PG pero fuera de peligro" className="text-[0.65rem] text-moss">
+                  ✚
+                </span>
+              )}
+              {conditions.map((cond) => (
+                <span
+                  key={cond}
+                  title={
+                    conditionTimers[cond]
+                      ? `${conditionLabel(cond)} · ${conditionTimers[cond].remaining} rondas`
+                      : conditionLabel(cond)
+                  }
+                  className="rounded-sm border border-blood/40 bg-blood/10 px-1 text-[0.6rem] text-blood/90"
+                >
+                  {conditionSymbol(cond)}
+                  {conditionTimers[cond] && <span className="ml-0.5 text-gold/80">{conditionTimers[cond].remaining}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {hasHp && (
-        <StatTooltip stat="hp" className="flex items-center gap-1.5">
-          <div className="h-2.5 w-24 overflow-hidden rounded-sm bg-night-950">
-            <div className={`h-full ${hpColor}`} style={{ width: `${hpRatio * 100}%` }} />
+      {/* ── 2. Qué te queda ───────────────────────────────────────────── */}
+      {/* Al envolverse en móvil, el separador pasa de columna a fila: una línea
+          vertical a la izquierda de un bloque que ocupa todo el ancho no separa
+          nada. */}
+      {!dead && (
+        <div className="flex flex-col gap-1.5 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+          {gated && !downed && (
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {budget != null && movementRelevant && (
+                <StatTooltip
+                  stat="mov"
+                  term={`Movimiento ${remaining}/${budget}`}
+                  desc={
+                    outOfMovement
+                      ? `Has gastado las ${budget} casillas de este turno. Se recuperan al empezar el siguiente.`
+                      : `Te quedan ${remaining} de ${budget} casillas este turno.${combatant?.dashed ? ' La segunda tanda procede de Correr.' : ''}`
+                  }
+                  className="flex items-center gap-0.5"
+                >
+                  <span className="sr-only">Movimiento {remaining}/{budget} casillas</span>
+                  {/* Gastarlo todo se canta con palabras, no solo con pips
+                      apagados: es la diferencia entre "no me deja moverme" y
+                      "ya me he movido". */}
+                  {outOfMovement && (
+                    <span className="mr-1 whitespace-nowrap font-display text-[0.62rem] uppercase tracking-widest text-ochre">
+                      Sin movimiento
+                    </span>
+                  )}
+                  {Array.from({ length: budget }, (_, index) => {
+                    const available = index >= spentMovement;
+                    const fromDash = combatant?.dashed && index >= baseBudget;
+                    return (
+                      <span
+                        key={index}
+                        className={`h-2.5 w-1.5 rounded-[1px] border ${index === baseBudget && fromDash ? 'ml-1' : ''} ${
+                          available
+                            ? fromDash
+                              ? 'border-gold/80 bg-gold shadow-[0_0_5px_rgba(232,195,104,0.7)]'
+                              : 'border-moss/80 bg-moss shadow-[0_0_5px_rgba(94,140,74,0.7)]'
+                            : fromDash
+                              ? 'border-gold/20 bg-night-950'
+                              : 'border-bone/15 bg-night-950'
+                        }`}
+                      />
+                    );
+                  })}
+                </StatTooltip>
+              )}
+              <ResourceChip stat="accion" label="Acción" spent={actionUsed} />
+              <ResourceChip stat="adicional" label="Adicional" spent={Boolean(combatant?.bonusUsed)} />
+              <ResourceChip stat="reaccion" label="Reacción" spent={combatant?.reactionAvailable === false} />
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1">
+            {weaponRow.slice(0, 4).map((weapon, index) => (
+              <WeaponSlot
+                key={weapon.id}
+                slot={weapon}
+                index={index}
+                aiming={weapon.id === aimingWeaponId}
+                range={weapon.id === aimingWeaponId ? aimRange : null}
+                onAim={(id) => onAimWeapon?.(id)}
+              />
+            ))}
+            {weaponRow.length > 0 && slots.length > 0 && (
+              <span aria-hidden="true" className="mx-0.5 h-8 w-px bg-bone/10" />
+            )}
+            {slots.map((slot) => (
+              <ActionSlot key={slot.key} slot={slot} />
+            ))}
           </div>
-          <span className="font-mono text-xs text-bone/70">
-            {hp}/{hpMax}
-          </span>
-          {hpTemp > 0 && <span className="font-mono text-xs text-moss">+{hpTemp} temp.</span>}
-        </StatTooltip>
-      )}
 
-      {ac != null && (
-        <StatTooltip stat="ca" className="rounded-sm border border-bone/15 px-1.5 py-0.5 font-mono text-xs text-bone/70">
-          CA {ac}
-        </StatTooltip>
-      )}
-
-      {gated && budget != null && (
-        <StatTooltip stat="mov" className="font-mono text-xs text-bone/70">
-          Mov {remaining}/{budget} cas
-        </StatTooltip>
-      )}
-
-      {gated && (
-        <StatTooltip
-          stat="accion"
-          className={`font-display text-xs uppercase tracking-widest ${
-            combatant.actionUsed ? 'text-bone/30 line-through' : 'text-gold'
-          }`}
-        >
-          Acción
-        </StatTooltip>
-      )}
-
-      {conditions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          {conditions.map((cond) => (
-            <span
-              key={cond}
-              title={conditionLabel(cond)}
-              className="rounded-sm border border-blood/40 bg-blood/10 px-1 text-[0.65rem] text-blood/90"
+          {/* La línea que enseña a atacar: qué llevas empuñado, qué falta por
+              hacer y si ese golpe llega desde donde estás. */}
+          {aimingWeapon && (
+            <p
+              className={`max-w-[26rem] text-[0.68rem] ${
+                aimRange && !aimRange.canAttack ? 'text-blood' : aimRange?.state === 'larga' ? 'text-ochre' : 'text-moss'
+              }`}
             >
-              {conditionSymbol(cond)} {conditionLabel(cond)}
-              {conditionTimers[cond] && <span className="ml-1 text-gold/80">⌛{conditionTimers[cond].remaining}</span>}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* PJ muerto de verdad (3 fallos): estado final, ya no hay nada que tirar */}
-      {combatActive && dead && (
-        <div className="flex items-center gap-2 border-l border-blood/30 pl-3">
-          <span className="font-display text-xs uppercase tracking-widest text-blood">☠ Muerto</span>
-        </div>
-      )}
-
-      {combatActive && stable && (
-        <div className="flex items-center gap-2 border-l border-moss/30 pl-3">
-          <span className="font-display text-xs uppercase tracking-widest text-moss">✚ Estable</span>
-        </div>
-      )}
-
-      {/* PJ agonizante: salvaciones de muerte en vez de acciones normales */}
-      {combatActive && dying && (
-        <div className="flex items-center gap-2 border-l border-bone/10 pl-3">
-          <span className="flex items-center gap-1" title="Salvaciones de muerte">
-            {[0, 1, 2].map((i) => (
-              <span key={`s${i}`} className={`h-2 w-2 rounded-full ${i < (combatant?.deathSaves?.successes ?? 0) ? 'bg-moss' : 'bg-night-950 ring-1 ring-moss/40'}`} />
-            ))}
-            <span className="mx-0.5 text-bone/30">·</span>
-            {[0, 1, 2].map((i) => (
-              <span key={`f${i}`} className={`h-2 w-2 rounded-full ${i < (combatant?.deathSaves?.failures ?? 0) ? 'bg-blood' : 'bg-night-950 ring-1 ring-blood/40'}`} />
-            ))}
-          </span>
-          {isMyTurn && !combatant?.deathSaveRolled && onDeathSave && (
-            <button
-              onClick={onDeathSave}
-              className="rounded-sm border border-blood/50 px-2 py-0.5 text-xs text-blood hover:bg-blood/10"
-            >
-              Tirar salvación
-            </button>
+              <span className="font-display uppercase tracking-widest">{aimingWeapon.name}</span>
+              {aimRange && target?.name ? (
+                <> · {target.name} a {target.distance * 5} pies · {aimRange.label}</>
+              ) : (
+                <> · pulsa un enemigo para atacarlo · Esc para bajar el arma</>
+              )}
+            </p>
           )}
         </div>
       )}
 
-      {/* Acciones especiales del turno (gastan la acción): Correr dobla el
-          movimiento, Esquivar altera ataques y Destrabarse evita que el
-          camino confirmado genere ataques de oportunidad. */}
-      {canAct && onSpecialAction && (
-        <div className="flex items-center gap-1 border-l border-bone/10 pl-3">
-          {[
-            { kind: 'correr', label: 'Correr', on: combatant?.dashed },
-            { kind: 'esquivar', label: 'Esquivar', on: combatant?.stance === 'esquivar' },
-            { kind: 'destrabarse', label: 'Destrabar', on: combatant?.stance === 'destrabarse' },
-          ].map((a) => (
-            <button
-              key={a.kind}
-              onClick={() => onSpecialAction(a.kind)}
-              disabled={combatant?.actionUsed && !a.on}
-              title={a.on ? 'Activa este turno' : combatant?.actionUsed ? 'Ya has usado tu acción' : `Gasta la acción: ${a.label}`}
-              className={`rounded-sm border px-2 py-0.5 text-xs ${
-                a.on
-                  ? 'border-moss bg-moss/20 text-bone'
-                  : 'border-bone/20 text-bone/70 hover:border-gold hover:text-gold disabled:opacity-30 disabled:hover:border-bone/20 disabled:hover:text-bone/70'
-              }`}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ── 3. Qué haces ahora ────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+        {dead ? (
+          <span className="font-display text-xs uppercase tracking-widest text-blood">☠ Muerto</span>
+        ) : dying ? (
+          <div className="flex items-center gap-2">
+            <DeathSaveDots saves={combatant?.deathSaves} />
+            {canRollDeathSave ? (
+              <button
+                type="button"
+                onClick={onDeathSave}
+                className="inline-flex min-h-10 items-center rounded-sm border border-blood/60 bg-blood/10 px-3 font-display text-xs uppercase tracking-widest text-blood hover:bg-blood/20"
+              >
+                Tirar salvación
+              </button>
+            ) : (
+              <span className="font-display text-[0.65rem] uppercase tracking-widest text-blood/70">Agonizando</span>
+            )}
+          </div>
+        ) : null}
 
-      <div className="flex flex-wrap items-center gap-1.5 border-l border-bone/10 pl-3">
-        {characterId && (
+        {isMyTurn && onEndTurn ? (
           <button
-            onClick={onOpenSheet}
-            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
-          >
-            Ficha
-          </button>
-        )}
-        {characterId && onOpenSpells && (
-          <button
-            onClick={onOpenSpells}
-            className="inline-flex min-h-9 items-center rounded-sm border border-violet-300/30 px-2.5 text-xs text-violet-100 hover:border-violet-300"
-          >
-            Conjuros
-          </button>
-        )}
-        {characterId && (
-          <button
-            onClick={onOpenInventory}
-            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
-          >
-            Inventario
-          </button>
-        )}
-        {canSeeNotes && (
-          <button
-            onClick={onOpenNotes}
-            className="inline-flex min-h-9 items-center rounded-sm border border-bone/20 px-2.5 text-xs text-bone/80 hover:border-gold hover:text-gold"
-          >
-            Notas
-          </button>
-        )}
-        {isMyTurn ? (
-          <button
+            type="button"
             onClick={onEndTurn}
-            className="inline-flex min-h-9 items-center rounded-sm bg-gold px-2.5 text-xs font-semibold text-night-950 hover:bg-gold/90"
+            aria-keyshortcuts=" "
+            aria-label="Terminar turno"
+            title="Terminar turno · Tecla Espacio"
+            className="inline-flex min-h-10 items-center gap-2 rounded-sm bg-gold px-3.5 font-display text-xs uppercase tracking-widest text-night-950 shadow-[0_0_16px_rgba(232,195,104,0.35)] hover:bg-gold/90"
           >
             Terminar turno
+            <span aria-hidden="true" className="rounded-sm bg-night-950/20 px-1 font-mono text-[0.6rem] normal-case tracking-normal">
+              Espacio
+            </span>
           </button>
         ) : (
           gated && (
-            <span className="inline-flex min-h-9 items-center rounded-sm border border-bone/10 px-2.5 text-xs text-bone/40">
+            <span className="inline-flex min-h-10 items-center rounded-sm border border-bone/10 px-3 text-xs text-bone/40">
               Esperando tu turno…
             </span>
           )
         )}
       </div>
+      <style>{`@keyframes hudNotice{0%{transform:translateY(5px);opacity:0}8%,78%{transform:translateY(0);opacity:1}100%{transform:translateY(-3px);opacity:0}}`}</style>
     </div>
   );
 }

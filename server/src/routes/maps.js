@@ -653,7 +653,7 @@ mapsRouter.patch('/:mapId/salas/:roomId', (req, res) => {
     const spawned = spawnRoomEnemies(map.campaign_id, [room.id]);
     if (spawned.added > 0) notifyCombat(map.campaign_id);
     if (spawned.added > 0) notifyBestiary(map.campaign_id);
-    if (spawned.startedCombat) notifyCombatStarted(map.campaign_id);
+    if (spawned.encounterStarted) notifyCombatStarted(map.campaign_id);
     fireRevealEvents(map.campaign_id, [room.id]);
   }
 

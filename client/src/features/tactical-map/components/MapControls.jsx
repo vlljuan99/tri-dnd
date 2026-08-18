@@ -1,25 +1,112 @@
 import { Link } from 'react-router-dom';
+import { CAMERA_KEYS, keyLabel } from '../domain/shortcuts.js';
 
-// Estilo compartido de todos los botones del footer del tablero: misma
-// altura, misma tipografía (normal, no versalitas) y mismos bordes, para
-// que las tres zonas se vean como piezas del mismo juego de cajas.
-const BTN = 'inline-flex min-h-9 items-center rounded-sm border px-2.5 text-xs';
-const BTN_IDLE = `${BTN} border-bone/20 text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40`;
-const BTN_ON = `${BTN} border-gold bg-gold/10 text-gold`;
-// Caja contenedora común (la misma que usa la fila de personaje)
-const BOX = 'flex flex-wrap gap-1.5 rounded-sm border border-gold/25 bg-night-900/95 p-1.5 shadow-xl backdrop-blur';
+const PANEL =
+  'rounded-xl border border-gold/25 bg-night-950/90 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-md';
+const SLOT =
+  'group relative grid h-9 w-9 place-items-center rounded-lg border border-bone/15 bg-night-900/85 text-bone/65 transition hover:border-gold/60 hover:bg-gold/10 hover:text-gold disabled:cursor-not-allowed disabled:opacity-25';
+const SLOT_ON = 'border-gold/70 bg-gold/15 text-gold shadow-[inset_0_0_12px_rgba(232,195,104,0.12)]';
 
-// Devuelve la zona izquierda del footer del tablero (45%): el pad de
-// movimiento apilado encima de la fila de cámara + mesa/editor/vista. El
-// resto del ancho (la fila de personaje) lo añade TacticalMap con PlayerHud.
+function Icon({ name, className = 'h-[1.05rem] w-[1.05rem]' }) {
+  const common = {
+    className,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  };
+
+  switch (name) {
+    case 'rotate-left':
+      return <svg {...common}><path d="M4 8V3m0 0h5M4 3l4 4" /><path d="M5.5 14a7 7 0 1 0 2-7" /></svg>;
+    case 'rotate-right':
+      return <svg {...common}><path d="M20 8V3m0 0h-5m5 0-4 4" /><path d="M18.5 14a7 7 0 1 1-2-7" /></svg>;
+    case 'tilt-down':
+      return <svg {...common}><path d="m6 9 6 6 6-6" /><path d="M8 5h8" /></svg>;
+    case 'tilt-up':
+      return <svg {...common}><path d="m6 15 6-6 6 6" /><path d="M8 19h8" /></svg>;
+    case 'zoom-in':
+      return <svg {...common}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M10.5 7v7m-3.5-3.5h7" /></svg>;
+    case 'zoom-out':
+      return <svg {...common}><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21M7 10.5h7" /></svg>;
+    case 'center':
+      return <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M12 2v4m0 12v4M2 12h4m12 0h4" /></svg>;
+    case 'grid':
+      return <svg {...common}><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M9 3v18m6-18v18M3 9h18M3 15h18" /></svg>;
+    case 'clear':
+      return <svg {...common}><path d="m7 7 10 10M17 7 7 17" /><circle cx="12" cy="12" r="9" /></svg>;
+    case 'measure':
+      return <svg {...common}><path d="m5 19 14-14 2 2L7 21H3v-4Z" /><path d="m13 7 2 2m-5 1 2 2m-5 1 2 2" /></svg>;
+    case 'table':
+      return <svg {...common}><path d="M4 5h16v11H9l-5 4V5Z" /><path d="M8 9h8m-8 3h5" /></svg>;
+    case 'edit':
+      return <svg {...common}><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13 7 4 4" /></svg>;
+    case 'party':
+      return <svg {...common}><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2" /><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6m0-5c3 0 5 1.5 5.5 5" /></svg>;
+    case 'book':
+      return <svg {...common}><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5Z" /><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z" /></svg>;
+    case 'up':
+      return <svg {...common}><path d="m6 14 6-6 6 6" /></svg>;
+    case 'down':
+      return <svg {...common}><path d="m6 10 6 6 6-6" /></svg>;
+    case 'left':
+      return <svg {...common}><path d="m14 6-6 6 6 6" /></svg>;
+    case 'right':
+      return <svg {...common}><path d="m10 6 6 6-6 6" /></svg>;
+    default:
+      return null;
+  }
+}
+
+function IconButton({ label, icon, shortcut = null, active = false, className = '', children, ...props }) {
+  // La tecla se anuncia en el propio botón: el dock es donde se descubre que
+  // la cámara también se maneja con el teclado.
+  const key = shortcut ? keyLabel(shortcut) : null;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-keyshortcuts={key ?? undefined}
+      title={key ? `${label} · Tecla ${key}` : label}
+      className={`${SLOT} ${active ? SLOT_ON : ''} ${className} ${key ? 'relative' : ''}`}
+      {...props}
+    >
+      {key && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0.5 top-0 font-mono text-[0.5rem] leading-tight text-bone/30"
+        >
+          {key}
+        </span>
+      )}
+      {icon && <Icon name={icon} />}
+      {children}
+    </button>
+  );
+}
+
+function IconLink({ to, label, icon }) {
+  return (
+    <Link to={to} aria-label={label} title={label} className={SLOT}>
+      <Icon name={icon} />
+    </Link>
+  );
+}
+
+/**
+ * Dock de sistema del tablero. Se comporta como un mando de videojuego:
+ * huella estrecha, iconos constantes y el pad del token solo cuando sirve.
+ */
 export default function MapControls({
   showGrid,
   selectedToken,
+  canNudgeSelected,
   isDm,
   measureMode,
   onToggleMeasureMode,
-  playerView,
-  onTogglePlayerView,
   editorHref,
   showArchive,
   onCenter,
@@ -39,188 +126,87 @@ export default function MapControls({
   onToggleDrawer,
 }) {
   return (
-    <div className="pointer-events-auto flex w-[45%] flex-col items-start gap-2">
-      {/* Pad del TOKEN seleccionado (mover casilla a casilla) */}
-      <div className="rounded-sm border border-gold/25 bg-night-900/95 p-1.5 shadow-xl backdrop-blur">
-        <p className="pb-1 text-center text-[0.6rem] uppercase tracking-widest text-bone/40">Token</p>
-        <div className="grid grid-cols-3 gap-1">
-          <span />
-          <button
-            type="button"
-            aria-label="Mover token al norte"
-            disabled={!selectedToken}
-            onClick={() => onNudgeToken(0, -1)}
-            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-          >
-            N
-          </button>
-          <span />
-          <button
-            type="button"
-            aria-label="Mover token al oeste"
-            disabled={!selectedToken}
-            onClick={() => onNudgeToken(-1, 0)}
-            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-          >
-            O
-          </button>
-          <button
-            type="button"
-            aria-label="Mover token al sur"
-            disabled={!selectedToken}
-            onClick={() => onNudgeToken(0, 1)}
-            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-          >
-            S
-          </button>
-          <button
-            type="button"
-            aria-label="Mover token al este"
-            disabled={!selectedToken}
-            onClick={() => onNudgeToken(1, 0)}
-            className="flex h-9 w-9 items-center justify-center rounded-sm border border-bone/20 text-xs text-bone/80 hover:border-gold hover:text-gold disabled:opacity-40"
-          >
-            E
-          </button>
+    <div className="pointer-events-auto flex w-[7.25rem] flex-col gap-1.5">
+      {canNudgeSelected && (
+        <div className={PANEL}>
+          <p className="mb-1 truncate px-1 text-center font-display text-[0.58rem] uppercase tracking-[0.14em] text-gold/55">
+            {selectedToken.name}
+          </p>
+          <div className="grid grid-cols-3 gap-1">
+            <span />
+            <IconButton label="Mover token al norte" icon="up" onClick={() => onNudgeToken(0, -1)} />
+            <span />
+            <IconButton label="Mover token al oeste" icon="left" onClick={() => onNudgeToken(-1, 0)} />
+            <IconButton label="Mover token al sur" icon="down" onClick={() => onNudgeToken(0, 1)} />
+            <IconButton label="Mover token al este" icon="right" onClick={() => onNudgeToken(1, 0)} />
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        {/* Cámara: rotar el tablero, cenital/inclinada, zoom y centrar */}
-        <div className={BOX}>
-          <span className="self-center pl-1 pr-0.5 text-[0.6rem] uppercase tracking-widest text-bone/40">
-            Cámara
-          </span>
-          <button
-            type="button"
-            aria-label="Rotar el tablero a la izquierda"
-            title="Rotar 45° a la izquierda"
+      <div className={PANEL} aria-label="Cámara" title="Arrastra con el botón derecho para orbitar; con dos dedos en móvil">
+        <div className="grid grid-cols-3 gap-1">
+          <IconButton
+            label="Rotar 45° a la izquierda"
+            icon="rotate-left"
+            shortcut={CAMERA_KEYS.rotarIzquierda}
             onClick={onRotateLeft}
-            className={`${BTN_IDLE} min-w-9 justify-center`}
-          >
-            ⟲
-          </button>
-          <button
-            type="button"
-            aria-label="Rotar el tablero a la derecha"
-            title="Rotar 45° a la derecha"
+          />
+          <IconButton label="Centrar mapa" icon="center" shortcut={CAMERA_KEYS.centrar} onClick={onCenter} />
+          <IconButton
+            label="Rotar 45° a la derecha"
+            icon="rotate-right"
+            shortcut={CAMERA_KEYS.rotarDerecha}
             onClick={onRotateRight}
-            className={`${BTN_IDLE} min-w-9 justify-center`}
-          >
-            ⟳
-          </button>
-          <button
-            type="button"
-            aria-label="Menos inclinación (hacia cenital)"
-            title="Menos inclinación: hacia la vista cenital (plano puro)"
+          />
+          <IconButton
+            label="Menos inclinación, hacia cenital"
+            icon="tilt-down"
+            shortcut={CAMERA_KEYS.inclinarMenos}
             disabled={!canTiltDown}
             onClick={onTiltDown}
-            className={`${BTN_IDLE} min-w-9 justify-center`}
-          >
-            ▽
-          </button>
+          />
           <span
-            className="inline-flex min-h-9 min-w-14 items-center justify-center rounded-sm border border-bone/10 px-1.5 font-mono text-xs text-bone/70"
-            title="Inclinación de la cámara: Cenital = plano puro; a más grados, más relieve y escorzo"
+            title="Inclinación actual"
+            className="grid h-9 w-9 place-items-center rounded-lg border border-gold/15 bg-night-900/70 font-mono text-[0.65rem] text-gold/65"
           >
             {tiltLabel}
           </span>
-          <button
-            type="button"
-            aria-label="Más inclinación"
-            title="Más inclinación: el tablero se ve más en escorzo y el relieve destaca"
+          <IconButton
+            label="Más inclinación"
+            icon="tilt-up"
+            shortcut={CAMERA_KEYS.inclinarMas}
             disabled={!canTiltUp}
             onClick={onTiltUp}
-            className={`${BTN_IDLE} min-w-9 justify-center`}
-          >
-            △
-          </button>
-          <button type="button" aria-label="Acercar" onClick={onZoomIn} className={`${BTN_IDLE} min-w-9 justify-center`}>
-            +
-          </button>
-          <button type="button" aria-label="Alejar" onClick={onZoomOut} className={`${BTN_IDLE} min-w-9 justify-center`}>
-            -
-          </button>
-          <button type="button" aria-label="Centrar mapa" onClick={onCenter} className={BTN_IDLE}>
-            Centrar
-          </button>
+          />
+          <IconButton label="Alejar" icon="zoom-out" shortcut={CAMERA_KEYS.alejar} onClick={onZoomOut} />
+          <span aria-hidden="true" className="grid h-9 w-9 place-items-center text-gold/30">
+            <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_8px_currentColor]" />
+          </span>
+          <IconButton label="Acercar" icon="zoom-in" shortcut={CAMERA_KEYS.acercar} onClick={onZoomIn} />
         </div>
+      </div>
 
-        {/* Herramientas de mesa */}
-        <div className={BOX}>
-          <button
-            type="button"
-            aria-label={showGrid ? 'Ocultar rejilla' : 'Mostrar rejilla'}
+      <div className={PANEL} aria-label="Herramientas del tablero">
+        <div className="grid grid-cols-3 gap-1">
+          <IconButton
+            label={showGrid ? 'Ocultar rejilla' : 'Mostrar rejilla'}
+            icon="grid"
+            active={showGrid}
             onClick={onToggleGrid}
-            className={BTN_IDLE}
-          >
-            {showGrid ? 'Rejilla: sí' : 'Rejilla: no'}
-          </button>
-          <button
-            type="button"
-            aria-label="Deseleccionar token"
-            disabled={!selectedToken}
-            onClick={onClearSelection}
-            className={BTN_IDLE}
-          >
-            Soltar
-          </button>
-          <button
-            type="button"
-            aria-label="Medir distancia"
-            aria-pressed={measureMode}
-            onClick={onToggleMeasureMode}
-            className={measureMode ? BTN_ON : BTN_IDLE}
-          >
-            Medir
-          </button>
-        </div>
-
-        <div className={BOX}>
-          <button
-            type="button"
-            aria-pressed={drawerOpen}
-            onClick={onToggleDrawer}
-            title="Registro, iniciativa y presencia de la mesa"
-            className={drawerOpen ? BTN_ON : BTN_IDLE}
-          >
-            Mesa
-          </button>
+          />
+          <IconButton label="Medir distancia" icon="measure" active={measureMode} onClick={onToggleMeasureMode} />
+          <IconButton label="Deseleccionar token" icon="clear" disabled={!selectedToken} onClick={onClearSelection} />
+          <IconButton label="Abrir mesa, registro e iniciativa" icon="table" active={drawerOpen} onClick={onToggleDrawer} />
+          {isDm && editorHref && <IconLink to={editorHref} label="Abrir editor" icon="edit" />}
           {isDm && editorHref && (
-            <>
-              <Link to={editorHref} className={BTN_IDLE}>
-                Editor
-              </Link>
-              <Link
-                to={editorHref.replace(/\/editor$/, '/taller/reparto')}
-                className={BTN_IDLE}
-                title="PNJ, enemigos y equipo del reparto"
-              >
-                Reparto
-              </Link>
-            </>
+            <IconLink to={editorHref.replace(/\/editor$/, '/taller/reparto')} label="Abrir reparto" icon="party" />
           )}
           {showArchive && editorHref && (
-            <Link
+            <IconLink
               to={editorHref.replace(/\/editor$/, isDm ? '/taller/lore' : '/archivo')}
-              className={BTN_IDLE}
-              title={isDm ? 'Preparación y artículos de la campaña' : 'Artículos publicados por el DM'}
-            >
-              {isDm ? 'Lore y trama' : 'Artículos'}
-            </Link>
-          )}
-          {isDm && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={playerView}
-              aria-label="Alternar entre vista DM y vista jugador"
-              title="Alterna qué ve el tablero: tu vista de DM o la vista filtrada del grupo"
-              onClick={onTogglePlayerView}
-              className={playerView ? BTN_ON : BTN_IDLE}
-            >
-              {playerView ? 'Vista jugador' : 'Vista DM'}
-            </button>
+              label={isDm ? 'Abrir lore y trama' : 'Abrir artículos'}
+              icon="book"
+            />
           )}
         </div>
       </div>

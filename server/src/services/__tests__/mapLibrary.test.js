@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { serializeRoom, serializeToken } from '../mapLibrary.js';
+import { serializeRoom, serializeToken, spawnEncounterTransition } from '../mapLibrary.js';
 
 const tokenRow = {
   id: 7,
@@ -57,4 +57,28 @@ test('los fluidos se serializan para DM y jugador', () => {
 
   assert.deepEqual(serializeRoom(row).fluidCells, [[0, 0, 'agua'], [1, 0, 'arcana']]);
   assert.deepEqual(serializeRoom(row, { forPlayer: true }).fluidCells, [[0, 0, 'agua'], [1, 0, 'arcana']]);
+});
+
+test('el primer enemigo inicia encuentro aunque la mesa ya estuviera en turnos', () => {
+  assert.deepEqual(
+    spawnEncounterTransition({
+      added: 2,
+      startCombat: true,
+      combatActiveBefore: true,
+      activeEnemiesBefore: false,
+    }),
+    { turnModeActivated: false, encounterStarted: true }
+  );
+});
+
+test('un refuerzo no repite el aviso de un combate que ya está rodando', () => {
+  assert.deepEqual(
+    spawnEncounterTransition({
+      added: 1,
+      startCombat: true,
+      combatActiveBefore: true,
+      activeEnemiesBefore: true,
+    }),
+    { turnModeActivated: false, encounterStarted: false }
+  );
 });
