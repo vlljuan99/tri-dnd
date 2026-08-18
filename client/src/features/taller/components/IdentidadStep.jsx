@@ -16,6 +16,8 @@ function formFromCampaign(campaign) {
     description: campaign.description ?? '',
     artStyle: campaign.artStyle ?? '',
     maxPlayers: campaign.maxPlayers == null ? '' : String(campaign.maxPlayers),
+    startingLevel: String(campaign.startingLevel ?? 1),
+    clockEnabled: Boolean(campaign.clockEnabled),
   };
 }
 
@@ -25,6 +27,8 @@ function identitySnapshot(form) {
     description: form.description,
     artStyle: form.artStyle,
     maxPlayers: String(form.maxPlayers).trim(),
+    startingLevel: String(form.startingLevel).trim(),
+    clockEnabled: Boolean(form.clockEnabled),
   });
 }
 
@@ -38,6 +42,11 @@ function payloadFor(form, isDraft) {
     return { error: 'Las plazas deben ser un número entre 1 y 20.' };
   }
 
+  const startingLevel = Number(String(form.startingLevel).trim() || 1);
+  if (!Number.isInteger(startingLevel) || startingLevel < 1 || startingLevel > 20) {
+    return { error: 'El nivel inicial debe estar entre 1 y 20.' };
+  }
+
   return {
     snapshot: identitySnapshot(form),
     body: {
@@ -45,6 +54,8 @@ function payloadFor(form, isDraft) {
       description: form.description,
       artStyle: form.artStyle,
       maxPlayers,
+      startingLevel,
+      clockEnabled: Boolean(form.clockEnabled),
       ...(isDraft ? { status: 'complete' } : {}),
     },
   };
@@ -299,6 +310,44 @@ export default function IdentidadStep({ progress }) {
             />
           </label>
         </div>
+
+        {/* Fase D: la mesa decide a qué nivel empiezan los personajes; a
+            partir de ahí los niveles se conceden por milestone desde
+            «Jugadores», sin XP. */}
+        {/* Fase F: el reloj de campaña es una capacidad opcional. Apagado
+            —como nace— no aparece ningún control temporal en la mesa y las
+            reglas funcionan exactamente igual. */}
+        <label className="flex cursor-pointer items-start gap-2 text-sm text-bone/80">
+          <input
+            type="checkbox"
+            checked={form.clockEnabled}
+            onChange={(event) => change('clockEnabled', event.target.checked)}
+            className="mt-1 accent-gold"
+          />
+          <span>
+            Llevar reloj de campaña
+            <span className="mt-0.5 block text-xs text-bone/45">
+              Muestra la hora en la mesa y la adelanta con los descansos (1 h el corto, 8 h el largo).
+              Puedes encenderlo o apagarlo después; ninguna regla depende de él.
+            </span>
+          </span>
+        </label>
+
+        <label className={labelClass}>
+          Nivel inicial de los personajes
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={form.startingLevel}
+            onChange={(event) => change('startingLevel', event.target.value)}
+            className={`${inputClass} w-24 font-mono normal-case tracking-normal`}
+          />
+          <span className="mt-1 block text-xs normal-case tracking-normal text-bone/45">
+            Con el que se crean las fichas nuevas de esta mesa. Después el nivel lo concedes tú por
+            milestone; nadie lo escribe a mano.
+          </span>
+        </label>
 
         <label className={labelClass}>
           Sinopsis privada (solo la ves tú)

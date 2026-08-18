@@ -1,90 +1,215 @@
 {
   "_comentario": "Traducciones al español aplicadas sobre los datos del SRD 5e al sincronizar. Clave: categoría → índice de la API → { name, desc? }. Las entradas sin traducción se muestran en inglés con un indicador en la UI. Los nombres de hechizos, monstruos, condiciones y equipo están completos; las descripciones largas aún se traducen por lotes.",
-
   "ability-scores": {
-    "str": { "name": "Fuerza" },
-    "dex": { "name": "Destreza" },
-    "con": { "name": "Constitución" },
-    "int": { "name": "Inteligencia" },
-    "wis": { "name": "Sabiduría" },
-    "cha": { "name": "Carisma" }
+    "str": {
+      "name": "Fuerza"
+    },
+    "dex": {
+      "name": "Destreza"
+    },
+    "con": {
+      "name": "Constitución"
+    },
+    "int": {
+      "name": "Inteligencia"
+    },
+    "wis": {
+      "name": "Sabiduría"
+    },
+    "cha": {
+      "name": "Carisma"
+    }
   },
-
   "classes": {
-    "barbarian": { "name": "Bárbaro" },
-    "bard": { "name": "Bardo" },
-    "cleric": { "name": "Clérigo" },
-    "druid": { "name": "Druida" },
-    "fighter": { "name": "Guerrero" },
-    "monk": { "name": "Monje" },
-    "paladin": { "name": "Paladín" },
-    "ranger": { "name": "Explorador" },
-    "rogue": { "name": "Pícaro" },
-    "sorcerer": { "name": "Hechicero" },
-    "warlock": { "name": "Brujo" },
-    "wizard": { "name": "Mago" }
+    "barbarian": {
+      "name": "Bárbaro"
+    },
+    "bard": {
+      "name": "Bardo"
+    },
+    "cleric": {
+      "name": "Clérigo"
+    },
+    "druid": {
+      "name": "Druida"
+    },
+    "fighter": {
+      "name": "Guerrero"
+    },
+    "monk": {
+      "name": "Monje"
+    },
+    "paladin": {
+      "name": "Paladín"
+    },
+    "ranger": {
+      "name": "Explorador"
+    },
+    "rogue": {
+      "name": "Pícaro"
+    },
+    "sorcerer": {
+      "name": "Hechicero"
+    },
+    "warlock": {
+      "name": "Brujo"
+    },
+    "wizard": {
+      "name": "Mago"
+    }
   },
-
   "races": {
-    "dragonborn": { "name": "Dracónido" },
-    "dwarf": { "name": "Enano" },
-    "elf": { "name": "Elfo" },
-    "gnome": { "name": "Gnomo" },
-    "half-elf": { "name": "Semielfo" },
-    "half-orc": { "name": "Semiorco" },
-    "halfling": { "name": "Mediano" },
-    "human": { "name": "Humano" },
-    "tiefling": { "name": "Tiflin" }
+    "dragonborn": {
+      "name": "Dracónido"
+    },
+    "dwarf": {
+      "name": "Enano"
+    },
+    "elf": {
+      "name": "Elfo"
+    },
+    "gnome": {
+      "name": "Gnomo"
+    },
+    "half-elf": {
+      "name": "Semielfo"
+    },
+    "half-orc": {
+      "name": "Semiorco"
+    },
+    "halfling": {
+      "name": "Mediano"
+    },
+    "human": {
+      "name": "Humano"
+    },
+    "tiefling": {
+      "name": "Tiflin"
+    }
   },
-
   "skills": {
-    "acrobatics": { "name": "Acrobacias" },
-    "animal-handling": { "name": "Trato con Animales" },
-    "arcana": { "name": "Arcanos" },
-    "athletics": { "name": "Atletismo" },
-    "deception": { "name": "Engaño" },
-    "history": { "name": "Historia" },
-    "insight": { "name": "Perspicacia" },
-    "intimidation": { "name": "Intimidación" },
-    "investigation": { "name": "Investigación" },
-    "medicine": { "name": "Medicina" },
-    "nature": { "name": "Naturaleza" },
-    "perception": { "name": "Percepción" },
-    "performance": { "name": "Interpretación" },
-    "persuasion": { "name": "Persuasión" },
-    "religion": { "name": "Religión" },
-    "sleight-of-hand": { "name": "Juego de Manos" },
-    "stealth": { "name": "Sigilo" },
-    "survival": { "name": "Supervivencia" }
+    "acrobatics": {
+      "name": "Acrobacias"
+    },
+    "animal-handling": {
+      "name": "Trato con Animales"
+    },
+    "arcana": {
+      "name": "Arcanos"
+    },
+    "athletics": {
+      "name": "Atletismo"
+    },
+    "deception": {
+      "name": "Engaño"
+    },
+    "history": {
+      "name": "Historia"
+    },
+    "insight": {
+      "name": "Perspicacia"
+    },
+    "intimidation": {
+      "name": "Intimidación"
+    },
+    "investigation": {
+      "name": "Investigación"
+    },
+    "medicine": {
+      "name": "Medicina"
+    },
+    "nature": {
+      "name": "Naturaleza"
+    },
+    "perception": {
+      "name": "Percepción"
+    },
+    "performance": {
+      "name": "Interpretación"
+    },
+    "persuasion": {
+      "name": "Persuasión"
+    },
+    "religion": {
+      "name": "Religión"
+    },
+    "sleight-of-hand": {
+      "name": "Juego de Manos"
+    },
+    "stealth": {
+      "name": "Sigilo"
+    },
+    "survival": {
+      "name": "Supervivencia"
+    }
   },
-
   "damage-types": {
-    "acid": { "name": "Ácido" },
-    "bludgeoning": { "name": "Contundente" },
-    "cold": { "name": "Frío" },
-    "fire": { "name": "Fuego" },
-    "force": { "name": "Fuerza" },
-    "lightning": { "name": "Relámpago" },
-    "necrotic": { "name": "Necrótico" },
-    "piercing": { "name": "Perforante" },
-    "poison": { "name": "Veneno" },
-    "psychic": { "name": "Psíquico" },
-    "radiant": { "name": "Radiante" },
-    "slashing": { "name": "Cortante" },
-    "thunder": { "name": "Trueno" }
+    "acid": {
+      "name": "Ácido"
+    },
+    "bludgeoning": {
+      "name": "Contundente"
+    },
+    "cold": {
+      "name": "Frío"
+    },
+    "fire": {
+      "name": "Fuego"
+    },
+    "force": {
+      "name": "Fuerza"
+    },
+    "lightning": {
+      "name": "Relámpago"
+    },
+    "necrotic": {
+      "name": "Necrótico"
+    },
+    "piercing": {
+      "name": "Perforante"
+    },
+    "poison": {
+      "name": "Veneno"
+    },
+    "psychic": {
+      "name": "Psíquico"
+    },
+    "radiant": {
+      "name": "Radiante"
+    },
+    "slashing": {
+      "name": "Cortante"
+    },
+    "thunder": {
+      "name": "Trueno"
+    }
   },
-
   "magic-schools": {
-    "abjuration": { "name": "Abjuración" },
-    "conjuration": { "name": "Conjuración" },
-    "divination": { "name": "Adivinación" },
-    "enchantment": { "name": "Encantamiento" },
-    "evocation": { "name": "Evocación" },
-    "illusion": { "name": "Ilusión" },
-    "necromancy": { "name": "Nigromancia" },
-    "transmutation": { "name": "Transmutación" }
+    "abjuration": {
+      "name": "Abjuración"
+    },
+    "conjuration": {
+      "name": "Conjuración"
+    },
+    "divination": {
+      "name": "Adivinación"
+    },
+    "enchantment": {
+      "name": "Encantamiento"
+    },
+    "evocation": {
+      "name": "Evocación"
+    },
+    "illusion": {
+      "name": "Ilusión"
+    },
+    "necromancy": {
+      "name": "Nigromancia"
+    },
+    "transmutation": {
+      "name": "Transmutación"
+    }
   },
-
   "conditions": {
     "blinded": {
       "name": "Cegado",
@@ -147,7 +272,6 @@
       "desc": "Una criatura inconsciente está incapacitada, no puede moverse ni hablar y no percibe su entorno. Suelta lo que esté sujetando y cae derribada. Falla automáticamente las salvaciones de Fuerza y Destreza. Las tiradas de ataque contra ella tienen ventaja. Cualquier ataque que la impacte es un golpe crítico si el atacante está a 5 pies o menos de ella."
     }
   },
-
   "weapon-properties": {
     "ammunition": {
       "name": "Munición",
@@ -194,913 +318,3176 @@
       "desc": "Puede usarse con una o dos manos. El valor de daño entre paréntesis se aplica al empuñarla a dos manos."
     }
   },
-
   "equipment": {
-    "club": { "name": "Garrote" },
-    "dagger": { "name": "Daga" },
-    "greatclub": { "name": "Gran garrote" },
-    "handaxe": { "name": "Hacha de mano" },
-    "javelin": { "name": "Jabalina" },
-    "light-hammer": { "name": "Martillo ligero" },
-    "mace": { "name": "Maza" },
-    "quarterstaff": { "name": "Bastón" },
-    "sickle": { "name": "Hoz" },
-    "spear": { "name": "Lanza" },
-    "crossbow-light": { "name": "Ballesta ligera" },
-    "dart": { "name": "Dardo" },
-    "shortbow": { "name": "Arco corto" },
-    "sling": { "name": "Honda" },
-    "battleaxe": { "name": "Hacha de batalla" },
-    "flail": { "name": "Mangual" },
-    "glaive": { "name": "Guja" },
-    "greataxe": { "name": "Gran hacha" },
-    "greatsword": { "name": "Espadón" },
-    "halberd": { "name": "Alabarda" },
-    "lance": { "name": "Lanza de caballería" },
-    "longsword": { "name": "Espada larga" },
-    "maul": { "name": "Mazo" },
-    "morningstar": { "name": "Lucero del alba" },
-    "pike": { "name": "Pica" },
-    "rapier": { "name": "Estoque" },
-    "scimitar": { "name": "Cimitarra" },
-    "shortsword": { "name": "Espada corta" },
-    "trident": { "name": "Tridente" },
-    "war-pick": { "name": "Pico de guerra" },
-    "warhammer": { "name": "Martillo de guerra" },
-    "whip": { "name": "Látigo" },
-    "blowgun": { "name": "Cerbatana" },
-    "crossbow-hand": { "name": "Ballesta de mano" },
-    "crossbow-heavy": { "name": "Ballesta pesada" },
-    "longbow": { "name": "Arco largo" },
-    "net": { "name": "Red" },
-
-    "padded": { "name": "Armadura acolchada" },
-    "leather": { "name": "Armadura de cuero" },
-    "studded-leather": { "name": "Cuero tachonado" },
-    "hide": { "name": "Armadura de pieles" },
-    "chain-shirt": { "name": "Camisa de mallas" },
-    "scale-mail": { "name": "Cota de escamas" },
-    "breastplate": { "name": "Coraza" },
-    "half-plate": { "name": "Media armadura" },
-    "ring-mail": { "name": "Cota de anillas" },
-    "chain-mail": { "name": "Cota de mallas" },
-    "splint": { "name": "Armadura de bandas" },
-    "plate": { "name": "Armadura de placas" },
-    "shield": { "name": "Escudo" },
-
-    "arrow": { "name": "Flechas (20)" },
-    "crossbow-bolt": { "name": "Virotes de ballesta (20)" },
-    "sling-bullet": { "name": "Balas de honda (20)" },
-    "blowgun-needle": { "name": "Agujas de cerbatana (50)" },
-    "backpack": { "name": "Mochila" },
-    "bedroll": { "name": "Saco de dormir" },
-    "rope-hempen-50-feet": { "name": "Cuerda de cáñamo (50 pies)" },
-    "rope-silk-50-feet": { "name": "Cuerda de seda (50 pies)" },
-    "torch": { "name": "Antorcha" },
-    "tinderbox": { "name": "Yesquero" },
-    "rations-1-day": { "name": "Raciones (1 día)" },
-    "waterskin": { "name": "Odre de agua" },
-    "healers-kit": { "name": "Kit de sanador" },
-    "potion-of-healing": { "name": "Poción de curación" },
-    "crowbar": { "name": "Palanca" },
-    "grappling-hook": { "name": "Gancho de escalada" },
-    "lantern-hooded": { "name": "Linterna con capucha" },
-    "oil-flask": { "name": "Frasco de aceite" },
-
-    "abacus": { "name": "Ábaco" },
-    "acid-vial": { "name": "Ácido (vial)" },
-    "alchemists-supplies": { "name": "Suministros de alquimista" },
-    "alchemists-fire-flask": { "name": "Fuego de alquimista (frasco)" },
-    "alms-box": { "name": "Caja de limosnas" },
-    "amulet": { "name": "Amuleto" },
-    "animal-feed-1-day": { "name": "Pienso para animales (1 día)" },
-    "antitoxin-vial": { "name": "Antitoxina (vial)" },
-    "bagpipes": { "name": "Gaita" },
-    "ball-bearings-bag-of-1000": { "name": "Cojinetes de bolas (bolsa de 1.000)" },
-    "barding-breastplate": { "name": "Barda: coraza" },
-    "barding-chain-mail": { "name": "Barda: cota de mallas" },
-    "barding-chain-shirt": { "name": "Barda: camisa de mallas" },
-    "barding-half-plate": { "name": "Barda: media armadura" },
-    "barding-hide": { "name": "Barda: armadura de pieles" },
-    "barding-leather": { "name": "Barda: armadura de cuero" },
-    "barding-padded": { "name": "Barda: armadura acolchada" },
-    "barding-plate": { "name": "Barda: armadura de placas" },
-    "barding-ring-mail": { "name": "Barda: cota de anillas" },
-    "barding-scale-mail": { "name": "Barda: cota de escamas" },
-    "barding-splint": { "name": "Barda: armadura de bandas" },
-    "barding-studded-leather": { "name": "Barda: cuero tachonado" },
-    "barrel": { "name": "Barril" },
-    "basket": { "name": "Cesta" },
-    "bell": { "name": "Campana" },
-    "bit-and-bridle": { "name": "Bocado y bridas" },
-    "blanket": { "name": "Manta" },
-    "block-and-tackle": { "name": "Polea y aparejo" },
-    "block-of-incense": { "name": "Bloque de incienso" },
-    "book": { "name": "Libro" },
-    "bottle-glass": { "name": "Botella de vidrio" },
-    "brewers-supplies": { "name": "Suministros de cervecero" },
-    "bucket": { "name": "Cubo" },
-    "burglars-pack": { "name": "Equipo de ladrón" },
-    "calligraphers-supplies": { "name": "Suministros de calígrafo" },
-    "caltrops": { "name": "Abrojos" },
-    "camel": { "name": "Camello" },
-    "candle": { "name": "Vela" },
-    "carpenters-tools": { "name": "Herramientas de carpintero" },
-    "carriage": { "name": "Carruaje" },
-    "cart": { "name": "Carro" },
-    "cartographers-tools": { "name": "Herramientas de cartógrafo" },
-    "case-crossbow-bolt": { "name": "Estuche para virotes de ballesta" },
-    "case-map-or-scroll": { "name": "Estuche para mapas o pergaminos" },
-    "censer": { "name": "Incensario" },
-    "chain-10-feet": { "name": "Cadena (10 pies)" },
-    "chalk-1-piece": { "name": "Tiza (1 pieza)" },
-    "chariot": { "name": "Carro de guerra" },
-    "chest": { "name": "Cofre" },
-    "climbers-kit": { "name": "Equipo de escalada" },
-    "clothes-common": { "name": "Ropa común" },
-    "clothes-costume": { "name": "Disfraz" },
-    "clothes-fine": { "name": "Ropa elegante" },
-    "clothes-travelers": { "name": "Ropa de viaje" },
-    "cobblers-tools": { "name": "Herramientas de zapatero" },
-    "component-pouch": { "name": "Bolsa de componentes" },
-    "cooks-utensils": { "name": "Utensilios de cocinero" },
-    "crystal": { "name": "Cristal" },
-    "dice-set": { "name": "Juego de dados" },
-    "diplomats-pack": { "name": "Equipo de diplomático" },
-    "disguise-kit": { "name": "Kit de disfraz" },
-    "donkey": { "name": "Burro" },
-    "drum": { "name": "Tambor" },
-    "dulcimer": { "name": "Dulcémele" },
-    "dungeoneers-pack": { "name": "Equipo de explorador de mazmorras" },
-    "elephant": { "name": "Elefante" },
-    "emblem": { "name": "Emblema" },
-    "entertainers-pack": { "name": "Equipo de artista" },
-    "explorers-pack": { "name": "Equipo de explorador" },
-    "fishing-tackle": { "name": "Aparejos de pesca" },
-    "flask-or-tankard": { "name": "Frasco o jarra" },
-    "flute": { "name": "Flauta" },
-    "forgery-kit": { "name": "Kit de falsificación" },
-    "galley": { "name": "Galera" },
-    "glassblowers-tools": { "name": "Herramientas de soplador de vidrio" },
-    "half-plate-armor": { "name": "Media armadura" },
-    "hammer": { "name": "Martillo" },
-    "hammer-sledge": { "name": "Mazo de dos manos" },
-    "herbalism-kit": { "name": "Kit de herboristería" },
-    "hide-armor": { "name": "Armadura de pieles" },
-    "holy-water-flask": { "name": "Agua bendita (frasco)" },
-    "horn": { "name": "Cuerno" },
-    "horse-draft": { "name": "Caballo de tiro" },
-    "horse-riding": { "name": "Caballo de monta" },
-    "hourglass": { "name": "Reloj de arena" },
-    "hunting-trap": { "name": "Trampa de caza" },
-    "ink-1-ounce-bottle": { "name": "Tinta (botella de 1 onza)" },
-    "ink-pen": { "name": "Pluma" },
-    "jewelers-tools": { "name": "Herramientas de joyero" },
-    "jug-or-pitcher": { "name": "Jarra" },
-    "keelboat": { "name": "Barco de quilla" },
-    "ladder-10-foot": { "name": "Escalera (10 pies)" },
-    "lamp": { "name": "Lámpara" },
-    "lantern-bullseye": { "name": "Linterna sorda" },
-    "leather-armor": { "name": "Armadura de cuero" },
-    "leatherworkers-tools": { "name": "Herramientas de peletero" },
-    "little-bag-of-sand": { "name": "Saquito de arena" },
-    "lock": { "name": "Cerradura" },
-    "longship": { "name": "Drakkar" },
-    "lute": { "name": "Laúd" },
-    "lyre": { "name": "Lira" },
-    "magnifying-glass": { "name": "Lupa" },
-    "manacles": { "name": "Grilletes" },
-    "masons-tools": { "name": "Herramientas de albañil" },
-    "mastiff": { "name": "Mastín" },
-    "mess-kit": { "name": "Utensilios de campaña" },
-    "mirror-steel": { "name": "Espejo de acero" },
-    "mule": { "name": "Mula" },
-    "navigators-tools": { "name": "Herramientas de navegante" },
-    "orb": { "name": "Orbe" },
-    "padded-armor": { "name": "Armadura acolchada" },
-    "painters-supplies": { "name": "Suministros de pintor" },
-    "pan-flute": { "name": "Flauta de Pan" },
-    "paper-one-sheet": { "name": "Papel (una hoja)" },
-    "parchment-one-sheet": { "name": "Pergamino (una hoja)" },
-    "perfume-vial": { "name": "Perfume (vial)" },
-    "pick-miners": { "name": "Pico de minero" },
-    "piton": { "name": "Pitón" },
-    "plate-armor": { "name": "Armadura de placas" },
-    "playing-card-set": { "name": "Baraja de cartas" },
-    "poison-basic-vial": { "name": "Veneno básico (vial)" },
-    "poisoners-kit": { "name": "Kit de envenenador" },
-    "pole-10-foot": { "name": "Pértiga (10 pies)" },
-    "pony": { "name": "Poni" },
-    "pot-iron": { "name": "Olla de hierro" },
-    "potters-tools": { "name": "Herramientas de alfarero" },
-    "pouch": { "name": "Faltriquera" },
-    "priests-pack": { "name": "Equipo de sacerdote" },
-    "quiver": { "name": "Carcaj" },
-    "ram-portable": { "name": "Ariete portátil" },
-    "reliquary": { "name": "Relicario" },
-    "robes": { "name": "Túnicas" },
-    "rod": { "name": "Cetro" },
-    "rowboat": { "name": "Bote de remos" },
-    "sack": { "name": "Saco" },
-    "saddle-exotic": { "name": "Silla de montar exótica" },
-    "saddle-military": { "name": "Silla de montar militar" },
-    "saddle-pack": { "name": "Silla de carga" },
-    "saddle-riding": { "name": "Silla de montar" },
-    "saddlebags": { "name": "Alforjas" },
-    "sailing-ship": { "name": "Velero" },
-    "scale-merchants": { "name": "Balanza de mercader" },
-    "scholars-pack": { "name": "Equipo de erudito" },
-    "sealing-wax": { "name": "Cera para sellar" },
-    "shawm": { "name": "Chirimía" },
-    "shovel": { "name": "Pala" },
-    "signal-whistle": { "name": "Silbato de señales" },
-    "signet-ring": { "name": "Anillo de sello" },
-    "sled": { "name": "Trineo" },
-    "small-knife": { "name": "Cuchillo pequeño" },
-    "smiths-tools": { "name": "Herramientas de herrero" },
-    "soap": { "name": "Jabón" },
-    "spellbook": { "name": "Libro de conjuros" },
-    "spike-iron": { "name": "Clavo de hierro" },
-    "splint-armor": { "name": "Armadura de bandas" },
-    "sprig-of-mistletoe": { "name": "Ramita de muérdago" },
-    "spyglass": { "name": "Catalejo" },
-    "stabling-1-day": { "name": "Estabulación (1 día)" },
-    "staff": { "name": "Bastón" },
-    "string-10-feet": { "name": "Cordel (10 pies)" },
-    "studded-leather-armor": { "name": "Armadura de cuero tachonado" },
-    "tent-two-person": { "name": "Tienda para dos personas" },
-    "thieves-tools": { "name": "Herramientas de ladrón" },
-    "tinkers-tools": { "name": "Herramientas de hojalatero" },
-    "totem": { "name": "Tótem" },
-    "vestments": { "name": "Vestiduras" },
-    "vial": { "name": "Vial" },
-    "viol": { "name": "Viola" },
-    "wagon": { "name": "Carreta" },
-    "wand": { "name": "Varita" },
-    "warhorse": { "name": "Caballo de guerra" },
-    "warship": { "name": "Buque de guerra" },
-    "weavers-tools": { "name": "Herramientas de tejedor" },
-    "whetstone": { "name": "Piedra de afilar" },
-    "woodcarvers-tools": { "name": "Herramientas de tallista" },
-    "wooden-staff": { "name": "Bastón de madera" },
-    "yew-wand": { "name": "Varita de tejo" }
+    "club": {
+      "name": "Garrote"
+    },
+    "dagger": {
+      "name": "Daga"
+    },
+    "greatclub": {
+      "name": "Gran garrote"
+    },
+    "handaxe": {
+      "name": "Hacha de mano"
+    },
+    "javelin": {
+      "name": "Jabalina"
+    },
+    "light-hammer": {
+      "name": "Martillo ligero"
+    },
+    "mace": {
+      "name": "Maza"
+    },
+    "quarterstaff": {
+      "name": "Bastón"
+    },
+    "sickle": {
+      "name": "Hoz"
+    },
+    "spear": {
+      "name": "Lanza"
+    },
+    "crossbow-light": {
+      "name": "Ballesta ligera"
+    },
+    "dart": {
+      "name": "Dardo"
+    },
+    "shortbow": {
+      "name": "Arco corto"
+    },
+    "sling": {
+      "name": "Honda"
+    },
+    "battleaxe": {
+      "name": "Hacha de batalla"
+    },
+    "flail": {
+      "name": "Mangual"
+    },
+    "glaive": {
+      "name": "Guja"
+    },
+    "greataxe": {
+      "name": "Gran hacha"
+    },
+    "greatsword": {
+      "name": "Espadón"
+    },
+    "halberd": {
+      "name": "Alabarda"
+    },
+    "lance": {
+      "name": "Lanza de caballería"
+    },
+    "longsword": {
+      "name": "Espada larga"
+    },
+    "maul": {
+      "name": "Mazo"
+    },
+    "morningstar": {
+      "name": "Lucero del alba"
+    },
+    "pike": {
+      "name": "Pica"
+    },
+    "rapier": {
+      "name": "Estoque"
+    },
+    "scimitar": {
+      "name": "Cimitarra"
+    },
+    "shortsword": {
+      "name": "Espada corta"
+    },
+    "trident": {
+      "name": "Tridente"
+    },
+    "war-pick": {
+      "name": "Pico de guerra"
+    },
+    "warhammer": {
+      "name": "Martillo de guerra"
+    },
+    "whip": {
+      "name": "Látigo"
+    },
+    "blowgun": {
+      "name": "Cerbatana"
+    },
+    "crossbow-hand": {
+      "name": "Ballesta de mano"
+    },
+    "crossbow-heavy": {
+      "name": "Ballesta pesada"
+    },
+    "longbow": {
+      "name": "Arco largo"
+    },
+    "net": {
+      "name": "Red"
+    },
+    "padded": {
+      "name": "Armadura acolchada"
+    },
+    "leather": {
+      "name": "Armadura de cuero"
+    },
+    "studded-leather": {
+      "name": "Cuero tachonado"
+    },
+    "hide": {
+      "name": "Armadura de pieles"
+    },
+    "chain-shirt": {
+      "name": "Camisa de mallas"
+    },
+    "scale-mail": {
+      "name": "Cota de escamas"
+    },
+    "breastplate": {
+      "name": "Coraza"
+    },
+    "half-plate": {
+      "name": "Media armadura"
+    },
+    "ring-mail": {
+      "name": "Cota de anillas"
+    },
+    "chain-mail": {
+      "name": "Cota de mallas"
+    },
+    "splint": {
+      "name": "Armadura de bandas"
+    },
+    "plate": {
+      "name": "Armadura de placas"
+    },
+    "shield": {
+      "name": "Escudo"
+    },
+    "arrow": {
+      "name": "Flechas (20)"
+    },
+    "crossbow-bolt": {
+      "name": "Virotes de ballesta (20)"
+    },
+    "sling-bullet": {
+      "name": "Balas de honda (20)"
+    },
+    "blowgun-needle": {
+      "name": "Agujas de cerbatana (50)"
+    },
+    "backpack": {
+      "name": "Mochila"
+    },
+    "bedroll": {
+      "name": "Saco de dormir"
+    },
+    "rope-hempen-50-feet": {
+      "name": "Cuerda de cáñamo (50 pies)"
+    },
+    "rope-silk-50-feet": {
+      "name": "Cuerda de seda (50 pies)"
+    },
+    "torch": {
+      "name": "Antorcha"
+    },
+    "tinderbox": {
+      "name": "Yesquero"
+    },
+    "rations-1-day": {
+      "name": "Raciones (1 día)"
+    },
+    "waterskin": {
+      "name": "Odre de agua"
+    },
+    "healers-kit": {
+      "name": "Kit de sanador"
+    },
+    "potion-of-healing": {
+      "name": "Poción de curación"
+    },
+    "crowbar": {
+      "name": "Palanca"
+    },
+    "grappling-hook": {
+      "name": "Gancho de escalada"
+    },
+    "lantern-hooded": {
+      "name": "Linterna con capucha"
+    },
+    "oil-flask": {
+      "name": "Frasco de aceite"
+    },
+    "abacus": {
+      "name": "Ábaco"
+    },
+    "acid-vial": {
+      "name": "Ácido (vial)"
+    },
+    "alchemists-supplies": {
+      "name": "Suministros de alquimista"
+    },
+    "alchemists-fire-flask": {
+      "name": "Fuego de alquimista (frasco)"
+    },
+    "alms-box": {
+      "name": "Caja de limosnas"
+    },
+    "amulet": {
+      "name": "Amuleto"
+    },
+    "animal-feed-1-day": {
+      "name": "Pienso para animales (1 día)"
+    },
+    "antitoxin-vial": {
+      "name": "Antitoxina (vial)"
+    },
+    "bagpipes": {
+      "name": "Gaita"
+    },
+    "ball-bearings-bag-of-1000": {
+      "name": "Cojinetes de bolas (bolsa de 1.000)"
+    },
+    "barding-breastplate": {
+      "name": "Barda: coraza"
+    },
+    "barding-chain-mail": {
+      "name": "Barda: cota de mallas"
+    },
+    "barding-chain-shirt": {
+      "name": "Barda: camisa de mallas"
+    },
+    "barding-half-plate": {
+      "name": "Barda: media armadura"
+    },
+    "barding-hide": {
+      "name": "Barda: armadura de pieles"
+    },
+    "barding-leather": {
+      "name": "Barda: armadura de cuero"
+    },
+    "barding-padded": {
+      "name": "Barda: armadura acolchada"
+    },
+    "barding-plate": {
+      "name": "Barda: armadura de placas"
+    },
+    "barding-ring-mail": {
+      "name": "Barda: cota de anillas"
+    },
+    "barding-scale-mail": {
+      "name": "Barda: cota de escamas"
+    },
+    "barding-splint": {
+      "name": "Barda: armadura de bandas"
+    },
+    "barding-studded-leather": {
+      "name": "Barda: cuero tachonado"
+    },
+    "barrel": {
+      "name": "Barril"
+    },
+    "basket": {
+      "name": "Cesta"
+    },
+    "bell": {
+      "name": "Campana"
+    },
+    "bit-and-bridle": {
+      "name": "Bocado y bridas"
+    },
+    "blanket": {
+      "name": "Manta"
+    },
+    "block-and-tackle": {
+      "name": "Polea y aparejo"
+    },
+    "block-of-incense": {
+      "name": "Bloque de incienso"
+    },
+    "book": {
+      "name": "Libro"
+    },
+    "bottle-glass": {
+      "name": "Botella de vidrio"
+    },
+    "brewers-supplies": {
+      "name": "Suministros de cervecero"
+    },
+    "bucket": {
+      "name": "Cubo"
+    },
+    "burglars-pack": {
+      "name": "Equipo de ladrón"
+    },
+    "calligraphers-supplies": {
+      "name": "Suministros de calígrafo"
+    },
+    "caltrops": {
+      "name": "Abrojos"
+    },
+    "camel": {
+      "name": "Camello"
+    },
+    "candle": {
+      "name": "Vela"
+    },
+    "carpenters-tools": {
+      "name": "Herramientas de carpintero"
+    },
+    "carriage": {
+      "name": "Carruaje"
+    },
+    "cart": {
+      "name": "Carro"
+    },
+    "cartographers-tools": {
+      "name": "Herramientas de cartógrafo"
+    },
+    "case-crossbow-bolt": {
+      "name": "Estuche para virotes de ballesta"
+    },
+    "case-map-or-scroll": {
+      "name": "Estuche para mapas o pergaminos"
+    },
+    "censer": {
+      "name": "Incensario"
+    },
+    "chain-10-feet": {
+      "name": "Cadena (10 pies)"
+    },
+    "chalk-1-piece": {
+      "name": "Tiza (1 pieza)"
+    },
+    "chariot": {
+      "name": "Carro de guerra"
+    },
+    "chest": {
+      "name": "Cofre"
+    },
+    "climbers-kit": {
+      "name": "Equipo de escalada"
+    },
+    "clothes-common": {
+      "name": "Ropa común"
+    },
+    "clothes-costume": {
+      "name": "Disfraz"
+    },
+    "clothes-fine": {
+      "name": "Ropa elegante"
+    },
+    "clothes-travelers": {
+      "name": "Ropa de viaje"
+    },
+    "cobblers-tools": {
+      "name": "Herramientas de zapatero"
+    },
+    "component-pouch": {
+      "name": "Bolsa de componentes"
+    },
+    "cooks-utensils": {
+      "name": "Utensilios de cocinero"
+    },
+    "crystal": {
+      "name": "Cristal"
+    },
+    "dice-set": {
+      "name": "Juego de dados"
+    },
+    "diplomats-pack": {
+      "name": "Equipo de diplomático"
+    },
+    "disguise-kit": {
+      "name": "Kit de disfraz"
+    },
+    "donkey": {
+      "name": "Burro"
+    },
+    "drum": {
+      "name": "Tambor"
+    },
+    "dulcimer": {
+      "name": "Dulcémele"
+    },
+    "dungeoneers-pack": {
+      "name": "Equipo de explorador de mazmorras"
+    },
+    "elephant": {
+      "name": "Elefante"
+    },
+    "emblem": {
+      "name": "Emblema"
+    },
+    "entertainers-pack": {
+      "name": "Equipo de artista"
+    },
+    "explorers-pack": {
+      "name": "Equipo de explorador"
+    },
+    "fishing-tackle": {
+      "name": "Aparejos de pesca"
+    },
+    "flask-or-tankard": {
+      "name": "Frasco o jarra"
+    },
+    "flute": {
+      "name": "Flauta"
+    },
+    "forgery-kit": {
+      "name": "Kit de falsificación"
+    },
+    "galley": {
+      "name": "Galera"
+    },
+    "glassblowers-tools": {
+      "name": "Herramientas de soplador de vidrio"
+    },
+    "half-plate-armor": {
+      "name": "Media armadura"
+    },
+    "hammer": {
+      "name": "Martillo"
+    },
+    "hammer-sledge": {
+      "name": "Mazo de dos manos"
+    },
+    "herbalism-kit": {
+      "name": "Kit de herboristería"
+    },
+    "hide-armor": {
+      "name": "Armadura de pieles"
+    },
+    "holy-water-flask": {
+      "name": "Agua bendita (frasco)"
+    },
+    "horn": {
+      "name": "Cuerno"
+    },
+    "horse-draft": {
+      "name": "Caballo de tiro"
+    },
+    "horse-riding": {
+      "name": "Caballo de monta"
+    },
+    "hourglass": {
+      "name": "Reloj de arena"
+    },
+    "hunting-trap": {
+      "name": "Trampa de caza"
+    },
+    "ink-1-ounce-bottle": {
+      "name": "Tinta (botella de 1 onza)"
+    },
+    "ink-pen": {
+      "name": "Pluma"
+    },
+    "jewelers-tools": {
+      "name": "Herramientas de joyero"
+    },
+    "jug-or-pitcher": {
+      "name": "Jarra"
+    },
+    "keelboat": {
+      "name": "Barco de quilla"
+    },
+    "ladder-10-foot": {
+      "name": "Escalera (10 pies)"
+    },
+    "lamp": {
+      "name": "Lámpara"
+    },
+    "lantern-bullseye": {
+      "name": "Linterna sorda"
+    },
+    "leather-armor": {
+      "name": "Armadura de cuero"
+    },
+    "leatherworkers-tools": {
+      "name": "Herramientas de peletero"
+    },
+    "little-bag-of-sand": {
+      "name": "Saquito de arena"
+    },
+    "lock": {
+      "name": "Cerradura"
+    },
+    "longship": {
+      "name": "Drakkar"
+    },
+    "lute": {
+      "name": "Laúd"
+    },
+    "lyre": {
+      "name": "Lira"
+    },
+    "magnifying-glass": {
+      "name": "Lupa"
+    },
+    "manacles": {
+      "name": "Grilletes"
+    },
+    "masons-tools": {
+      "name": "Herramientas de albañil"
+    },
+    "mastiff": {
+      "name": "Mastín"
+    },
+    "mess-kit": {
+      "name": "Utensilios de campaña"
+    },
+    "mirror-steel": {
+      "name": "Espejo de acero"
+    },
+    "mule": {
+      "name": "Mula"
+    },
+    "navigators-tools": {
+      "name": "Herramientas de navegante"
+    },
+    "orb": {
+      "name": "Orbe"
+    },
+    "padded-armor": {
+      "name": "Armadura acolchada"
+    },
+    "painters-supplies": {
+      "name": "Suministros de pintor"
+    },
+    "pan-flute": {
+      "name": "Flauta de Pan"
+    },
+    "paper-one-sheet": {
+      "name": "Papel (una hoja)"
+    },
+    "parchment-one-sheet": {
+      "name": "Pergamino (una hoja)"
+    },
+    "perfume-vial": {
+      "name": "Perfume (vial)"
+    },
+    "pick-miners": {
+      "name": "Pico de minero"
+    },
+    "piton": {
+      "name": "Pitón"
+    },
+    "plate-armor": {
+      "name": "Armadura de placas"
+    },
+    "playing-card-set": {
+      "name": "Baraja de cartas"
+    },
+    "poison-basic-vial": {
+      "name": "Veneno básico (vial)"
+    },
+    "poisoners-kit": {
+      "name": "Kit de envenenador"
+    },
+    "pole-10-foot": {
+      "name": "Pértiga (10 pies)"
+    },
+    "pony": {
+      "name": "Poni"
+    },
+    "pot-iron": {
+      "name": "Olla de hierro"
+    },
+    "potters-tools": {
+      "name": "Herramientas de alfarero"
+    },
+    "pouch": {
+      "name": "Faltriquera"
+    },
+    "priests-pack": {
+      "name": "Equipo de sacerdote"
+    },
+    "quiver": {
+      "name": "Carcaj"
+    },
+    "ram-portable": {
+      "name": "Ariete portátil"
+    },
+    "reliquary": {
+      "name": "Relicario"
+    },
+    "robes": {
+      "name": "Túnicas"
+    },
+    "rod": {
+      "name": "Cetro"
+    },
+    "rowboat": {
+      "name": "Bote de remos"
+    },
+    "sack": {
+      "name": "Saco"
+    },
+    "saddle-exotic": {
+      "name": "Silla de montar exótica"
+    },
+    "saddle-military": {
+      "name": "Silla de montar militar"
+    },
+    "saddle-pack": {
+      "name": "Silla de carga"
+    },
+    "saddle-riding": {
+      "name": "Silla de montar"
+    },
+    "saddlebags": {
+      "name": "Alforjas"
+    },
+    "sailing-ship": {
+      "name": "Velero"
+    },
+    "scale-merchants": {
+      "name": "Balanza de mercader"
+    },
+    "scholars-pack": {
+      "name": "Equipo de erudito"
+    },
+    "sealing-wax": {
+      "name": "Cera para sellar"
+    },
+    "shawm": {
+      "name": "Chirimía"
+    },
+    "shovel": {
+      "name": "Pala"
+    },
+    "signal-whistle": {
+      "name": "Silbato de señales"
+    },
+    "signet-ring": {
+      "name": "Anillo de sello"
+    },
+    "sled": {
+      "name": "Trineo"
+    },
+    "small-knife": {
+      "name": "Cuchillo pequeño"
+    },
+    "smiths-tools": {
+      "name": "Herramientas de herrero"
+    },
+    "soap": {
+      "name": "Jabón"
+    },
+    "spellbook": {
+      "name": "Libro de conjuros"
+    },
+    "spike-iron": {
+      "name": "Clavo de hierro"
+    },
+    "splint-armor": {
+      "name": "Armadura de bandas"
+    },
+    "sprig-of-mistletoe": {
+      "name": "Ramita de muérdago"
+    },
+    "spyglass": {
+      "name": "Catalejo"
+    },
+    "stabling-1-day": {
+      "name": "Estabulación (1 día)"
+    },
+    "staff": {
+      "name": "Bastón"
+    },
+    "string-10-feet": {
+      "name": "Cordel (10 pies)"
+    },
+    "studded-leather-armor": {
+      "name": "Armadura de cuero tachonado"
+    },
+    "tent-two-person": {
+      "name": "Tienda para dos personas"
+    },
+    "thieves-tools": {
+      "name": "Herramientas de ladrón"
+    },
+    "tinkers-tools": {
+      "name": "Herramientas de hojalatero"
+    },
+    "totem": {
+      "name": "Tótem"
+    },
+    "vestments": {
+      "name": "Vestiduras"
+    },
+    "vial": {
+      "name": "Vial"
+    },
+    "viol": {
+      "name": "Viola"
+    },
+    "wagon": {
+      "name": "Carreta"
+    },
+    "wand": {
+      "name": "Varita"
+    },
+    "warhorse": {
+      "name": "Caballo de guerra"
+    },
+    "warship": {
+      "name": "Buque de guerra"
+    },
+    "weavers-tools": {
+      "name": "Herramientas de tejedor"
+    },
+    "whetstone": {
+      "name": "Piedra de afilar"
+    },
+    "woodcarvers-tools": {
+      "name": "Herramientas de tallista"
+    },
+    "wooden-staff": {
+      "name": "Bastón de madera"
+    },
+    "yew-wand": {
+      "name": "Varita de tejo"
+    }
   },
-
   "spells": {
-    "acid-arrow": { "name": "Flecha ácida" },
-    "acid-splash": { "name": "Salpicadura ácida" },
-    "aid": { "name": "Auxilio" },
-    "alarm": { "name": "Alarma" },
-    "alter-self": { "name": "Alterar el propio aspecto" },
-    "animal-friendship": { "name": "Amistad con los animales" },
-    "animal-messenger": { "name": "Mensajero animal" },
-    "animal-shapes": { "name": "Formas animales" },
-    "animate-dead": { "name": "Animar a los muertos" },
-    "animate-objects": { "name": "Animar objetos" },
-    "antilife-shell": { "name": "Caparazón antivida" },
-    "antimagic-field": { "name": "Campo antimagia" },
-    "antipathy-sympathy": { "name": "Antipatía/Simpatía" },
-    "arcane-eye": { "name": "Ojo arcano" },
-    "arcane-hand": { "name": "Mano arcana" },
-    "arcane-lock": { "name": "Cerradura arcana" },
-    "arcane-sword": { "name": "Espada arcana" },
-    "arcanists-magic-aura": { "name": "Aura mágica del arcanista" },
-    "astral-projection": { "name": "Proyección astral" },
-    "augury": { "name": "Augurio" },
-    "awaken": { "name": "Despertar" },
-    "bane": { "name": "Perdición" },
-    "banishment": { "name": "Destierro" },
-    "barkskin": { "name": "Piel de corteza" },
-    "beacon-of-hope": { "name": "Faro de esperanza" },
-    "bestow-curse": { "name": "Infligir maldición" },
-    "black-tentacles": { "name": "Tentáculos negros" },
-    "blade-barrier": { "name": "Barrera de cuchillas" },
-    "bless": { "name": "Bendecir" },
-    "blight": { "name": "Marchitar" },
-    "blindness-deafness": { "name": "Ceguera/Sordera" },
-    "blink": { "name": "Intermitencia" },
-    "blur": { "name": "Contorno borroso" },
-    "branding-smite": { "name": "Castigo marcador" },
-    "burning-hands": { "name": "Manos ardientes" },
-    "call-lightning": { "name": "Invocar al relámpago" },
-    "calm-emotions": { "name": "Calmar emociones" },
-    "chain-lightning": { "name": "Relámpago en cadena" },
-    "charm-person": { "name": "Hechizar persona" },
-    "chill-touch": { "name": "Toque helado" },
-    "circle-of-death": { "name": "Círculo de muerte" },
-    "clairvoyance": { "name": "Clarividencia" },
-    "clone": { "name": "Clon" },
-    "cloudkill": { "name": "Nube aniquiladora" },
-    "color-spray": { "name": "Rociada de color" },
-    "command": { "name": "Orden imperiosa" },
-    "commune": { "name": "Comunión" },
-    "commune-with-nature": { "name": "Comunión con la naturaleza" },
-    "comprehend-languages": { "name": "Comprender idiomas" },
-    "compulsion": { "name": "Compulsión" },
-    "cone-of-cold": { "name": "Cono de frío" },
-    "confusion": { "name": "Confusión" },
-    "conjure-animals": { "name": "Conjurar animales" },
-    "conjure-celestial": { "name": "Conjurar celestial" },
-    "conjure-elemental": { "name": "Conjurar elemental" },
-    "conjure-fey": { "name": "Conjurar feérico" },
-    "conjure-minor-elementals": { "name": "Conjurar elementales menores" },
-    "conjure-woodland-beings": { "name": "Conjurar seres de los bosques" },
-    "contact-other-plane": { "name": "Contactar con otro plano" },
-    "contagion": { "name": "Contagio" },
-    "contingency": { "name": "Contingencia" },
-    "continual-flame": { "name": "Llama continua" },
-    "control-water": { "name": "Controlar agua" },
-    "control-weather": { "name": "Controlar el clima" },
-    "counterspell": { "name": "Contrahechizo" },
-    "create-food-and-water": { "name": "Crear comida y agua" },
-    "create-undead": { "name": "Crear muertos vivientes" },
-    "create-or-destroy-water": { "name": "Crear o destruir agua" },
-    "creation": { "name": "Creación" },
-    "cure-wounds": { "name": "Curar heridas" },
-    "dancing-lights": { "name": "Luces danzantes" },
-    "darkness": { "name": "Oscuridad" },
-    "darkvision": { "name": "Visión en la oscuridad" },
-    "daylight": { "name": "Luz del día" },
-    "death-ward": { "name": "Custodia contra la muerte" },
-    "delayed-blast-fireball": { "name": "Bola de fuego de explosión retardada" },
-    "demiplane": { "name": "Semiplano" },
-    "detect-evil-and-good": { "name": "Detectar el bien y el mal" },
-    "detect-magic": { "name": "Detectar magia" },
-    "detect-poison-and-disease": { "name": "Detectar venenos y enfermedades" },
-    "detect-thoughts": { "name": "Detectar pensamientos" },
-    "dimension-door": { "name": "Puerta dimensional" },
-    "disguise-self": { "name": "Disfrazarse" },
-    "disintegrate": { "name": "Desintegrar" },
-    "dispel-evil-and-good": { "name": "Disipar el bien y el mal" },
-    "dispel-magic": { "name": "Disipar magia" },
-    "divination": { "name": "Adivinación" },
-    "divine-favor": { "name": "Favor divino" },
-    "divine-word": { "name": "Palabra divina" },
-    "dominate-beast": { "name": "Dominar bestia" },
-    "dominate-monster": { "name": "Dominar monstruo" },
-    "dominate-person": { "name": "Dominar persona" },
-    "dream": { "name": "Sueño" },
-    "druidcraft": { "name": "Druidismo" },
-    "earthquake": { "name": "Terremoto" },
-    "eldritch-blast": { "name": "Descarga sobrenatural" },
-    "enhance-ability": { "name": "Mejorar característica" },
-    "enlarge-reduce": { "name": "Agrandar/Reducir" },
-    "entangle": { "name": "Enmarañar" },
-    "enthrall": { "name": "Cautivar" },
-    "etherealness": { "name": "Etereidad" },
-    "expeditious-retreat": { "name": "Retirada expeditiva" },
-    "eyebite": { "name": "Mal de ojo" },
-    "fabricate": { "name": "Fabricar" },
-    "faerie-fire": { "name": "Fuego feérico" },
-    "faithful-hound": { "name": "Can fiel" },
-    "false-life": { "name": "Falsa vida" },
-    "fear": { "name": "Miedo" },
-    "feather-fall": { "name": "Caída de pluma" },
-    "feeblemind": { "name": "Debilidad mental" },
-    "find-familiar": { "name": "Encontrar familiar" },
-    "find-steed": { "name": "Encontrar corcel" },
-    "find-traps": { "name": "Encontrar trampas" },
-    "find-the-path": { "name": "Encontrar el camino" },
-    "finger-of-death": { "name": "Dedo de la muerte" },
-    "fire-bolt": { "name": "Saeta de fuego" },
-    "fire-shield": { "name": "Escudo de fuego" },
-    "fire-storm": { "name": "Tormenta de fuego" },
-    "fireball": { "name": "Bola de fuego" },
-    "flame-blade": { "name": "Hoja de llamas" },
-    "flame-strike": { "name": "Golpe flamígero" },
-    "flaming-sphere": { "name": "Esfera flamígera" },
-    "flesh-to-stone": { "name": "De la carne a la piedra" },
-    "floating-disk": { "name": "Disco flotante" },
-    "fly": { "name": "Volar" },
-    "fog-cloud": { "name": "Nube de niebla" },
-    "forbiddance": { "name": "Prohibición" },
-    "forcecage": { "name": "Jaula de fuerza" },
-    "foresight": { "name": "Presciencia" },
-    "freedom-of-movement": { "name": "Libertad de movimiento" },
-    "freezing-sphere": { "name": "Esfera congelante" },
-    "gaseous-form": { "name": "Forma gaseosa" },
-    "gate": { "name": "Portal" },
-    "geas": { "name": "Geas" },
-    "gentle-repose": { "name": "Reposo apacible" },
-    "giant-insect": { "name": "Insecto gigante" },
-    "glibness": { "name": "Elocuencia" },
-    "globe-of-invulnerability": { "name": "Globo de invulnerabilidad" },
-    "glyph-of-warding": { "name": "Glifo custodio" },
-    "goodberry": { "name": "Baya buena" },
-    "grease": { "name": "Grasa" },
-    "greater-invisibility": { "name": "Invisibilidad mayor" },
-    "greater-restoration": { "name": "Restablecimiento mayor" },
-    "guardian-of-faith": { "name": "Guardián de la fe" },
-    "guards-and-wards": { "name": "Guardias y custodias" },
-    "guidance": { "name": "Guía" },
-    "guiding-bolt": { "name": "Saeta guía" },
-    "gust-of-wind": { "name": "Ráfaga de viento" },
-    "hallow": { "name": "Santificar" },
-    "hallucinatory-terrain": { "name": "Terreno alucinatorio" },
-    "harm": { "name": "Dañar" },
-    "haste": { "name": "Acelerar" },
-    "heal": { "name": "Sanar" },
-    "healing-word": { "name": "Palabra de curación" },
-    "heat-metal": { "name": "Calentar metal" },
-    "hellish-rebuke": { "name": "Reprensión infernal" },
-    "heroes-feast": { "name": "Festín de los héroes" },
-    "heroism": { "name": "Heroísmo" },
-    "hideous-laughter": { "name": "Risa horrenda" },
-    "hold-monster": { "name": "Inmovilizar monstruo" },
-    "hold-person": { "name": "Inmovilizar persona" },
-    "holy-aura": { "name": "Aura sagrada" },
-    "hunters-mark": { "name": "Marca del cazador" },
-    "hypnotic-pattern": { "name": "Patrón hipnótico" },
-    "ice-storm": { "name": "Tormenta de hielo" },
-    "identify": { "name": "Identificar" },
-    "illusory-script": { "name": "Escritura ilusoria" },
-    "imprisonment": { "name": "Encarcelamiento" },
-    "incendiary-cloud": { "name": "Nube incendiaria" },
-    "inflict-wounds": { "name": "Infligir heridas" },
-    "insect-plague": { "name": "Plaga de insectos" },
-    "instant-summons": { "name": "Invocación instantánea" },
-    "invisibility": { "name": "Invisibilidad" },
-    "irresistible-dance": { "name": "Danza irresistible" },
-    "jump": { "name": "Salto" },
-    "knock": { "name": "Apertura" },
-    "legend-lore": { "name": "Conocimiento de leyendas" },
-    "lesser-restoration": { "name": "Restablecimiento menor" },
-    "levitate": { "name": "Levitar" },
-    "light": { "name": "Luz" },
-    "lightning-bolt": { "name": "Relámpago" },
-    "locate-animals-or-plants": { "name": "Localizar animales o plantas" },
-    "locate-creature": { "name": "Localizar criatura" },
-    "locate-object": { "name": "Localizar objeto" },
-    "longstrider": { "name": "Zancada larga" },
-    "mage-armor": { "name": "Armadura de mago" },
-    "mage-hand": { "name": "Mano de mago" },
-    "magic-circle": { "name": "Círculo mágico" },
-    "magic-jar": { "name": "Receptáculo mágico" },
-    "magic-missile": { "name": "Proyectil mágico" },
-    "magic-mouth": { "name": "Boca mágica" },
-    "magic-weapon": { "name": "Arma mágica" },
-    "magnificent-mansion": { "name": "Mansión magnífica" },
-    "major-image": { "name": "Imagen mayor" },
-    "mass-cure-wounds": { "name": "Curar heridas en masa" },
-    "mass-heal": { "name": "Sanar en masa" },
-    "mass-healing-word": { "name": "Palabra de curación en masa" },
-    "mass-suggestion": { "name": "Sugestión en masa" },
-    "maze": { "name": "Laberinto" },
-    "meld-into-stone": { "name": "Fundirse con la piedra" },
-    "mending": { "name": "Reparar" },
-    "message": { "name": "Mensaje" },
-    "meteor-swarm": { "name": "Lluvia de meteoritos" },
-    "mind-blank": { "name": "Mente en blanco" },
-    "minor-illusion": { "name": "Ilusión menor" },
-    "mirage-arcane": { "name": "Espejismo arcano" },
-    "mirror-image": { "name": "Imagen múltiple" },
-    "mislead": { "name": "Engañar" },
-    "misty-step": { "name": "Paso brumoso" },
-    "modify-memory": { "name": "Modificar recuerdo" },
-    "moonbeam": { "name": "Rayo de luna" },
-    "move-earth": { "name": "Mover la tierra" },
-    "nondetection": { "name": "Indetectable" },
-    "pass-without-trace": { "name": "Pasar sin dejar rastro" },
-    "passwall": { "name": "Pasamuros" },
-    "phantasmal-killer": { "name": "Asesino fantasmal" },
-    "phantom-steed": { "name": "Corcel fantasmal" },
-    "planar-ally": { "name": "Aliado planar" },
-    "planar-binding": { "name": "Ligadura planar" },
-    "plane-shift": { "name": "Desplazamiento entre planos" },
-    "plant-growth": { "name": "Crecimiento vegetal" },
-    "poison-spray": { "name": "Aerosol venenoso" },
-    "polymorph": { "name": "Polimorfar" },
-    "power-word-kill": { "name": "Palabra de poder: matar" },
-    "power-word-stun": { "name": "Palabra de poder: aturdir" },
-    "prayer-of-healing": { "name": "Oración de curación" },
-    "prestidigitation": { "name": "Prestidigitación" },
-    "prismatic-spray": { "name": "Rociada prismática" },
-    "prismatic-wall": { "name": "Muro prismático" },
-    "private-sanctum": { "name": "Santuario privado" },
-    "produce-flame": { "name": "Producir llama" },
-    "programmed-illusion": { "name": "Ilusión programada" },
-    "project-image": { "name": "Proyectar imagen" },
-    "protection-from-energy": { "name": "Protección contra la energía" },
-    "protection-from-evil-and-good": { "name": "Protección contra el bien y el mal" },
-    "protection-from-poison": { "name": "Protección contra el veneno" },
-    "purify-food-and-drink": { "name": "Purificar comida y bebida" },
-    "raise-dead": { "name": "Alzar a los muertos" },
-    "ray-of-enfeeblement": { "name": "Rayo debilitador" },
-    "ray-of-frost": { "name": "Rayo de escarcha" },
-    "regenerate": { "name": "Regenerar" },
-    "reincarnate": { "name": "Reencarnar" },
-    "remove-curse": { "name": "Quitar maldición" },
-    "resilient-sphere": { "name": "Esfera resiliente" },
-    "resistance": { "name": "Resistencia" },
-    "resurrection": { "name": "Resurrección" },
-    "reverse-gravity": { "name": "Invertir gravedad" },
-    "revivify": { "name": "Revivir" },
-    "rope-trick": { "name": "Truco de la cuerda" },
-    "sacred-flame": { "name": "Llama sagrada" },
-    "sanctuary": { "name": "Santuario" },
-    "scorching-ray": { "name": "Rayo abrasador" },
-    "scrying": { "name": "Escudriñamiento" },
-    "secret-chest": { "name": "Cofre secreto" },
-    "see-invisibility": { "name": "Ver invisibilidad" },
-    "seeming": { "name": "Apariencia" },
-    "sending": { "name": "Recado" },
-    "sequester": { "name": "Reclusión" },
-    "shapechange": { "name": "Cambiar de forma" },
-    "shatter": { "name": "Estallido" },
-    "shield": { "name": "Escudo" },
-    "shield-of-faith": { "name": "Escudo de la fe" },
-    "shillelagh": { "name": "Garrote mágico" },
-    "shocking-grasp": { "name": "Agarre electrizante" },
-    "silence": { "name": "Silencio" },
-    "silent-image": { "name": "Imagen silenciosa" },
-    "simulacrum": { "name": "Simulacro" },
-    "sleep": { "name": "Dormir" },
-    "sleet-storm": { "name": "Tormenta de aguanieve" },
-    "slow": { "name": "Ralentizar" },
-    "spare-the-dying": { "name": "Estabilizar" },
-    "speak-with-animals": { "name": "Hablar con los animales" },
-    "speak-with-dead": { "name": "Hablar con los muertos" },
-    "speak-with-plants": { "name": "Hablar con las plantas" },
-    "spider-climb": { "name": "Trepar cual arácnido" },
-    "spike-growth": { "name": "Crecimiento espinoso" },
-    "spirit-guardians": { "name": "Guardianes espirituales" },
-    "spiritual-weapon": { "name": "Arma espiritual" },
-    "stinking-cloud": { "name": "Nube apestosa" },
-    "stone-shape": { "name": "Moldear piedra" },
-    "stoneskin": { "name": "Piel pétrea" },
-    "storm-of-vengeance": { "name": "Tormenta de venganza" },
-    "suggestion": { "name": "Sugestión" },
-    "sunbeam": { "name": "Rayo solar" },
-    "sunburst": { "name": "Explosión solar" },
-    "symbol": { "name": "Símbolo" },
-    "telekinesis": { "name": "Telequinesis" },
-    "telepathic-bond": { "name": "Vínculo telepático" },
-    "teleport": { "name": "Teletransporte" },
-    "teleportation-circle": { "name": "Círculo de teletransporte" },
-    "thaumaturgy": { "name": "Taumaturgia" },
-    "thunderwave": { "name": "Onda atronadora" },
-    "time-stop": { "name": "Detener el tiempo" },
-    "tiny-hut": { "name": "Cabaña diminuta" },
-    "tongues": { "name": "Don de lenguas" },
-    "transport-via-plants": { "name": "Transporte mediante plantas" },
-    "tree-stride": { "name": "Zancada arbórea" },
-    "true-polymorph": { "name": "Polimorfar verdadero" },
-    "true-resurrection": { "name": "Resurrección verdadera" },
-    "true-seeing": { "name": "Visión verdadera" },
-    "true-strike": { "name": "Golpe verdadero" },
-    "unseen-servant": { "name": "Sirviente invisible" },
-    "vampiric-touch": { "name": "Toque vampírico" },
-    "vicious-mockery": { "name": "Burla cruel" },
-    "wall-of-fire": { "name": "Muro de fuego" },
-    "wall-of-force": { "name": "Muro de fuerza" },
-    "wall-of-ice": { "name": "Muro de hielo" },
-    "wall-of-stone": { "name": "Muro de piedra" },
-    "wall-of-thorns": { "name": "Muro de espinas" },
-    "warding-bond": { "name": "Vínculo protector" },
-    "water-breathing": { "name": "Respirar bajo el agua" },
-    "water-walk": { "name": "Caminar sobre el agua" },
-    "web": { "name": "Telaraña" },
-    "weird": { "name": "Horror sobrenatural" },
-    "wind-walk": { "name": "Caminar sobre el viento" },
-    "wind-wall": { "name": "Muro de viento" },
-    "wish": { "name": "Deseo" },
-    "word-of-recall": { "name": "Palabra de regreso" },
-    "zone-of-truth": { "name": "Zona de verdad" }
+    "acid-arrow": {
+      "name": "Flecha ácida"
+    },
+    "acid-splash": {
+      "name": "Salpicadura ácida"
+    },
+    "aid": {
+      "name": "Auxilio"
+    },
+    "alarm": {
+      "name": "Alarma"
+    },
+    "alter-self": {
+      "name": "Alterar el propio aspecto"
+    },
+    "animal-friendship": {
+      "name": "Amistad con los animales"
+    },
+    "animal-messenger": {
+      "name": "Mensajero animal"
+    },
+    "animal-shapes": {
+      "name": "Formas animales"
+    },
+    "animate-dead": {
+      "name": "Animar a los muertos"
+    },
+    "animate-objects": {
+      "name": "Animar objetos"
+    },
+    "antilife-shell": {
+      "name": "Caparazón antivida"
+    },
+    "antimagic-field": {
+      "name": "Campo antimagia"
+    },
+    "antipathy-sympathy": {
+      "name": "Antipatía/Simpatía"
+    },
+    "arcane-eye": {
+      "name": "Ojo arcano"
+    },
+    "arcane-hand": {
+      "name": "Mano arcana"
+    },
+    "arcane-lock": {
+      "name": "Cerradura arcana"
+    },
+    "arcane-sword": {
+      "name": "Espada arcana"
+    },
+    "arcanists-magic-aura": {
+      "name": "Aura mágica del arcanista"
+    },
+    "astral-projection": {
+      "name": "Proyección astral"
+    },
+    "augury": {
+      "name": "Augurio"
+    },
+    "awaken": {
+      "name": "Despertar"
+    },
+    "bane": {
+      "name": "Perdición"
+    },
+    "banishment": {
+      "name": "Destierro"
+    },
+    "barkskin": {
+      "name": "Piel de corteza"
+    },
+    "beacon-of-hope": {
+      "name": "Faro de esperanza"
+    },
+    "bestow-curse": {
+      "name": "Infligir maldición"
+    },
+    "black-tentacles": {
+      "name": "Tentáculos negros"
+    },
+    "blade-barrier": {
+      "name": "Barrera de cuchillas"
+    },
+    "bless": {
+      "name": "Bendecir"
+    },
+    "blight": {
+      "name": "Marchitar"
+    },
+    "blindness-deafness": {
+      "name": "Ceguera/Sordera"
+    },
+    "blink": {
+      "name": "Intermitencia"
+    },
+    "blur": {
+      "name": "Contorno borroso"
+    },
+    "branding-smite": {
+      "name": "Castigo marcador"
+    },
+    "burning-hands": {
+      "name": "Manos ardientes"
+    },
+    "call-lightning": {
+      "name": "Invocar al relámpago"
+    },
+    "calm-emotions": {
+      "name": "Calmar emociones"
+    },
+    "chain-lightning": {
+      "name": "Relámpago en cadena"
+    },
+    "charm-person": {
+      "name": "Hechizar persona"
+    },
+    "chill-touch": {
+      "name": "Toque helado"
+    },
+    "circle-of-death": {
+      "name": "Círculo de muerte"
+    },
+    "clairvoyance": {
+      "name": "Clarividencia"
+    },
+    "clone": {
+      "name": "Clon"
+    },
+    "cloudkill": {
+      "name": "Nube aniquiladora"
+    },
+    "color-spray": {
+      "name": "Rociada de color"
+    },
+    "command": {
+      "name": "Orden imperiosa"
+    },
+    "commune": {
+      "name": "Comunión"
+    },
+    "commune-with-nature": {
+      "name": "Comunión con la naturaleza"
+    },
+    "comprehend-languages": {
+      "name": "Comprender idiomas"
+    },
+    "compulsion": {
+      "name": "Compulsión"
+    },
+    "cone-of-cold": {
+      "name": "Cono de frío"
+    },
+    "confusion": {
+      "name": "Confusión"
+    },
+    "conjure-animals": {
+      "name": "Conjurar animales"
+    },
+    "conjure-celestial": {
+      "name": "Conjurar celestial"
+    },
+    "conjure-elemental": {
+      "name": "Conjurar elemental"
+    },
+    "conjure-fey": {
+      "name": "Conjurar feérico"
+    },
+    "conjure-minor-elementals": {
+      "name": "Conjurar elementales menores"
+    },
+    "conjure-woodland-beings": {
+      "name": "Conjurar seres de los bosques"
+    },
+    "contact-other-plane": {
+      "name": "Contactar con otro plano"
+    },
+    "contagion": {
+      "name": "Contagio"
+    },
+    "contingency": {
+      "name": "Contingencia"
+    },
+    "continual-flame": {
+      "name": "Llama continua"
+    },
+    "control-water": {
+      "name": "Controlar agua"
+    },
+    "control-weather": {
+      "name": "Controlar el clima"
+    },
+    "counterspell": {
+      "name": "Contrahechizo"
+    },
+    "create-food-and-water": {
+      "name": "Crear comida y agua"
+    },
+    "create-undead": {
+      "name": "Crear muertos vivientes"
+    },
+    "create-or-destroy-water": {
+      "name": "Crear o destruir agua"
+    },
+    "creation": {
+      "name": "Creación"
+    },
+    "cure-wounds": {
+      "name": "Curar heridas"
+    },
+    "dancing-lights": {
+      "name": "Luces danzantes"
+    },
+    "darkness": {
+      "name": "Oscuridad"
+    },
+    "darkvision": {
+      "name": "Visión en la oscuridad"
+    },
+    "daylight": {
+      "name": "Luz del día"
+    },
+    "death-ward": {
+      "name": "Custodia contra la muerte"
+    },
+    "delayed-blast-fireball": {
+      "name": "Bola de fuego de explosión retardada"
+    },
+    "demiplane": {
+      "name": "Semiplano"
+    },
+    "detect-evil-and-good": {
+      "name": "Detectar el bien y el mal"
+    },
+    "detect-magic": {
+      "name": "Detectar magia"
+    },
+    "detect-poison-and-disease": {
+      "name": "Detectar venenos y enfermedades"
+    },
+    "detect-thoughts": {
+      "name": "Detectar pensamientos"
+    },
+    "dimension-door": {
+      "name": "Puerta dimensional"
+    },
+    "disguise-self": {
+      "name": "Disfrazarse"
+    },
+    "disintegrate": {
+      "name": "Desintegrar"
+    },
+    "dispel-evil-and-good": {
+      "name": "Disipar el bien y el mal"
+    },
+    "dispel-magic": {
+      "name": "Disipar magia"
+    },
+    "divination": {
+      "name": "Adivinación"
+    },
+    "divine-favor": {
+      "name": "Favor divino"
+    },
+    "divine-word": {
+      "name": "Palabra divina"
+    },
+    "dominate-beast": {
+      "name": "Dominar bestia"
+    },
+    "dominate-monster": {
+      "name": "Dominar monstruo"
+    },
+    "dominate-person": {
+      "name": "Dominar persona"
+    },
+    "dream": {
+      "name": "Sueño"
+    },
+    "druidcraft": {
+      "name": "Druidismo"
+    },
+    "earthquake": {
+      "name": "Terremoto"
+    },
+    "eldritch-blast": {
+      "name": "Descarga sobrenatural"
+    },
+    "enhance-ability": {
+      "name": "Mejorar característica"
+    },
+    "enlarge-reduce": {
+      "name": "Agrandar/Reducir"
+    },
+    "entangle": {
+      "name": "Enmarañar"
+    },
+    "enthrall": {
+      "name": "Cautivar"
+    },
+    "etherealness": {
+      "name": "Etereidad"
+    },
+    "expeditious-retreat": {
+      "name": "Retirada expeditiva"
+    },
+    "eyebite": {
+      "name": "Mal de ojo"
+    },
+    "fabricate": {
+      "name": "Fabricar"
+    },
+    "faerie-fire": {
+      "name": "Fuego feérico"
+    },
+    "faithful-hound": {
+      "name": "Can fiel"
+    },
+    "false-life": {
+      "name": "Falsa vida"
+    },
+    "fear": {
+      "name": "Miedo"
+    },
+    "feather-fall": {
+      "name": "Caída de pluma"
+    },
+    "feeblemind": {
+      "name": "Debilidad mental"
+    },
+    "find-familiar": {
+      "name": "Encontrar familiar"
+    },
+    "find-steed": {
+      "name": "Encontrar corcel"
+    },
+    "find-traps": {
+      "name": "Encontrar trampas"
+    },
+    "find-the-path": {
+      "name": "Encontrar el camino"
+    },
+    "finger-of-death": {
+      "name": "Dedo de la muerte"
+    },
+    "fire-bolt": {
+      "name": "Saeta de fuego"
+    },
+    "fire-shield": {
+      "name": "Escudo de fuego"
+    },
+    "fire-storm": {
+      "name": "Tormenta de fuego"
+    },
+    "fireball": {
+      "name": "Bola de fuego"
+    },
+    "flame-blade": {
+      "name": "Hoja de llamas"
+    },
+    "flame-strike": {
+      "name": "Golpe flamígero"
+    },
+    "flaming-sphere": {
+      "name": "Esfera flamígera"
+    },
+    "flesh-to-stone": {
+      "name": "De la carne a la piedra"
+    },
+    "floating-disk": {
+      "name": "Disco flotante"
+    },
+    "fly": {
+      "name": "Volar"
+    },
+    "fog-cloud": {
+      "name": "Nube de niebla"
+    },
+    "forbiddance": {
+      "name": "Prohibición"
+    },
+    "forcecage": {
+      "name": "Jaula de fuerza"
+    },
+    "foresight": {
+      "name": "Presciencia"
+    },
+    "freedom-of-movement": {
+      "name": "Libertad de movimiento"
+    },
+    "freezing-sphere": {
+      "name": "Esfera congelante"
+    },
+    "gaseous-form": {
+      "name": "Forma gaseosa"
+    },
+    "gate": {
+      "name": "Portal"
+    },
+    "geas": {
+      "name": "Geas"
+    },
+    "gentle-repose": {
+      "name": "Reposo apacible"
+    },
+    "giant-insect": {
+      "name": "Insecto gigante"
+    },
+    "glibness": {
+      "name": "Elocuencia"
+    },
+    "globe-of-invulnerability": {
+      "name": "Globo de invulnerabilidad"
+    },
+    "glyph-of-warding": {
+      "name": "Glifo custodio"
+    },
+    "goodberry": {
+      "name": "Baya buena"
+    },
+    "grease": {
+      "name": "Grasa"
+    },
+    "greater-invisibility": {
+      "name": "Invisibilidad mayor"
+    },
+    "greater-restoration": {
+      "name": "Restablecimiento mayor"
+    },
+    "guardian-of-faith": {
+      "name": "Guardián de la fe"
+    },
+    "guards-and-wards": {
+      "name": "Guardias y custodias"
+    },
+    "guidance": {
+      "name": "Guía"
+    },
+    "guiding-bolt": {
+      "name": "Saeta guía"
+    },
+    "gust-of-wind": {
+      "name": "Ráfaga de viento"
+    },
+    "hallow": {
+      "name": "Santificar"
+    },
+    "hallucinatory-terrain": {
+      "name": "Terreno alucinatorio"
+    },
+    "harm": {
+      "name": "Dañar"
+    },
+    "haste": {
+      "name": "Acelerar"
+    },
+    "heal": {
+      "name": "Sanar"
+    },
+    "healing-word": {
+      "name": "Palabra de curación"
+    },
+    "heat-metal": {
+      "name": "Calentar metal"
+    },
+    "hellish-rebuke": {
+      "name": "Reprensión infernal"
+    },
+    "heroes-feast": {
+      "name": "Festín de los héroes"
+    },
+    "heroism": {
+      "name": "Heroísmo"
+    },
+    "hideous-laughter": {
+      "name": "Risa horrenda"
+    },
+    "hold-monster": {
+      "name": "Inmovilizar monstruo"
+    },
+    "hold-person": {
+      "name": "Inmovilizar persona"
+    },
+    "holy-aura": {
+      "name": "Aura sagrada"
+    },
+    "hunters-mark": {
+      "name": "Marca del cazador"
+    },
+    "hypnotic-pattern": {
+      "name": "Patrón hipnótico"
+    },
+    "ice-storm": {
+      "name": "Tormenta de hielo"
+    },
+    "identify": {
+      "name": "Identificar"
+    },
+    "illusory-script": {
+      "name": "Escritura ilusoria"
+    },
+    "imprisonment": {
+      "name": "Encarcelamiento"
+    },
+    "incendiary-cloud": {
+      "name": "Nube incendiaria"
+    },
+    "inflict-wounds": {
+      "name": "Infligir heridas"
+    },
+    "insect-plague": {
+      "name": "Plaga de insectos"
+    },
+    "instant-summons": {
+      "name": "Invocación instantánea"
+    },
+    "invisibility": {
+      "name": "Invisibilidad"
+    },
+    "irresistible-dance": {
+      "name": "Danza irresistible"
+    },
+    "jump": {
+      "name": "Salto"
+    },
+    "knock": {
+      "name": "Apertura"
+    },
+    "legend-lore": {
+      "name": "Conocimiento de leyendas"
+    },
+    "lesser-restoration": {
+      "name": "Restablecimiento menor"
+    },
+    "levitate": {
+      "name": "Levitar"
+    },
+    "light": {
+      "name": "Luz"
+    },
+    "lightning-bolt": {
+      "name": "Relámpago"
+    },
+    "locate-animals-or-plants": {
+      "name": "Localizar animales o plantas"
+    },
+    "locate-creature": {
+      "name": "Localizar criatura"
+    },
+    "locate-object": {
+      "name": "Localizar objeto"
+    },
+    "longstrider": {
+      "name": "Zancada larga"
+    },
+    "mage-armor": {
+      "name": "Armadura de mago"
+    },
+    "mage-hand": {
+      "name": "Mano de mago"
+    },
+    "magic-circle": {
+      "name": "Círculo mágico"
+    },
+    "magic-jar": {
+      "name": "Receptáculo mágico"
+    },
+    "magic-missile": {
+      "name": "Proyectil mágico"
+    },
+    "magic-mouth": {
+      "name": "Boca mágica"
+    },
+    "magic-weapon": {
+      "name": "Arma mágica"
+    },
+    "magnificent-mansion": {
+      "name": "Mansión magnífica"
+    },
+    "major-image": {
+      "name": "Imagen mayor"
+    },
+    "mass-cure-wounds": {
+      "name": "Curar heridas en masa"
+    },
+    "mass-heal": {
+      "name": "Sanar en masa"
+    },
+    "mass-healing-word": {
+      "name": "Palabra de curación en masa"
+    },
+    "mass-suggestion": {
+      "name": "Sugestión en masa"
+    },
+    "maze": {
+      "name": "Laberinto"
+    },
+    "meld-into-stone": {
+      "name": "Fundirse con la piedra"
+    },
+    "mending": {
+      "name": "Reparar"
+    },
+    "message": {
+      "name": "Mensaje"
+    },
+    "meteor-swarm": {
+      "name": "Lluvia de meteoritos"
+    },
+    "mind-blank": {
+      "name": "Mente en blanco"
+    },
+    "minor-illusion": {
+      "name": "Ilusión menor"
+    },
+    "mirage-arcane": {
+      "name": "Espejismo arcano"
+    },
+    "mirror-image": {
+      "name": "Imagen múltiple"
+    },
+    "mislead": {
+      "name": "Engañar"
+    },
+    "misty-step": {
+      "name": "Paso brumoso"
+    },
+    "modify-memory": {
+      "name": "Modificar recuerdo"
+    },
+    "moonbeam": {
+      "name": "Rayo de luna"
+    },
+    "move-earth": {
+      "name": "Mover la tierra"
+    },
+    "nondetection": {
+      "name": "Indetectable"
+    },
+    "pass-without-trace": {
+      "name": "Pasar sin dejar rastro"
+    },
+    "passwall": {
+      "name": "Pasamuros"
+    },
+    "phantasmal-killer": {
+      "name": "Asesino fantasmal"
+    },
+    "phantom-steed": {
+      "name": "Corcel fantasmal"
+    },
+    "planar-ally": {
+      "name": "Aliado planar"
+    },
+    "planar-binding": {
+      "name": "Ligadura planar"
+    },
+    "plane-shift": {
+      "name": "Desplazamiento entre planos"
+    },
+    "plant-growth": {
+      "name": "Crecimiento vegetal"
+    },
+    "poison-spray": {
+      "name": "Aerosol venenoso"
+    },
+    "polymorph": {
+      "name": "Polimorfar"
+    },
+    "power-word-kill": {
+      "name": "Palabra de poder: matar"
+    },
+    "power-word-stun": {
+      "name": "Palabra de poder: aturdir"
+    },
+    "prayer-of-healing": {
+      "name": "Oración de curación"
+    },
+    "prestidigitation": {
+      "name": "Prestidigitación"
+    },
+    "prismatic-spray": {
+      "name": "Rociada prismática"
+    },
+    "prismatic-wall": {
+      "name": "Muro prismático"
+    },
+    "private-sanctum": {
+      "name": "Santuario privado"
+    },
+    "produce-flame": {
+      "name": "Producir llama"
+    },
+    "programmed-illusion": {
+      "name": "Ilusión programada"
+    },
+    "project-image": {
+      "name": "Proyectar imagen"
+    },
+    "protection-from-energy": {
+      "name": "Protección contra la energía"
+    },
+    "protection-from-evil-and-good": {
+      "name": "Protección contra el bien y el mal"
+    },
+    "protection-from-poison": {
+      "name": "Protección contra el veneno"
+    },
+    "purify-food-and-drink": {
+      "name": "Purificar comida y bebida"
+    },
+    "raise-dead": {
+      "name": "Alzar a los muertos"
+    },
+    "ray-of-enfeeblement": {
+      "name": "Rayo debilitador"
+    },
+    "ray-of-frost": {
+      "name": "Rayo de escarcha"
+    },
+    "regenerate": {
+      "name": "Regenerar"
+    },
+    "reincarnate": {
+      "name": "Reencarnar"
+    },
+    "remove-curse": {
+      "name": "Quitar maldición"
+    },
+    "resilient-sphere": {
+      "name": "Esfera resiliente"
+    },
+    "resistance": {
+      "name": "Resistencia"
+    },
+    "resurrection": {
+      "name": "Resurrección"
+    },
+    "reverse-gravity": {
+      "name": "Invertir gravedad"
+    },
+    "revivify": {
+      "name": "Revivir"
+    },
+    "rope-trick": {
+      "name": "Truco de la cuerda"
+    },
+    "sacred-flame": {
+      "name": "Llama sagrada"
+    },
+    "sanctuary": {
+      "name": "Santuario"
+    },
+    "scorching-ray": {
+      "name": "Rayo abrasador"
+    },
+    "scrying": {
+      "name": "Escudriñamiento"
+    },
+    "secret-chest": {
+      "name": "Cofre secreto"
+    },
+    "see-invisibility": {
+      "name": "Ver invisibilidad"
+    },
+    "seeming": {
+      "name": "Apariencia"
+    },
+    "sending": {
+      "name": "Recado"
+    },
+    "sequester": {
+      "name": "Reclusión"
+    },
+    "shapechange": {
+      "name": "Cambiar de forma"
+    },
+    "shatter": {
+      "name": "Estallido"
+    },
+    "shield": {
+      "name": "Escudo"
+    },
+    "shield-of-faith": {
+      "name": "Escudo de la fe"
+    },
+    "shillelagh": {
+      "name": "Garrote mágico"
+    },
+    "shocking-grasp": {
+      "name": "Agarre electrizante"
+    },
+    "silence": {
+      "name": "Silencio"
+    },
+    "silent-image": {
+      "name": "Imagen silenciosa"
+    },
+    "simulacrum": {
+      "name": "Simulacro"
+    },
+    "sleep": {
+      "name": "Dormir"
+    },
+    "sleet-storm": {
+      "name": "Tormenta de aguanieve"
+    },
+    "slow": {
+      "name": "Ralentizar"
+    },
+    "spare-the-dying": {
+      "name": "Estabilizar"
+    },
+    "speak-with-animals": {
+      "name": "Hablar con los animales"
+    },
+    "speak-with-dead": {
+      "name": "Hablar con los muertos"
+    },
+    "speak-with-plants": {
+      "name": "Hablar con las plantas"
+    },
+    "spider-climb": {
+      "name": "Trepar cual arácnido"
+    },
+    "spike-growth": {
+      "name": "Crecimiento espinoso"
+    },
+    "spirit-guardians": {
+      "name": "Guardianes espirituales"
+    },
+    "spiritual-weapon": {
+      "name": "Arma espiritual"
+    },
+    "stinking-cloud": {
+      "name": "Nube apestosa"
+    },
+    "stone-shape": {
+      "name": "Moldear piedra"
+    },
+    "stoneskin": {
+      "name": "Piel pétrea"
+    },
+    "storm-of-vengeance": {
+      "name": "Tormenta de venganza"
+    },
+    "suggestion": {
+      "name": "Sugestión"
+    },
+    "sunbeam": {
+      "name": "Rayo solar"
+    },
+    "sunburst": {
+      "name": "Explosión solar"
+    },
+    "symbol": {
+      "name": "Símbolo"
+    },
+    "telekinesis": {
+      "name": "Telequinesis"
+    },
+    "telepathic-bond": {
+      "name": "Vínculo telepático"
+    },
+    "teleport": {
+      "name": "Teletransporte"
+    },
+    "teleportation-circle": {
+      "name": "Círculo de teletransporte"
+    },
+    "thaumaturgy": {
+      "name": "Taumaturgia"
+    },
+    "thunderwave": {
+      "name": "Onda atronadora"
+    },
+    "time-stop": {
+      "name": "Detener el tiempo"
+    },
+    "tiny-hut": {
+      "name": "Cabaña diminuta"
+    },
+    "tongues": {
+      "name": "Don de lenguas"
+    },
+    "transport-via-plants": {
+      "name": "Transporte mediante plantas"
+    },
+    "tree-stride": {
+      "name": "Zancada arbórea"
+    },
+    "true-polymorph": {
+      "name": "Polimorfar verdadero"
+    },
+    "true-resurrection": {
+      "name": "Resurrección verdadera"
+    },
+    "true-seeing": {
+      "name": "Visión verdadera"
+    },
+    "true-strike": {
+      "name": "Golpe verdadero"
+    },
+    "unseen-servant": {
+      "name": "Sirviente invisible"
+    },
+    "vampiric-touch": {
+      "name": "Toque vampírico"
+    },
+    "vicious-mockery": {
+      "name": "Burla cruel"
+    },
+    "wall-of-fire": {
+      "name": "Muro de fuego"
+    },
+    "wall-of-force": {
+      "name": "Muro de fuerza"
+    },
+    "wall-of-ice": {
+      "name": "Muro de hielo"
+    },
+    "wall-of-stone": {
+      "name": "Muro de piedra"
+    },
+    "wall-of-thorns": {
+      "name": "Muro de espinas"
+    },
+    "warding-bond": {
+      "name": "Vínculo protector"
+    },
+    "water-breathing": {
+      "name": "Respirar bajo el agua"
+    },
+    "water-walk": {
+      "name": "Caminar sobre el agua"
+    },
+    "web": {
+      "name": "Telaraña"
+    },
+    "weird": {
+      "name": "Horror sobrenatural"
+    },
+    "wind-walk": {
+      "name": "Caminar sobre el viento"
+    },
+    "wind-wall": {
+      "name": "Muro de viento"
+    },
+    "wish": {
+      "name": "Deseo"
+    },
+    "word-of-recall": {
+      "name": "Palabra de regreso"
+    },
+    "zone-of-truth": {
+      "name": "Zona de verdad"
+    }
   },
   "monsters": {
-    "aboleth": { "name": "Aboleth" },
-    "acolyte": { "name": "Acólito" },
-    "adult-black-dragon": { "name": "Dragón negro adulto" },
-    "adult-blue-dragon": { "name": "Dragón azul adulto" },
-    "adult-brass-dragon": { "name": "Dragón de latón adulto" },
-    "adult-bronze-dragon": { "name": "Dragón de bronce adulto" },
-    "adult-copper-dragon": { "name": "Dragón de cobre adulto" },
-    "adult-gold-dragon": { "name": "Dragón dorado adulto" },
-    "adult-green-dragon": { "name": "Dragón verde adulto" },
-    "adult-red-dragon": { "name": "Dragón rojo adulto" },
-    "adult-silver-dragon": { "name": "Dragón de plata adulto" },
-    "adult-white-dragon": { "name": "Dragón blanco adulto" },
-    "air-elemental": { "name": "Elemental de aire" },
-    "ancient-black-dragon": { "name": "Dragón negro anciano" },
-    "ancient-blue-dragon": { "name": "Dragón azul anciano" },
-    "ancient-brass-dragon": { "name": "Dragón de latón anciano" },
-    "ancient-bronze-dragon": { "name": "Dragón de bronce anciano" },
-    "ancient-copper-dragon": { "name": "Dragón de cobre anciano" },
-    "ancient-gold-dragon": { "name": "Dragón dorado anciano" },
-    "ancient-green-dragon": { "name": "Dragón verde anciano" },
-    "ancient-red-dragon": { "name": "Dragón rojo anciano" },
-    "ancient-silver-dragon": { "name": "Dragón de plata anciano" },
-    "ancient-white-dragon": { "name": "Dragón blanco anciano" },
-    "androsphinx": { "name": "Androesfinge" },
-    "animated-armor": { "name": "Armadura animada" },
-    "ankheg": { "name": "Anquheg" },
-    "ape": { "name": "Simio" },
-    "archmage": { "name": "Archimago" },
-    "assassin": { "name": "Asesino" },
-    "awakened-shrub": { "name": "Arbusto despierto" },
-    "awakened-tree": { "name": "Árbol despierto" },
-    "axe-beak": { "name": "Pico hacha" },
-    "azer": { "name": "Azer" },
-    "baboon": { "name": "Babuino" },
-    "badger": { "name": "Tejón" },
-    "balor": { "name": "Balor" },
-    "bandit": { "name": "Bandido" },
-    "bandit-captain": { "name": "Capitán bandido" },
-    "barbed-devil": { "name": "Diablo espinoso" },
-    "basilisk": { "name": "Basilisco" },
-    "bat": { "name": "Murciélago" },
-    "bearded-devil": { "name": "Diablo barbudo" },
-    "behir": { "name": "Behir" },
-    "berserker": { "name": "Berserker" },
-    "black-bear": { "name": "Oso negro" },
-    "black-dragon-wyrmling": { "name": "Cría de dragón negro" },
-    "black-pudding": { "name": "Pudin negro" },
-    "blink-dog": { "name": "Perro parpadeante" },
-    "blood-hawk": { "name": "Halcón sanguinario" },
-    "blue-dragon-wyrmling": { "name": "Cría de dragón azul" },
-    "boar": { "name": "Jabalí" },
-    "bone-devil": { "name": "Diablo óseo" },
-    "brass-dragon-wyrmling": { "name": "Cría de dragón de latón" },
-    "bronze-dragon-wyrmling": { "name": "Cría de dragón de bronce" },
-    "brown-bear": { "name": "Oso pardo" },
-    "bugbear": { "name": "Osgo" },
-    "bulette": { "name": "Bulette" },
-    "camel": { "name": "Camello" },
-    "cat": { "name": "Gato" },
-    "centaur": { "name": "Centauro" },
-    "chain-devil": { "name": "Diablo de las cadenas" },
-    "chimera": { "name": "Quimera" },
-    "chuul": { "name": "Chuul" },
-    "clay-golem": { "name": "Gólem de arcilla" },
-    "cloaker": { "name": "Cloaker" },
-    "cloud-giant": { "name": "Gigante de las nubes" },
-    "cockatrice": { "name": "Cocatriz" },
-    "commoner": { "name": "Plebeyo" },
-    "constrictor-snake": { "name": "Serpiente constrictora" },
-    "copper-dragon-wyrmling": { "name": "Cría de dragón de cobre" },
-    "couatl": { "name": "Couatl" },
-    "crab": { "name": "Cangrejo" },
-    "crocodile": { "name": "Cocodrilo" },
-    "cult-fanatic": { "name": "Fanático del culto" },
-    "cultist": { "name": "Sectario" },
-    "darkmantle": { "name": "Manto oscuro" },
-    "death-dog": { "name": "Perro de la muerte" },
-    "deep-gnome-svirfneblin": { "name": "Gnomo de las profundidades (Svirfneblin)" },
-    "deer": { "name": "Ciervo" },
-    "deva": { "name": "Deva" },
-    "dire-wolf": { "name": "Lobo terrible" },
-    "djinni": { "name": "Djinni" },
-    "doppelganger": { "name": "Doppelganger" },
-    "draft-horse": { "name": "Caballo de tiro" },
-    "dragon-turtle": { "name": "Tortuga dragón" },
-    "dretch": { "name": "Dretch" },
-    "drider": { "name": "Drider" },
-    "drow": { "name": "Drow" },
-    "druid": { "name": "Druida" },
-    "dryad": { "name": "Dríada" },
-    "duergar": { "name": "Duergar" },
-    "dust-mephit": { "name": "Mefita de polvo" },
-    "eagle": { "name": "Águila" },
-    "earth-elemental": { "name": "Elemental de tierra" },
-    "efreeti": { "name": "Efreeti" },
-    "elephant": { "name": "Elefante" },
-    "elk": { "name": "Alce" },
-    "erinyes": { "name": "Erinia" },
-    "ettercap": { "name": "Ettercap" },
-    "ettin": { "name": "Ettin" },
-    "fire-elemental": { "name": "Elemental de fuego" },
-    "fire-giant": { "name": "Gigante de fuego" },
-    "flesh-golem": { "name": "Gólem de carne" },
-    "flying-snake": { "name": "Serpiente voladora" },
-    "flying-sword": { "name": "Espada voladora" },
-    "frog": { "name": "Rana" },
-    "frost-giant": { "name": "Gigante de escarcha" },
-    "gargoyle": { "name": "Gárgola" },
-    "gelatinous-cube": { "name": "Cubo gelatinoso" },
-    "ghast": { "name": "Gul" },
-    "ghost": { "name": "Fantasma" },
-    "ghoul": { "name": "Necrófago" },
-    "giant-ape": { "name": "Simio gigante" },
-    "giant-badger": { "name": "Tejón gigante" },
-    "giant-bat": { "name": "Murciélago gigante" },
-    "giant-boar": { "name": "Jabalí gigante" },
-    "giant-centipede": { "name": "Ciempiés gigante" },
-    "giant-constrictor-snake": { "name": "Serpiente constrictora gigante" },
-    "giant-crab": { "name": "Cangrejo gigante" },
-    "giant-crocodile": { "name": "Cocodrilo gigante" },
-    "giant-eagle": { "name": "Águila gigante" },
-    "giant-elk": { "name": "Alce gigante" },
-    "giant-fire-beetle": { "name": "Escarabajo de fuego gigante" },
-    "giant-frog": { "name": "Rana gigante" },
-    "giant-goat": { "name": "Cabra gigante" },
-    "giant-hyena": { "name": "Hiena gigante" },
-    "giant-lizard": { "name": "Lagarto gigante" },
-    "giant-octopus": { "name": "Pulpo gigante" },
-    "giant-owl": { "name": "Búho gigante" },
-    "giant-poisonous-snake": { "name": "Serpiente venenosa gigante" },
-    "giant-rat": { "name": "Rata gigante" },
-    "giant-rat-diseased": { "name": "Rata gigante (enferma)" },
-    "giant-scorpion": { "name": "Escorpión gigante" },
-    "giant-sea-horse": { "name": "Caballito de mar gigante" },
-    "giant-shark": { "name": "Tiburón gigante" },
-    "giant-spider": { "name": "Araña gigante" },
-    "giant-toad": { "name": "Sapo gigante" },
-    "giant-vulture": { "name": "Buitre gigante" },
-    "giant-wasp": { "name": "Avispa gigante" },
-    "giant-weasel": { "name": "Comadreja gigante" },
-    "giant-wolf-spider": { "name": "Araña lobo gigante" },
-    "gibbering-mouther": { "name": "Bocazas" },
-    "glabrezu": { "name": "Glabrezu" },
-    "gladiator": { "name": "Gladiador" },
-    "gnoll": { "name": "Gnoll" },
-    "goat": { "name": "Cabra" },
-    "goblin": { "name": "Trasgo" },
-    "gold-dragon-wyrmling": { "name": "Cría de dragón dorado" },
-    "gorgon": { "name": "Gorgona" },
-    "gray-ooze": { "name": "Limo gris" },
-    "green-dragon-wyrmling": { "name": "Cría de dragón verde" },
-    "green-hag": { "name": "Bruja verde" },
-    "grick": { "name": "Grick" },
-    "griffon": { "name": "Grifo" },
-    "grimlock": { "name": "Grimlock" },
-    "guard": { "name": "Guardia" },
-    "guardian-naga": { "name": "Naga guardiana" },
-    "gynosphinx": { "name": "Ginoesfinge" },
-    "half-red-dragon-veteran": { "name": "Veterano mitad dragón rojo" },
-    "harpy": { "name": "Arpía" },
-    "hawk": { "name": "Halcón" },
-    "hell-hound": { "name": "Perro infernal" },
-    "hezrou": { "name": "Hezrou" },
-    "hill-giant": { "name": "Gigante de las colinas" },
-    "hippogriff": { "name": "Hipogrifo" },
-    "hobgoblin": { "name": "Hobgoblin" },
-    "homunculus": { "name": "Homúnculo" },
-    "horned-devil": { "name": "Diablo cornudo" },
-    "hunter-shark": { "name": "Tiburón cazador" },
-    "hydra": { "name": "Hidra" },
-    "hyena": { "name": "Hiena" },
-    "ice-devil": { "name": "Diablo de hielo" },
-    "ice-mephit": { "name": "Mefita de hielo" },
-    "imp": { "name": "Diablillo" },
-    "invisible-stalker": { "name": "Acechador invisible" },
-    "iron-golem": { "name": "Gólem de hierro" },
-    "jackal": { "name": "Chacal" },
-    "killer-whale": { "name": "Orca" },
-    "knight": { "name": "Caballero" },
-    "kobold": { "name": "Kóbold" },
-    "kraken": { "name": "Kraken" },
-    "lamia": { "name": "Lamia" },
-    "lemure": { "name": "Lemur" },
-    "lich": { "name": "Liche" },
-    "lion": { "name": "León" },
-    "lizard": { "name": "Lagarto" },
-    "lizardfolk": { "name": "Hombre lagarto" },
-    "mage": { "name": "Mago" },
-    "magma-mephit": { "name": "Mefita de magma" },
-    "magmin": { "name": "Magmin" },
-    "mammoth": { "name": "Mamut" },
-    "manticore": { "name": "Mantícora" },
-    "marilith": { "name": "Marilith" },
-    "mastiff": { "name": "Mastín" },
-    "medusa": { "name": "Medusa" },
-    "merfolk": { "name": "Tritón" },
-    "merrow": { "name": "Merrow" },
-    "mimic": { "name": "Mímico" },
-    "minotaur": { "name": "Minotauro" },
-    "minotaur-skeleton": { "name": "Esqueleto de minotauro" },
-    "mule": { "name": "Mula" },
-    "mummy": { "name": "Momia" },
-    "mummy-lord": { "name": "Señor momia" },
-    "nalfeshnee": { "name": "Nalfeshnee" },
-    "night-hag": { "name": "Bruja de la noche" },
-    "nightmare": { "name": "Pesadilla" },
-    "noble": { "name": "Noble" },
-    "ochre-jelly": { "name": "Gelatina ocre" },
-    "octopus": { "name": "Pulpo" },
-    "ogre": { "name": "Ogro" },
-    "ogre-zombie": { "name": "Zombi ogro" },
-    "oni": { "name": "Oni" },
-    "orc": { "name": "Orco" },
-    "otyugh": { "name": "Otyugh" },
-    "owl": { "name": "Búho" },
-    "owlbear": { "name": "Oso búho" },
-    "panther": { "name": "Pantera" },
-    "pegasus": { "name": "Pegaso" },
-    "phase-spider": { "name": "Araña de fase" },
-    "pit-fiend": { "name": "Diablo del pozo" },
-    "planetar": { "name": "Planetar" },
-    "plesiosaurus": { "name": "Plesiosaurio" },
-    "poisonous-snake": { "name": "Serpiente venenosa" },
-    "polar-bear": { "name": "Oso polar" },
-    "pony": { "name": "Poni" },
-    "priest": { "name": "Sacerdote" },
-    "pseudodragon": { "name": "Pseudodragón" },
-    "purple-worm": { "name": "Gusano púrpura" },
-    "quasit": { "name": "Quasit" },
-    "quipper": { "name": "Quipper" },
-    "rakshasa": { "name": "Rakshasa" },
-    "rat": { "name": "Rata" },
-    "raven": { "name": "Cuervo" },
-    "red-dragon-wyrmling": { "name": "Cría de dragón rojo" },
-    "reef-shark": { "name": "Tiburón de arrecife" },
-    "remorhaz": { "name": "Remorhaz" },
-    "rhinoceros": { "name": "Rinoceronte" },
-    "riding-horse": { "name": "Caballo de montar" },
-    "roc": { "name": "Roc" },
-    "roper": { "name": "Roper" },
-    "rug-of-smothering": { "name": "Alfombra asfixiante" },
-    "rust-monster": { "name": "Monstruo oxidador" },
-    "saber-toothed-tiger": { "name": "Tigre dientes de sable" },
-    "sahuagin": { "name": "Sahuagin" },
-    "salamander": { "name": "Salamandra" },
-    "satyr": { "name": "Sátiro" },
-    "scorpion": { "name": "Escorpión" },
-    "scout": { "name": "Explorador" },
-    "sea-hag": { "name": "Bruja del mar" },
-    "sea-horse": { "name": "Caballito de mar" },
-    "shadow": { "name": "Sombra" },
-    "shambling-mound": { "name": "Montículo tambaleante" },
-    "shield-guardian": { "name": "Guardián escudo" },
-    "shrieker": { "name": "Chillón" },
-    "silver-dragon-wyrmling": { "name": "Cría de dragón de plata" },
-    "skeleton": { "name": "Esqueleto" },
-    "solar": { "name": "Solar" },
-    "specter": { "name": "Espectro" },
-    "spider": { "name": "Araña" },
-    "spirit-naga": { "name": "Naga espiritual" },
-    "sprite": { "name": "Sprite" },
-    "spy": { "name": "Espía" },
-    "steam-mephit": { "name": "Mefita de vapor" },
-    "stirge": { "name": "Stirge" },
-    "stone-giant": { "name": "Gigante de piedra" },
-    "stone-golem": { "name": "Gólem de piedra" },
-    "storm-giant": { "name": "Gigante de las tormentas" },
-    "succubus-incubus": { "name": "Súcubo/Íncubo" },
-    "swarm-of-bats": { "name": "Enjambre de murciélagos" },
-    "swarm-of-beetles": { "name": "Enjambre de escarabajos" },
-    "swarm-of-centipedes": { "name": "Enjambre de ciempiés" },
-    "swarm-of-insects": { "name": "Enjambre de insectos" },
-    "swarm-of-poisonous-snakes": { "name": "Enjambre de serpientes venenosas" },
-    "swarm-of-quippers": { "name": "Enjambre de quippers" },
-    "swarm-of-rats": { "name": "Enjambre de ratas" },
-    "swarm-of-ravens": { "name": "Enjambre de cuervos" },
-    "swarm-of-spiders": { "name": "Enjambre de arañas" },
-    "swarm-of-wasps": { "name": "Enjambre de avispas" },
-    "tarrasque": { "name": "Tarrasca" },
-    "thug": { "name": "Matón" },
-    "tiger": { "name": "Tigre" },
-    "treant": { "name": "Treant" },
-    "tribal-warrior": { "name": "Guerrero tribal" },
-    "triceratops": { "name": "Triceratops" },
-    "troll": { "name": "Trol" },
-    "tyrannosaurus-rex": { "name": "Tiranosaurio Rex" },
-    "unicorn": { "name": "Unicornio" },
-    "vampire-spawn": { "name": "Vástago de vampiro" },
-    "vampire-bat": { "name": "Vampiro (forma de murciélago)" },
-    "vampire-mist": { "name": "Vampiro (forma de niebla)" },
-    "vampire-vampire": { "name": "Vampiro (forma de vampiro)" },
-    "veteran": { "name": "Veterano" },
-    "violet-fungus": { "name": "Hongo violeta" },
-    "vrock": { "name": "Vrock" },
-    "vulture": { "name": "Buitre" },
-    "warhorse": { "name": "Caballo de guerra" },
-    "warhorse-skeleton": { "name": "Esqueleto de caballo de guerra" },
-    "water-elemental": { "name": "Elemental de agua" },
-    "weasel": { "name": "Comadreja" },
-    "werebear-bear": { "name": "Hombre oso (forma de oso)" },
-    "werebear-human": { "name": "Hombre oso (forma humana)" },
-    "werebear-hybrid": { "name": "Hombre oso (forma híbrida)" },
-    "wereboar-boar": { "name": "Hombre jabalí (forma de jabalí)" },
-    "wereboar-human": { "name": "Hombre jabalí (forma humana)" },
-    "wereboar-hybrid": { "name": "Hombre jabalí (forma híbrida)" },
-    "wererat-human": { "name": "Hombre rata (forma humana)" },
-    "wererat-hybrid": { "name": "Hombre rata (forma híbrida)" },
-    "wererat-rat": { "name": "Hombre rata (forma de rata)" },
-    "weretiger-human": { "name": "Hombre tigre (forma humana)" },
-    "weretiger-hybrid": { "name": "Hombre tigre (forma híbrida)" },
-    "weretiger-tiger": { "name": "Hombre tigre (forma de tigre)" },
-    "werewolf-human": { "name": "Hombre lobo (forma humana)" },
-    "werewolf-hybrid": { "name": "Hombre lobo (forma híbrida)" },
-    "werewolf-wolf": { "name": "Hombre lobo (forma de lobo)" },
-    "white-dragon-wyrmling": { "name": "Cría de dragón blanco" },
-    "wight": { "name": "Wight" },
-    "will-o-wisp": { "name": "Fuego fatuo" },
-    "winter-wolf": { "name": "Lobo invernal" },
-    "wolf": { "name": "Lobo" },
-    "worg": { "name": "Worg" },
-    "wraith": { "name": "Aparición" },
-    "wyvern": { "name": "Viverna" },
-    "xorn": { "name": "Xorn" },
-    "young-black-dragon": { "name": "Dragón negro joven" },
-    "young-blue-dragon": { "name": "Dragón azul joven" },
-    "young-brass-dragon": { "name": "Dragón de latón joven" },
-    "young-bronze-dragon": { "name": "Dragón de bronce joven" },
-    "young-copper-dragon": { "name": "Dragón de cobre joven" },
-    "young-gold-dragon": { "name": "Dragón dorado joven" },
-    "young-green-dragon": { "name": "Dragón verde joven" },
-    "young-red-dragon": { "name": "Dragón rojo joven" },
-    "young-silver-dragon": { "name": "Dragón de plata joven" },
-    "young-white-dragon": { "name": "Dragón blanco joven" },
-    "zombie": { "name": "Zombi" }
+    "aboleth": {
+      "name": "Aboleth"
+    },
+    "acolyte": {
+      "name": "Acólito"
+    },
+    "adult-black-dragon": {
+      "name": "Dragón negro adulto"
+    },
+    "adult-blue-dragon": {
+      "name": "Dragón azul adulto"
+    },
+    "adult-brass-dragon": {
+      "name": "Dragón de latón adulto"
+    },
+    "adult-bronze-dragon": {
+      "name": "Dragón de bronce adulto"
+    },
+    "adult-copper-dragon": {
+      "name": "Dragón de cobre adulto"
+    },
+    "adult-gold-dragon": {
+      "name": "Dragón dorado adulto"
+    },
+    "adult-green-dragon": {
+      "name": "Dragón verde adulto"
+    },
+    "adult-red-dragon": {
+      "name": "Dragón rojo adulto"
+    },
+    "adult-silver-dragon": {
+      "name": "Dragón de plata adulto"
+    },
+    "adult-white-dragon": {
+      "name": "Dragón blanco adulto"
+    },
+    "air-elemental": {
+      "name": "Elemental de aire"
+    },
+    "ancient-black-dragon": {
+      "name": "Dragón negro anciano"
+    },
+    "ancient-blue-dragon": {
+      "name": "Dragón azul anciano"
+    },
+    "ancient-brass-dragon": {
+      "name": "Dragón de latón anciano"
+    },
+    "ancient-bronze-dragon": {
+      "name": "Dragón de bronce anciano"
+    },
+    "ancient-copper-dragon": {
+      "name": "Dragón de cobre anciano"
+    },
+    "ancient-gold-dragon": {
+      "name": "Dragón dorado anciano"
+    },
+    "ancient-green-dragon": {
+      "name": "Dragón verde anciano"
+    },
+    "ancient-red-dragon": {
+      "name": "Dragón rojo anciano"
+    },
+    "ancient-silver-dragon": {
+      "name": "Dragón de plata anciano"
+    },
+    "ancient-white-dragon": {
+      "name": "Dragón blanco anciano"
+    },
+    "androsphinx": {
+      "name": "Androesfinge"
+    },
+    "animated-armor": {
+      "name": "Armadura animada"
+    },
+    "ankheg": {
+      "name": "Anquheg"
+    },
+    "ape": {
+      "name": "Simio"
+    },
+    "archmage": {
+      "name": "Archimago"
+    },
+    "assassin": {
+      "name": "Asesino"
+    },
+    "awakened-shrub": {
+      "name": "Arbusto despierto"
+    },
+    "awakened-tree": {
+      "name": "Árbol despierto"
+    },
+    "axe-beak": {
+      "name": "Pico hacha"
+    },
+    "azer": {
+      "name": "Azer"
+    },
+    "baboon": {
+      "name": "Babuino"
+    },
+    "badger": {
+      "name": "Tejón"
+    },
+    "balor": {
+      "name": "Balor"
+    },
+    "bandit": {
+      "name": "Bandido"
+    },
+    "bandit-captain": {
+      "name": "Capitán bandido"
+    },
+    "barbed-devil": {
+      "name": "Diablo espinoso"
+    },
+    "basilisk": {
+      "name": "Basilisco"
+    },
+    "bat": {
+      "name": "Murciélago"
+    },
+    "bearded-devil": {
+      "name": "Diablo barbudo"
+    },
+    "behir": {
+      "name": "Behir"
+    },
+    "berserker": {
+      "name": "Berserker"
+    },
+    "black-bear": {
+      "name": "Oso negro"
+    },
+    "black-dragon-wyrmling": {
+      "name": "Cría de dragón negro"
+    },
+    "black-pudding": {
+      "name": "Pudin negro"
+    },
+    "blink-dog": {
+      "name": "Perro parpadeante"
+    },
+    "blood-hawk": {
+      "name": "Halcón sanguinario"
+    },
+    "blue-dragon-wyrmling": {
+      "name": "Cría de dragón azul"
+    },
+    "boar": {
+      "name": "Jabalí"
+    },
+    "bone-devil": {
+      "name": "Diablo óseo"
+    },
+    "brass-dragon-wyrmling": {
+      "name": "Cría de dragón de latón"
+    },
+    "bronze-dragon-wyrmling": {
+      "name": "Cría de dragón de bronce"
+    },
+    "brown-bear": {
+      "name": "Oso pardo"
+    },
+    "bugbear": {
+      "name": "Osgo"
+    },
+    "bulette": {
+      "name": "Bulette"
+    },
+    "camel": {
+      "name": "Camello"
+    },
+    "cat": {
+      "name": "Gato"
+    },
+    "centaur": {
+      "name": "Centauro"
+    },
+    "chain-devil": {
+      "name": "Diablo de las cadenas"
+    },
+    "chimera": {
+      "name": "Quimera"
+    },
+    "chuul": {
+      "name": "Chuul"
+    },
+    "clay-golem": {
+      "name": "Gólem de arcilla"
+    },
+    "cloaker": {
+      "name": "Cloaker"
+    },
+    "cloud-giant": {
+      "name": "Gigante de las nubes"
+    },
+    "cockatrice": {
+      "name": "Cocatriz"
+    },
+    "commoner": {
+      "name": "Plebeyo"
+    },
+    "constrictor-snake": {
+      "name": "Serpiente constrictora"
+    },
+    "copper-dragon-wyrmling": {
+      "name": "Cría de dragón de cobre"
+    },
+    "couatl": {
+      "name": "Couatl"
+    },
+    "crab": {
+      "name": "Cangrejo"
+    },
+    "crocodile": {
+      "name": "Cocodrilo"
+    },
+    "cult-fanatic": {
+      "name": "Fanático del culto"
+    },
+    "cultist": {
+      "name": "Sectario"
+    },
+    "darkmantle": {
+      "name": "Manto oscuro"
+    },
+    "death-dog": {
+      "name": "Perro de la muerte"
+    },
+    "deep-gnome-svirfneblin": {
+      "name": "Gnomo de las profundidades (Svirfneblin)"
+    },
+    "deer": {
+      "name": "Ciervo"
+    },
+    "deva": {
+      "name": "Deva"
+    },
+    "dire-wolf": {
+      "name": "Lobo terrible"
+    },
+    "djinni": {
+      "name": "Djinni"
+    },
+    "doppelganger": {
+      "name": "Doppelganger"
+    },
+    "draft-horse": {
+      "name": "Caballo de tiro"
+    },
+    "dragon-turtle": {
+      "name": "Tortuga dragón"
+    },
+    "dretch": {
+      "name": "Dretch"
+    },
+    "drider": {
+      "name": "Drider"
+    },
+    "drow": {
+      "name": "Drow"
+    },
+    "druid": {
+      "name": "Druida"
+    },
+    "dryad": {
+      "name": "Dríada"
+    },
+    "duergar": {
+      "name": "Duergar"
+    },
+    "dust-mephit": {
+      "name": "Mefita de polvo"
+    },
+    "eagle": {
+      "name": "Águila"
+    },
+    "earth-elemental": {
+      "name": "Elemental de tierra"
+    },
+    "efreeti": {
+      "name": "Efreeti"
+    },
+    "elephant": {
+      "name": "Elefante"
+    },
+    "elk": {
+      "name": "Alce"
+    },
+    "erinyes": {
+      "name": "Erinia"
+    },
+    "ettercap": {
+      "name": "Ettercap"
+    },
+    "ettin": {
+      "name": "Ettin"
+    },
+    "fire-elemental": {
+      "name": "Elemental de fuego"
+    },
+    "fire-giant": {
+      "name": "Gigante de fuego"
+    },
+    "flesh-golem": {
+      "name": "Gólem de carne"
+    },
+    "flying-snake": {
+      "name": "Serpiente voladora"
+    },
+    "flying-sword": {
+      "name": "Espada voladora"
+    },
+    "frog": {
+      "name": "Rana"
+    },
+    "frost-giant": {
+      "name": "Gigante de escarcha"
+    },
+    "gargoyle": {
+      "name": "Gárgola"
+    },
+    "gelatinous-cube": {
+      "name": "Cubo gelatinoso"
+    },
+    "ghast": {
+      "name": "Gul"
+    },
+    "ghost": {
+      "name": "Fantasma"
+    },
+    "ghoul": {
+      "name": "Necrófago"
+    },
+    "giant-ape": {
+      "name": "Simio gigante"
+    },
+    "giant-badger": {
+      "name": "Tejón gigante"
+    },
+    "giant-bat": {
+      "name": "Murciélago gigante"
+    },
+    "giant-boar": {
+      "name": "Jabalí gigante"
+    },
+    "giant-centipede": {
+      "name": "Ciempiés gigante"
+    },
+    "giant-constrictor-snake": {
+      "name": "Serpiente constrictora gigante"
+    },
+    "giant-crab": {
+      "name": "Cangrejo gigante"
+    },
+    "giant-crocodile": {
+      "name": "Cocodrilo gigante"
+    },
+    "giant-eagle": {
+      "name": "Águila gigante"
+    },
+    "giant-elk": {
+      "name": "Alce gigante"
+    },
+    "giant-fire-beetle": {
+      "name": "Escarabajo de fuego gigante"
+    },
+    "giant-frog": {
+      "name": "Rana gigante"
+    },
+    "giant-goat": {
+      "name": "Cabra gigante"
+    },
+    "giant-hyena": {
+      "name": "Hiena gigante"
+    },
+    "giant-lizard": {
+      "name": "Lagarto gigante"
+    },
+    "giant-octopus": {
+      "name": "Pulpo gigante"
+    },
+    "giant-owl": {
+      "name": "Búho gigante"
+    },
+    "giant-poisonous-snake": {
+      "name": "Serpiente venenosa gigante"
+    },
+    "giant-rat": {
+      "name": "Rata gigante"
+    },
+    "giant-rat-diseased": {
+      "name": "Rata gigante (enferma)"
+    },
+    "giant-scorpion": {
+      "name": "Escorpión gigante"
+    },
+    "giant-sea-horse": {
+      "name": "Caballito de mar gigante"
+    },
+    "giant-shark": {
+      "name": "Tiburón gigante"
+    },
+    "giant-spider": {
+      "name": "Araña gigante"
+    },
+    "giant-toad": {
+      "name": "Sapo gigante"
+    },
+    "giant-vulture": {
+      "name": "Buitre gigante"
+    },
+    "giant-wasp": {
+      "name": "Avispa gigante"
+    },
+    "giant-weasel": {
+      "name": "Comadreja gigante"
+    },
+    "giant-wolf-spider": {
+      "name": "Araña lobo gigante"
+    },
+    "gibbering-mouther": {
+      "name": "Bocazas"
+    },
+    "glabrezu": {
+      "name": "Glabrezu"
+    },
+    "gladiator": {
+      "name": "Gladiador"
+    },
+    "gnoll": {
+      "name": "Gnoll"
+    },
+    "goat": {
+      "name": "Cabra"
+    },
+    "goblin": {
+      "name": "Trasgo"
+    },
+    "gold-dragon-wyrmling": {
+      "name": "Cría de dragón dorado"
+    },
+    "gorgon": {
+      "name": "Gorgona"
+    },
+    "gray-ooze": {
+      "name": "Limo gris"
+    },
+    "green-dragon-wyrmling": {
+      "name": "Cría de dragón verde"
+    },
+    "green-hag": {
+      "name": "Bruja verde"
+    },
+    "grick": {
+      "name": "Grick"
+    },
+    "griffon": {
+      "name": "Grifo"
+    },
+    "grimlock": {
+      "name": "Grimlock"
+    },
+    "guard": {
+      "name": "Guardia"
+    },
+    "guardian-naga": {
+      "name": "Naga guardiana"
+    },
+    "gynosphinx": {
+      "name": "Ginoesfinge"
+    },
+    "half-red-dragon-veteran": {
+      "name": "Veterano mitad dragón rojo"
+    },
+    "harpy": {
+      "name": "Arpía"
+    },
+    "hawk": {
+      "name": "Halcón"
+    },
+    "hell-hound": {
+      "name": "Perro infernal"
+    },
+    "hezrou": {
+      "name": "Hezrou"
+    },
+    "hill-giant": {
+      "name": "Gigante de las colinas"
+    },
+    "hippogriff": {
+      "name": "Hipogrifo"
+    },
+    "hobgoblin": {
+      "name": "Hobgoblin"
+    },
+    "homunculus": {
+      "name": "Homúnculo"
+    },
+    "horned-devil": {
+      "name": "Diablo cornudo"
+    },
+    "hunter-shark": {
+      "name": "Tiburón cazador"
+    },
+    "hydra": {
+      "name": "Hidra"
+    },
+    "hyena": {
+      "name": "Hiena"
+    },
+    "ice-devil": {
+      "name": "Diablo de hielo"
+    },
+    "ice-mephit": {
+      "name": "Mefita de hielo"
+    },
+    "imp": {
+      "name": "Diablillo"
+    },
+    "invisible-stalker": {
+      "name": "Acechador invisible"
+    },
+    "iron-golem": {
+      "name": "Gólem de hierro"
+    },
+    "jackal": {
+      "name": "Chacal"
+    },
+    "killer-whale": {
+      "name": "Orca"
+    },
+    "knight": {
+      "name": "Caballero"
+    },
+    "kobold": {
+      "name": "Kóbold"
+    },
+    "kraken": {
+      "name": "Kraken"
+    },
+    "lamia": {
+      "name": "Lamia"
+    },
+    "lemure": {
+      "name": "Lemur"
+    },
+    "lich": {
+      "name": "Liche"
+    },
+    "lion": {
+      "name": "León"
+    },
+    "lizard": {
+      "name": "Lagarto"
+    },
+    "lizardfolk": {
+      "name": "Hombre lagarto"
+    },
+    "mage": {
+      "name": "Mago"
+    },
+    "magma-mephit": {
+      "name": "Mefita de magma"
+    },
+    "magmin": {
+      "name": "Magmin"
+    },
+    "mammoth": {
+      "name": "Mamut"
+    },
+    "manticore": {
+      "name": "Mantícora"
+    },
+    "marilith": {
+      "name": "Marilith"
+    },
+    "mastiff": {
+      "name": "Mastín"
+    },
+    "medusa": {
+      "name": "Medusa"
+    },
+    "merfolk": {
+      "name": "Tritón"
+    },
+    "merrow": {
+      "name": "Merrow"
+    },
+    "mimic": {
+      "name": "Mímico"
+    },
+    "minotaur": {
+      "name": "Minotauro"
+    },
+    "minotaur-skeleton": {
+      "name": "Esqueleto de minotauro"
+    },
+    "mule": {
+      "name": "Mula"
+    },
+    "mummy": {
+      "name": "Momia"
+    },
+    "mummy-lord": {
+      "name": "Señor momia"
+    },
+    "nalfeshnee": {
+      "name": "Nalfeshnee"
+    },
+    "night-hag": {
+      "name": "Bruja de la noche"
+    },
+    "nightmare": {
+      "name": "Pesadilla"
+    },
+    "noble": {
+      "name": "Noble"
+    },
+    "ochre-jelly": {
+      "name": "Gelatina ocre"
+    },
+    "octopus": {
+      "name": "Pulpo"
+    },
+    "ogre": {
+      "name": "Ogro"
+    },
+    "ogre-zombie": {
+      "name": "Zombi ogro"
+    },
+    "oni": {
+      "name": "Oni"
+    },
+    "orc": {
+      "name": "Orco"
+    },
+    "otyugh": {
+      "name": "Otyugh"
+    },
+    "owl": {
+      "name": "Búho"
+    },
+    "owlbear": {
+      "name": "Oso búho"
+    },
+    "panther": {
+      "name": "Pantera"
+    },
+    "pegasus": {
+      "name": "Pegaso"
+    },
+    "phase-spider": {
+      "name": "Araña de fase"
+    },
+    "pit-fiend": {
+      "name": "Diablo del pozo"
+    },
+    "planetar": {
+      "name": "Planetar"
+    },
+    "plesiosaurus": {
+      "name": "Plesiosaurio"
+    },
+    "poisonous-snake": {
+      "name": "Serpiente venenosa"
+    },
+    "polar-bear": {
+      "name": "Oso polar"
+    },
+    "pony": {
+      "name": "Poni"
+    },
+    "priest": {
+      "name": "Sacerdote"
+    },
+    "pseudodragon": {
+      "name": "Pseudodragón"
+    },
+    "purple-worm": {
+      "name": "Gusano púrpura"
+    },
+    "quasit": {
+      "name": "Quasit"
+    },
+    "quipper": {
+      "name": "Quipper"
+    },
+    "rakshasa": {
+      "name": "Rakshasa"
+    },
+    "rat": {
+      "name": "Rata"
+    },
+    "raven": {
+      "name": "Cuervo"
+    },
+    "red-dragon-wyrmling": {
+      "name": "Cría de dragón rojo"
+    },
+    "reef-shark": {
+      "name": "Tiburón de arrecife"
+    },
+    "remorhaz": {
+      "name": "Remorhaz"
+    },
+    "rhinoceros": {
+      "name": "Rinoceronte"
+    },
+    "riding-horse": {
+      "name": "Caballo de montar"
+    },
+    "roc": {
+      "name": "Roc"
+    },
+    "roper": {
+      "name": "Roper"
+    },
+    "rug-of-smothering": {
+      "name": "Alfombra asfixiante"
+    },
+    "rust-monster": {
+      "name": "Monstruo oxidador"
+    },
+    "saber-toothed-tiger": {
+      "name": "Tigre dientes de sable"
+    },
+    "sahuagin": {
+      "name": "Sahuagin"
+    },
+    "salamander": {
+      "name": "Salamandra"
+    },
+    "satyr": {
+      "name": "Sátiro"
+    },
+    "scorpion": {
+      "name": "Escorpión"
+    },
+    "scout": {
+      "name": "Explorador"
+    },
+    "sea-hag": {
+      "name": "Bruja del mar"
+    },
+    "sea-horse": {
+      "name": "Caballito de mar"
+    },
+    "shadow": {
+      "name": "Sombra"
+    },
+    "shambling-mound": {
+      "name": "Montículo tambaleante"
+    },
+    "shield-guardian": {
+      "name": "Guardián escudo"
+    },
+    "shrieker": {
+      "name": "Chillón"
+    },
+    "silver-dragon-wyrmling": {
+      "name": "Cría de dragón de plata"
+    },
+    "skeleton": {
+      "name": "Esqueleto"
+    },
+    "solar": {
+      "name": "Solar"
+    },
+    "specter": {
+      "name": "Espectro"
+    },
+    "spider": {
+      "name": "Araña"
+    },
+    "spirit-naga": {
+      "name": "Naga espiritual"
+    },
+    "sprite": {
+      "name": "Sprite"
+    },
+    "spy": {
+      "name": "Espía"
+    },
+    "steam-mephit": {
+      "name": "Mefita de vapor"
+    },
+    "stirge": {
+      "name": "Stirge"
+    },
+    "stone-giant": {
+      "name": "Gigante de piedra"
+    },
+    "stone-golem": {
+      "name": "Gólem de piedra"
+    },
+    "storm-giant": {
+      "name": "Gigante de las tormentas"
+    },
+    "succubus-incubus": {
+      "name": "Súcubo/Íncubo"
+    },
+    "swarm-of-bats": {
+      "name": "Enjambre de murciélagos"
+    },
+    "swarm-of-beetles": {
+      "name": "Enjambre de escarabajos"
+    },
+    "swarm-of-centipedes": {
+      "name": "Enjambre de ciempiés"
+    },
+    "swarm-of-insects": {
+      "name": "Enjambre de insectos"
+    },
+    "swarm-of-poisonous-snakes": {
+      "name": "Enjambre de serpientes venenosas"
+    },
+    "swarm-of-quippers": {
+      "name": "Enjambre de quippers"
+    },
+    "swarm-of-rats": {
+      "name": "Enjambre de ratas"
+    },
+    "swarm-of-ravens": {
+      "name": "Enjambre de cuervos"
+    },
+    "swarm-of-spiders": {
+      "name": "Enjambre de arañas"
+    },
+    "swarm-of-wasps": {
+      "name": "Enjambre de avispas"
+    },
+    "tarrasque": {
+      "name": "Tarrasca"
+    },
+    "thug": {
+      "name": "Matón"
+    },
+    "tiger": {
+      "name": "Tigre"
+    },
+    "treant": {
+      "name": "Treant"
+    },
+    "tribal-warrior": {
+      "name": "Guerrero tribal"
+    },
+    "triceratops": {
+      "name": "Triceratops"
+    },
+    "troll": {
+      "name": "Trol"
+    },
+    "tyrannosaurus-rex": {
+      "name": "Tiranosaurio Rex"
+    },
+    "unicorn": {
+      "name": "Unicornio"
+    },
+    "vampire-spawn": {
+      "name": "Vástago de vampiro"
+    },
+    "vampire-bat": {
+      "name": "Vampiro (forma de murciélago)"
+    },
+    "vampire-mist": {
+      "name": "Vampiro (forma de niebla)"
+    },
+    "vampire-vampire": {
+      "name": "Vampiro (forma de vampiro)"
+    },
+    "veteran": {
+      "name": "Veterano"
+    },
+    "violet-fungus": {
+      "name": "Hongo violeta"
+    },
+    "vrock": {
+      "name": "Vrock"
+    },
+    "vulture": {
+      "name": "Buitre"
+    },
+    "warhorse": {
+      "name": "Caballo de guerra"
+    },
+    "warhorse-skeleton": {
+      "name": "Esqueleto de caballo de guerra"
+    },
+    "water-elemental": {
+      "name": "Elemental de agua"
+    },
+    "weasel": {
+      "name": "Comadreja"
+    },
+    "werebear-bear": {
+      "name": "Hombre oso (forma de oso)"
+    },
+    "werebear-human": {
+      "name": "Hombre oso (forma humana)"
+    },
+    "werebear-hybrid": {
+      "name": "Hombre oso (forma híbrida)"
+    },
+    "wereboar-boar": {
+      "name": "Hombre jabalí (forma de jabalí)"
+    },
+    "wereboar-human": {
+      "name": "Hombre jabalí (forma humana)"
+    },
+    "wereboar-hybrid": {
+      "name": "Hombre jabalí (forma híbrida)"
+    },
+    "wererat-human": {
+      "name": "Hombre rata (forma humana)"
+    },
+    "wererat-hybrid": {
+      "name": "Hombre rata (forma híbrida)"
+    },
+    "wererat-rat": {
+      "name": "Hombre rata (forma de rata)"
+    },
+    "weretiger-human": {
+      "name": "Hombre tigre (forma humana)"
+    },
+    "weretiger-hybrid": {
+      "name": "Hombre tigre (forma híbrida)"
+    },
+    "weretiger-tiger": {
+      "name": "Hombre tigre (forma de tigre)"
+    },
+    "werewolf-human": {
+      "name": "Hombre lobo (forma humana)"
+    },
+    "werewolf-hybrid": {
+      "name": "Hombre lobo (forma híbrida)"
+    },
+    "werewolf-wolf": {
+      "name": "Hombre lobo (forma de lobo)"
+    },
+    "white-dragon-wyrmling": {
+      "name": "Cría de dragón blanco"
+    },
+    "wight": {
+      "name": "Wight"
+    },
+    "will-o-wisp": {
+      "name": "Fuego fatuo"
+    },
+    "winter-wolf": {
+      "name": "Lobo invernal"
+    },
+    "wolf": {
+      "name": "Lobo"
+    },
+    "worg": {
+      "name": "Worg"
+    },
+    "wraith": {
+      "name": "Aparición"
+    },
+    "wyvern": {
+      "name": "Viverna"
+    },
+    "xorn": {
+      "name": "Xorn"
+    },
+    "young-black-dragon": {
+      "name": "Dragón negro joven"
+    },
+    "young-blue-dragon": {
+      "name": "Dragón azul joven"
+    },
+    "young-brass-dragon": {
+      "name": "Dragón de latón joven"
+    },
+    "young-bronze-dragon": {
+      "name": "Dragón de bronce joven"
+    },
+    "young-copper-dragon": {
+      "name": "Dragón de cobre joven"
+    },
+    "young-gold-dragon": {
+      "name": "Dragón dorado joven"
+    },
+    "young-green-dragon": {
+      "name": "Dragón verde joven"
+    },
+    "young-red-dragon": {
+      "name": "Dragón rojo joven"
+    },
+    "young-silver-dragon": {
+      "name": "Dragón de plata joven"
+    },
+    "young-white-dragon": {
+      "name": "Dragón blanco joven"
+    },
+    "zombie": {
+      "name": "Zombi"
+    }
+  },
+  "equipment-categories": {
+    "adventuring-gear": {
+      "name": "Equipo de aventura"
+    },
+    "ammunition": {
+      "name": "Munición"
+    },
+    "arcane-foci": {
+      "name": "Focos arcanos"
+    },
+    "armor": {
+      "name": "Armaduras"
+    },
+    "artisans-tools": {
+      "name": "Herramientas de artesano"
+    },
+    "druidic-foci": {
+      "name": "Focos druídicos"
+    },
+    "equipment-packs": {
+      "name": "Equipos preparados"
+    },
+    "gaming-sets": {
+      "name": "Juegos de mesa"
+    },
+    "heavy-armor": {
+      "name": "Armadura pesada"
+    },
+    "holy-symbols": {
+      "name": "Símbolos sagrados"
+    },
+    "kits": {
+      "name": "Estuches"
+    },
+    "land-vehicles": {
+      "name": "Vehículos terrestres"
+    },
+    "light-armor": {
+      "name": "Armadura ligera"
+    },
+    "martial-melee-weapons": {
+      "name": "Armas marciales cuerpo a cuerpo"
+    },
+    "martial-ranged-weapons": {
+      "name": "Armas marciales a distancia"
+    },
+    "martial-weapons": {
+      "name": "Armas marciales"
+    },
+    "medium-armor": {
+      "name": "Armadura media"
+    },
+    "melee-weapons": {
+      "name": "Armas cuerpo a cuerpo"
+    },
+    "mounts-and-other-animals": {
+      "name": "Monturas y otros animales"
+    },
+    "mounts-and-vehicles": {
+      "name": "Monturas y vehículos"
+    },
+    "musical-instruments": {
+      "name": "Instrumentos musicales"
+    },
+    "other-tools": {
+      "name": "Otras herramientas"
+    },
+    "potion": {
+      "name": "Pociones"
+    },
+    "ranged-weapons": {
+      "name": "Armas a distancia"
+    },
+    "ring": {
+      "name": "Anillos"
+    },
+    "rod": {
+      "name": "Varas"
+    },
+    "scroll": {
+      "name": "Pergaminos"
+    },
+    "shields": {
+      "name": "Escudos"
+    },
+    "simple-melee-weapons": {
+      "name": "Armas sencillas cuerpo a cuerpo"
+    },
+    "simple-ranged-weapons": {
+      "name": "Armas sencillas a distancia"
+    },
+    "simple-weapons": {
+      "name": "Armas sencillas"
+    },
+    "staff": {
+      "name": "Bastones"
+    },
+    "standard-gear": {
+      "name": "Equipo común"
+    },
+    "tack-harness-and-drawn-vehicles": {
+      "name": "Arreos, guarniciones y vehículos de tiro"
+    },
+    "tools": {
+      "name": "Herramientas"
+    },
+    "wand": {
+      "name": "Varitas"
+    },
+    "waterborne-vehicles": {
+      "name": "Vehículos acuáticos"
+    },
+    "weapon": {
+      "name": "Armas"
+    },
+    "wondrous-items": {
+      "name": "Objetos maravillosos"
+    }
+  },
+  "proficiencies": {
+    "all-armor": {
+      "name": "Todas las armaduras"
+    },
+    "light-armor": {
+      "name": "Armadura ligera"
+    },
+    "medium-armor": {
+      "name": "Armadura media"
+    },
+    "heavy-armor": {
+      "name": "Armadura pesada"
+    },
+    "shields": {
+      "name": "Escudos"
+    },
+    "simple-weapons": {
+      "name": "Armas sencillas"
+    },
+    "martial-weapons": {
+      "name": "Armas marciales"
+    },
+    "padded-armor": {
+      "name": "Armadura acolchada"
+    },
+    "leather-armor": {
+      "name": "Armadura de cuero"
+    },
+    "studded-leather-armor": {
+      "name": "Armadura de cuero tachonado"
+    },
+    "hide-armor": {
+      "name": "Armadura de pieles"
+    },
+    "chain-shirt": {
+      "name": "Camisote de mallas"
+    },
+    "scale-mail": {
+      "name": "Cota de escamas"
+    },
+    "breastplate": {
+      "name": "Coraza"
+    },
+    "half-plate-armor": {
+      "name": "Media placa"
+    },
+    "ring-mail": {
+      "name": "Cota de anillas"
+    },
+    "chain-mail": {
+      "name": "Cota de mallas"
+    },
+    "splint-armor": {
+      "name": "Armadura de bandas"
+    },
+    "plate-armor": {
+      "name": "Armadura de placas"
+    },
+    "battleaxes": {
+      "name": "Hachas de batalla"
+    },
+    "blowguns": {
+      "name": "Cerbatanas"
+    },
+    "clubs": {
+      "name": "Garrotes"
+    },
+    "crossbows-heavy": {
+      "name": "Ballestas pesadas"
+    },
+    "crossbows-light": {
+      "name": "Ballestas ligeras"
+    },
+    "daggers": {
+      "name": "Dagas"
+    },
+    "darts": {
+      "name": "Dardos"
+    },
+    "flails": {
+      "name": "Mangules"
+    },
+    "glaives": {
+      "name": "Gujas"
+    },
+    "greataxes": {
+      "name": "Grandes hachas"
+    },
+    "greatclubs": {
+      "name": "Grandes garrotes"
+    },
+    "greatswords": {
+      "name": "Espadones"
+    },
+    "halberds": {
+      "name": "Alabardas"
+    },
+    "hand-crossbows": {
+      "name": "Ballestas de mano"
+    },
+    "handaxes": {
+      "name": "Hachas de mano"
+    },
+    "javelins": {
+      "name": "Jabalinas"
+    },
+    "lances": {
+      "name": "Lanzas de caballería"
+    },
+    "light-hammers": {
+      "name": "Martillos ligeros"
+    },
+    "longbows": {
+      "name": "Arcos largos"
+    },
+    "longswords": {
+      "name": "Espadas largas"
+    },
+    "maces": {
+      "name": "Mazas"
+    },
+    "mauls": {
+      "name": "Mazos"
+    },
+    "morningstars": {
+      "name": "Luceros del alba"
+    },
+    "nets": {
+      "name": "Redes"
+    },
+    "pikes": {
+      "name": "Picas"
+    },
+    "quarterstaffs": {
+      "name": "Bastones"
+    },
+    "rapiers": {
+      "name": "Estoques"
+    },
+    "scimitars": {
+      "name": "Cimitarras"
+    },
+    "shortbows": {
+      "name": "Arcos cortos"
+    },
+    "shortswords": {
+      "name": "Espadas cortas"
+    },
+    "sickles": {
+      "name": "Hoces"
+    },
+    "slings": {
+      "name": "Hondas"
+    },
+    "spears": {
+      "name": "Lanzas"
+    },
+    "tridents": {
+      "name": "Tridentes"
+    },
+    "war-picks": {
+      "name": "Picos de guerra"
+    },
+    "warhammers": {
+      "name": "Martillos de guerra"
+    },
+    "whips": {
+      "name": "Látigos"
+    },
+    "alchemists-supplies": {
+      "name": "Suministros de alquimista"
+    },
+    "brewers-supplies": {
+      "name": "Suministros de cervecero"
+    },
+    "calligraphers-supplies": {
+      "name": "Suministros de calígrafo"
+    },
+    "carpenters-tools": {
+      "name": "Herramientas de carpintero"
+    },
+    "cartographers-tools": {
+      "name": "Herramientas de cartógrafo"
+    },
+    "cobblers-tools": {
+      "name": "Herramientas de zapatero"
+    },
+    "cooks-utensils": {
+      "name": "Utensilios de cocinero"
+    },
+    "glassblowers-tools": {
+      "name": "Herramientas de soplador de vidrio"
+    },
+    "jewelers-tools": {
+      "name": "Herramientas de joyero"
+    },
+    "leatherworkers-tools": {
+      "name": "Herramientas de curtidor"
+    },
+    "masons-tools": {
+      "name": "Herramientas de albañil"
+    },
+    "painters-supplies": {
+      "name": "Suministros de pintor"
+    },
+    "potters-tools": {
+      "name": "Herramientas de alfarero"
+    },
+    "smiths-tools": {
+      "name": "Herramientas de herrero"
+    },
+    "tinkers-tools": {
+      "name": "Herramientas de hojalatero"
+    },
+    "weavers-tools": {
+      "name": "Herramientas de tejedor"
+    },
+    "woodcarvers-tools": {
+      "name": "Herramientas de tallador"
+    },
+    "thieves-tools": {
+      "name": "Herramientas de ladrón"
+    },
+    "disguise-kit": {
+      "name": "Estuche de disfraces"
+    },
+    "forgery-kit": {
+      "name": "Estuche de falsificación"
+    },
+    "herbalism-kit": {
+      "name": "Estuche de herboristería"
+    },
+    "poisoners-kit": {
+      "name": "Estuche de envenenador"
+    },
+    "navigators-tools": {
+      "name": "Herramientas de navegante"
+    },
+    "dice-set": {
+      "name": "Juego de dados"
+    },
+    "playing-card-set": {
+      "name": "Baraja de cartas"
+    },
+    "bagpipes": {
+      "name": "Gaita"
+    },
+    "drum": {
+      "name": "Tambor"
+    },
+    "dulcimer": {
+      "name": "Salterio"
+    },
+    "flute": {
+      "name": "Flauta"
+    },
+    "horn": {
+      "name": "Cuerno"
+    },
+    "lute": {
+      "name": "Laúd"
+    },
+    "lyre": {
+      "name": "Lira"
+    },
+    "pan-flute": {
+      "name": "Flauta de pan"
+    },
+    "shawm": {
+      "name": "Chirimía"
+    },
+    "viol": {
+      "name": "Viola"
+    },
+    "land-vehicles": {
+      "name": "Vehículos terrestres"
+    },
+    "water-vehicles": {
+      "name": "Vehículos acuáticos"
+    },
+    "saving-throw-str": {
+      "name": "Salvación: FUE"
+    },
+    "saving-throw-dex": {
+      "name": "Salvación: DES"
+    },
+    "saving-throw-con": {
+      "name": "Salvación: CON"
+    },
+    "saving-throw-int": {
+      "name": "Salvación: INT"
+    },
+    "saving-throw-wis": {
+      "name": "Salvación: SAB"
+    },
+    "saving-throw-cha": {
+      "name": "Salvación: CAR"
+    },
+    "skill-acrobatics": {
+      "name": "Habilidad: Acrobacias"
+    },
+    "skill-animal-handling": {
+      "name": "Habilidad: Trato con Animales"
+    },
+    "skill-arcana": {
+      "name": "Habilidad: Arcanos"
+    },
+    "skill-athletics": {
+      "name": "Habilidad: Atletismo"
+    },
+    "skill-deception": {
+      "name": "Habilidad: Engaño"
+    },
+    "skill-history": {
+      "name": "Habilidad: Historia"
+    },
+    "skill-insight": {
+      "name": "Habilidad: Perspicacia"
+    },
+    "skill-intimidation": {
+      "name": "Habilidad: Intimidación"
+    },
+    "skill-investigation": {
+      "name": "Habilidad: Investigación"
+    },
+    "skill-medicine": {
+      "name": "Habilidad: Medicina"
+    },
+    "skill-nature": {
+      "name": "Habilidad: Naturaleza"
+    },
+    "skill-perception": {
+      "name": "Habilidad: Percepción"
+    },
+    "skill-performance": {
+      "name": "Habilidad: Interpretación"
+    },
+    "skill-persuasion": {
+      "name": "Habilidad: Persuasión"
+    },
+    "skill-religion": {
+      "name": "Habilidad: Religión"
+    },
+    "skill-sleight-of-hand": {
+      "name": "Habilidad: Juego de Manos"
+    },
+    "skill-stealth": {
+      "name": "Habilidad: Sigilo"
+    },
+    "skill-survival": {
+      "name": "Habilidad: Supervivencia"
+    }
   }
 }

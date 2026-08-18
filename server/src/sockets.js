@@ -16,6 +16,7 @@ import {
   notifyBestiary,
 } from './services/liveMap.js';
 import { getActiveMapId, touchMap } from './services/mapLibrary.js';
+import { projectileKind } from './services/projectiles.js';
 import { rollLoot, dropLootMarker } from './services/loot.js';
 import { buildFallDamageRoll, fallDiceForFeet } from './services/fallDamage.js';
 import { buildPerceptionRoll, discoverableTrapIds } from './services/perception.js';
@@ -64,6 +65,7 @@ import {
 } from './services/turnEconomy.js';
 import { DEATH_STATES, isMassiveDamage, normalizeConditionTimers } from './services/combatLifecycle.js';
 import { parseConditions, resolveAttackEffects } from './services/combatRules.js';
+import { wearingUnproficientArmor } from './rules/proficiency.js';
 import {
   absorbTemporaryHitPoints,
   damageDetailForViewer,
@@ -93,6 +95,7 @@ import {
 import { buildElevationMap, buildWalkableGrid } from './services/pathfinding.js';
 import { buildWallSet } from './services/walls.js';
 import { decideEnemyTurn, normalizeEnemyAttacks } from './services/enemyAi.js';
+import { createPacer } from './services/turnPacing.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
@@ -667,12 +670,13 @@ function elevationAtToken(token) {
   }
 }
 
-function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage }) {
+function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage, armorPenalty = false }) {
   const attackerConditions = parseConditions(attackerCombatant?.conditions);
   const targetConditions = parseConditions(resolved.combatant?.conditions);
   if (attackerCombatant?.kind === 'pj' && attackerCombatant?.downed && !attackerConditions.includes('inconsciente')) {
     attackerConditions.push('inconsciente');
   }
+  if (armorPenalty) attackerConditions.push('armadura-no-competente');
   if (
     resolved.kind === 'personaje' &&
     Number(resolved.character?.hp_current) <= 0 &&
@@ -711,7 +715,12 @@ function characterWeapon(character, weaponId, { thrown = false } = {}) {
   } catch {
     inventory = [];
   }
-  const item = inventory.find((candidate) => candidate.id === weaponId && candidate.weapon && candidate.equipped);
+  const item = inventory.find(
+    (candidate) =>
+      candidate.id === weaponId &&
+      candidate.weapon &&
+      (candidate.slot === 'mano-principal' || candidate.slot === 'mano-secundaria')
+  );
   if (!item) return null;
   let equipmentData = null;
   if (item.srdIndex && !String(item.srdIndex).startsWith('custom:')) {
@@ -729,6 +738,7 @@ function characterWeapon(character, weaponId, { thrown = false } = {}) {
   return {
     id: item.id,
     name: item.name,
+    srdIndex: item.srdIndex ?? null,
     melee: !geometry.ranged,
     damageTypes: [item.weapon.damageType ?? null],
     magical: Boolean(item.weapon.magical),
@@ -842,7 +852,35 @@ function combatVisualTarget(resolved) {
     : { mapTokenId: resolved.token.id };
 }
 
-function emitAttackVisual(campaignId, resolved, { hit, crit = false } = {}) {
+// Referencia pública de quien dispara, en el mismo formato que la del objetivo:
+// el cliente resuelve ambas puntas contra los tokens que ya tiene pintados.
+function combatVisualSource({ character = null, token = null } = {}) {
+  if (character) return { characterId: character.id };
+  return token ? { mapTokenId: token.id } : null;
+}
+
+/**
+ * Efecto del ataque. Además del impacto o el fallo sobre el objetivo, un ataque
+ * a distancia manda volar su proyectil: sin él, el enemigo perdía vida al otro
+ * lado del mapa sin que nada lo cruzara.
+ *
+ * `attacker` y `weapon` son opcionales: sin ellos se emite solo el impacto,
+ * como hasta ahora (fluidos, trampas y demás fuentes sin tirador).
+ */
+function emitAttackVisual(campaignId, resolved, { hit, crit = false, attacker = null, weapon = null } = {}) {
+  const from = attacker ? combatVisualSource(attacker) : null;
+  const kind = weapon
+    ? projectileKind({ geometry: weapon.geometry, srdIndex: weapon.srdIndex, name: weapon.name })
+    : null;
+  if (from && kind) {
+    notifyCombatVisual(campaignId, {
+      type: 'proyectil',
+      kind,
+      from,
+      to: combatVisualTarget(resolved),
+      hit: Boolean(hit),
+    });
+  }
   notifyCombatVisual(campaignId, {
     type: hit ? 'hit' : 'miss',
     ...combatVisualTarget(resolved),
@@ -1031,6 +1069,13 @@ export function setupSockets(io) {
   // pausarlo o adelantarlo antes de que la IA actúe.
   const enemyAiTimers = new Map();
   const enemyAiRunning = new Set();
+  // El turno automático se resuelve por tiempos (ver services/turnPacing.js), así
+  // que deja de ser instantáneo: entre moverse y atacar hay esperas reales. Si
+  // durante una de ellas el DM pausa la IA, termina el combate o adelanta el
+  // turno, la secuencia en vuelo tiene que abortar sin aplicar lo que quedaba.
+  // Cada campaña lleva un contador: la secuencia captura el suyo al empezar y
+  // se detiene en cuanto no coincide.
+  const enemyAiEpochs = new Map();
 
   bindConditionExpirationNotifier((campaignId, expirations) => {
     emitConditionExpirations(campaignId, expirations);
@@ -1844,7 +1889,15 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('chat:new', message);
     }
 
-    function performEnemyAiAttacks(campaignId, combatant, tokenId, data, firstAttack, firstTarget) {
+    async function performEnemyAiAttacks(
+      campaignId,
+      combatant,
+      tokenId,
+      data,
+      firstAttack,
+      firstTarget,
+      { pacer, keepActing }
+    ) {
       const attacks = normalizeEnemyAttacks(data, jsonValue(combatant.overrides, {}));
       if (!firstAttack || !firstTarget || attacks.length === 0) return { attacks: 0 };
       const plans = buildMultiattackPlans(data);
@@ -1857,6 +1910,13 @@ export function setupSockets(io) {
       let count = 0;
 
       while (attackName && target && count < 20) {
+        if (count > 0) {
+          // Multiataque: cada golpe llega a la mesa por separado. Sin esta
+          // espera, tres ataques se publicaban en el mismo instante y no había
+          // forma de saber cuál había hecho qué daño.
+          await pacer.wait('entreAtaques');
+          if (!keepActing()) break;
+        }
         const currentCombatant = db
           .prepare('SELECT * FROM combatants WHERE id = ? AND campaign_id = ?')
           .get(combatant.id, campaignId);
@@ -1899,7 +1959,12 @@ export function setupSockets(io) {
           campaignId,
           critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll
         );
-        emitAttackVisual(campaignId, resolved, { hit, crit: critical });
+        emitAttackVisual(campaignId, resolved, {
+          hit,
+          crit: critical,
+          attacker: { token: { id: currentCombatant.map_token_id } },
+          weapon: actionData,
+        });
         postSystemMessage(
           campaignId,
           hit
@@ -1936,10 +2001,20 @@ export function setupSockets(io) {
         attackName = remaining[0]?.actionName ?? null;
         planId = spend.multiattackState?.planId ?? null;
       }
+      // Que el último impacto se vea antes de que el turno pase de manos.
+      if (count > 0) await pacer.wait('trasAtaque');
       return { attacks: count };
     }
 
-    function runEnemyAiTurn(campaignId, combatant) {
+    // Resuelve el turno de un enemigo POR TIEMPOS: se anuncia, camina, respira
+    // y ataca, con esperas reales entre cada cosa (services/turnPacing.js). Las
+    // reglas y los resultados son los mismos que cuando se resolvía de golpe;
+    // lo único que cambia es que ahora el turno se puede seguir con la vista.
+    //
+    // `keepActing()` se consulta antes de cada tramo: si el DM pausa la IA o
+    // termina el combate mientras el enemigo camina, lo que quedaba no se
+    // aplica.
+    async function runEnemyAiTurn(campaignId, combatant, { pacer, keepActing }) {
       const context = enemyTurnContext(campaignId, combatant);
       if (!context) return { acted: false, reason: 'sin mapa' };
       if (!context.targets.length) {
@@ -1970,8 +2045,25 @@ export function setupSockets(io) {
         maxMove,
       });
       if (!decision) return { acted: false, reason: 'sin jugada' };
+
+      // Primer tiempo: se avisa de quién actúa ANTES de que se mueva nada, para
+      // que la mesa pueda mirar al enemigo correcto. Solo viaja el id, que ya es
+      // público en el tracker: la posición no, porque revelaría por dónde anda
+      // un enemigo que el jugador quizá no ve.
+      io.to(roomName(campaignId)).emit('combat:acting', { combatantId: combatant.id });
+      await pacer.wait('telegrafia');
+      if (!keepActing()) return { acted: false, reason: 'cancelado antes de moverse' };
+
       const movement = moveEnemyWithAi(campaignId, combatant, context, decision);
       if (!movement.ok) return { acted: false, reason: movement.error };
+
+      if (movement.moved) {
+        // El recorrido dura en función de las casillas del camino: un enemigo
+        // que cruza la sala tarda más que uno que da un paso.
+        await pacer.wait('caminata', { cells: decision.path?.length ?? 0 });
+        await pacer.wait('trasMovimiento');
+        if (!keepActing()) return { acted: true, reason: 'cancelado tras moverse' };
+      }
 
       const stillStanding = db
         .prepare('SELECT hp_current FROM combatants WHERE id = ?')
@@ -1979,13 +2071,14 @@ export function setupSockets(io) {
       if (Number.isInteger(stillStanding?.hp_current) && stillStanding.hp_current <= 0) {
         return { acted: movement.moved, reason: 'derrotado durante el movimiento' };
       }
-      const attacks = performEnemyAiAttacks(
+      const attacks = await performEnemyAiAttacks(
         campaignId,
         combatant,
         context.attacker.id,
         data,
         decision.attack,
-        decision.target
+        decision.target,
+        { pacer, keepActing }
       );
       return { acted: movement.moved || attacks.attacks > 0 };
     }
@@ -1995,6 +2088,10 @@ export function setupSockets(io) {
       const timer = enemyAiTimers.get(key);
       if (timer) clearTimeout(timer);
       enemyAiTimers.delete(key);
+      // Cancela también la jugada que ya esté a medias: al subir el contador,
+      // la secuencia en vuelo deja de reconocerse como vigente y se detiene
+      // antes del siguiente tramo.
+      enemyAiEpochs.set(key, (enemyAiEpochs.get(key) ?? 0) + 1);
     }
 
     function scheduleEnemyAiTurn(campaignId, delay = 700) {
@@ -2023,28 +2120,33 @@ export function setupSockets(io) {
 
       enemyAiTimers.set(
         key,
-        setTimeout(() => {
+        setTimeout(async () => {
           enemyAiTimers.delete(key);
           enemyAiRunning.add(key);
+          // El turno ya no es instantáneo: se comprueba antes de cada tramo que
+          // la mesa sigue queriendo esta jugada. Cubre a la vez que el DM pause
+          // la IA, que termine el combate y que el turno haya pasado a otro.
+          const epoch = enemyAiEpochs.get(key) ?? 0;
+          const pacer = createPacer();
+          const keepActing = () => {
+            if ((enemyAiEpochs.get(key) ?? 0) !== epoch) return false;
+            const table = db
+              .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
+              .get(key);
+            return Boolean(
+              table?.combat_active && table.enemy_ai_enabled && table.combat_turn_id === active.id
+            );
+          };
           try {
-            const currentTable = db
-              .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
-              .get(key);
-            if (
-              !currentTable?.combat_active || !currentTable.enemy_ai_enabled ||
-              currentTable.combat_turn_id !== active.id
-            ) return;
-            runEnemyAiTurn(key, active);
-            const afterAction = db
-              .prepare('SELECT combat_active, combat_turn_id, enemy_ai_enabled FROM game_tables WHERE campaign_id = ?')
-              .get(key);
-            if (
-              afterAction?.combat_active && afterAction.enemy_ai_enabled &&
-              afterAction.combat_turn_id === active.id
-            ) {
-              const advanced = advanceTurn(key);
-              emitConditionExpirations(key, advanced.expiredConditions);
-              if (advanced.fluidChanged) notifyCampaignMap(key);
+            if (!keepActing()) return;
+            await runEnemyAiTurn(key, active, { pacer, keepActing });
+            if (keepActing()) {
+              await pacer.wait('antesDeCerrar');
+              if (keepActing()) {
+                const advanced = advanceTurn(key);
+                emitConditionExpirations(key, advanced.expiredConditions);
+                if (advanced.fluidChanged) notifyCampaignMap(key);
+              }
             }
             broadcastCombat(key);
           } catch (error) {
@@ -2065,16 +2167,25 @@ export function setupSockets(io) {
       );
     }
 
+    // Secuencia única para cerrar un turno: cambia el activo, publica el
+    // tracker, anuncia expiraciones, refresca el mapa cuando haga falta y
+    // deja preparada la IA si el siguiente combatiente es suyo.
+    function advanceAndPublishTurn(campaignId, { mapChanged = false } = {}) {
+      const result = advanceTurn(campaignId);
+      if (result.error) return result;
+      broadcastCombat(campaignId);
+      emitConditionExpirations(campaignId, result.expiredConditions);
+      if (mapChanged || result.fluidChanged) notifyCampaignMap(campaignId);
+      scheduleEnemyAiTurn(campaignId);
+      return result;
+    }
+
     socket.on('combat:next', ({ campaignId }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede avanzar el turno' });
 
-      const result = advanceTurn(campaignId);
+      const result = advanceAndPublishTurn(campaignId);
       if (result.error) return cb?.(result);
-      broadcastCombat(campaignId);
-      emitConditionExpirations(campaignId, result.expiredConditions);
-      if (result.fluidChanged) notifyCampaignMap(campaignId);
-      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -2097,12 +2208,8 @@ export function setupSockets(io) {
         if (!owns) return cb?.({ error: 'No es tu turno' });
       }
 
-      const result = advanceTurn(campaignId);
+      const result = advanceAndPublishTurn(campaignId);
       if (result.error) return cb?.(result);
-      broadcastCombat(campaignId);
-      emitConditionExpirations(campaignId, result.expiredConditions);
-      if (result.fluidChanged) notifyCampaignMap(campaignId);
-      scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -2307,7 +2414,9 @@ export function setupSockets(io) {
       const result = recordDeathSave(campaignId, row.id, die);
       if (!result.ok) return cb?.(result);
 
-      // Con un 20 natural el personaje recupera 1 PG (vuelve en sí)
+      // Con un 20 natural el personaje recupera 1 PG (vuelve en sí). En ese
+      // caso conserva el turno para poder actuar; es la excepción deliberada
+      // al avance automático de la salvación de muerte.
       if (result.outcome === 'revive') {
         db.prepare("UPDATE characters SET hp_current = 1, updated_at = datetime('now') WHERE id = ?").run(row.character_id);
       }
@@ -2329,9 +2438,20 @@ export function setupSockets(io) {
 
       const mapId = getActiveMapId(campaignId);
       if (mapId) touchMap(mapId);
-      notifyCampaignMap(campaignId);
-      broadcastCombat(campaignId);
-      cb?.({ ok: true, outcome: result.outcome });
+      if (result.outcome === 'revive') {
+        notifyCampaignMap(campaignId);
+        broadcastCombat(campaignId);
+        cb?.({ ok: true, outcome: result.outcome, turnAdvanced: false });
+        return;
+      }
+
+      const advanceResult = advanceAndPublishTurn(campaignId, { mapChanged: true });
+      cb?.({
+        ok: true,
+        outcome: result.outcome,
+        turnAdvanced: !advanceResult.error,
+        turnError: advanceResult.error,
+      });
     });
 
     // Alterna entre modo por turnos (bloquea movimiento/acción fuera de tu
@@ -2656,6 +2776,15 @@ export function setupSockets(io) {
       if (membership.role !== 'dm' && character.user_id !== user.id) {
         return cb?.({ error: 'Solo puedes lanzar con tu propio personaje' });
       }
+      if (
+        wearingUnproficientArmor({
+          kind: character.kind,
+          inventory: JSON.parse(character.inventory || '[]'),
+          armor_proficiencies: JSON.parse(character.armor_proficiencies || '[]'),
+        })
+      ) {
+        return cb?.({ error: 'Llevas armadura sin competencia: no puedes lanzar conjuros mientras la lleves.' });
+      }
       const spellResult = spellDataForCharacter(character, spellIndex);
       if (spellResult.error) return cb?.(spellResult);
       const data = { ...spellResult.data, name: spellResult.known.name ?? spellResult.data.name };
@@ -2797,7 +2926,14 @@ export function setupSockets(io) {
         const message = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(shared) });
         io.to(roomName(campaignId)).emit('chat:new', message);
         outcomes.push({ target: targetForAttack, hit, saved: null, critical: spellAttackCritical });
-        emitAttackVisual(campaignId, targetForAttack, { hit, crit: spellAttackCritical });
+        emitAttackVisual(campaignId, targetForAttack, {
+          hit,
+          crit: spellAttackCritical,
+          attacker: { character },
+          // Un ataque de conjuro siempre sale del lanzador hacia el objetivo:
+          // vuela como destello arcano, sea rayo de escarcha o descarga.
+          weapon: { geometry: { ranged: true }, name: data.name, srdIndex: null },
+        });
       } else {
         for (const resolved of targets) {
           const saveAbility = data.dc?.dc_type?.index ?? null;
@@ -2931,9 +3067,15 @@ export function setupSockets(io) {
       const attackerCombatant = db
         .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
         .get(campaignId, checked.character.id);
+      const armorPenalty = wearingUnproficientArmor({
+        kind: checked.character.kind,
+        inventory: JSON.parse(checked.character.inventory || '[]'),
+        armor_proficiencies: JSON.parse(checked.character.armor_proficiencies || '[]'),
+      });
       const effects = attackEffectsFor(attackerCombatant, resolved, {
         melee: weaponData.melee,
         manualAdvantage,
+        armorPenalty,
       });
       const modeCheck = validateAttackMode(roll, effects);
       if (modeCheck.error) return cb?.(modeCheck);
@@ -2946,7 +3088,12 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
-      emitAttackVisual(campaignId, resolved, { hit, crit });
+      emitAttackVisual(campaignId, resolved, {
+        hit,
+        crit,
+        attacker: { character: checked.character },
+        weapon: weaponData,
+      });
 
       const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
       const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
@@ -3102,7 +3249,12 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
-      emitAttackVisual(campaignId, resolved, { hit, crit });
+      emitAttackVisual(campaignId, resolved, {
+        hit,
+        crit,
+        attacker: { token: attackerToken },
+        weapon: actionData,
+      });
 
       const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
       const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });

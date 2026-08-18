@@ -56,24 +56,40 @@ export function hasBoardLineOfSight(map, from, to) {
   return !lineBlocked(from.col, from.row, to.col, to.row, context.blocksSight, context.walls);
 }
 
+/**
+ * Casillas a las que se llega en línea recta desde `origin` dentro de `radius`,
+ * ya recortadas por muros, columnas y huecos: detrás de un obstáculo queda su
+ * sombra. Es la base tanto de la previsualización de visión como del alcance
+ * de un arma a distancia, que es la misma pregunta ("¿qué alcanzo desde aquí?")
+ * hecha con otro radio.
+ *
+ * Se devuelven casillas {col,row}: es lo que consumen los overlays del tablero.
+ * Con pares [x,y] la previsualización se pintaba en posiciones NaN, es decir,
+ * no se veía.
+ */
+export function cellsWithinSight(map, origin, radius) {
+  if (!map || !origin || !Number.isInteger(origin.col) || !Number.isInteger(origin.row)) return [];
+  const limit = Math.max(0, Math.min(60, radius ?? 0));
+  const { existing, blocksSight, walls } = boardSightContext(map);
+  const visible = [];
+  for (let row = origin.row - limit; row <= origin.row + limit; row += 1) {
+    for (let col = origin.col - limit; col <= origin.col + limit; col += 1) {
+      if (!existing.has(key(col, row))) continue;
+      if (!lineBlocked(origin.col, origin.row, col, row, blocksSight, walls)) visible.push({ col, row });
+    }
+  }
+  return visible;
+}
+
 // Espejo visual de server/src/services/vision.js. No decide qué datos puede
 // ver un jugador: el alcance solo llega al DM y esta función únicamente pinta
 // la previsualización de una criatura ya recibida.
 export function computeBoardVision(map, viewer) {
   if (!map || !viewer || !Number.isInteger(viewer.col) || !Number.isInteger(viewer.row)) return [];
-  const { existing, blocksSight, walls } = boardSightContext(map);
   const normalRadius = Math.max(1, Math.min(30, viewer.radius ?? 6));
   const fluidType = fluidTypeAtBoardCell(map, viewer.col, viewer.row);
   const fluidRadius = fluidType
     ? normalizeFluidEffects(map.fluidEffects)[fluidType]?.visionRadius
     : null;
-  const radius = fluidRadius ? Math.min(normalRadius, fluidRadius) : normalRadius;
-  const visible = [];
-  for (let y = viewer.row - radius; y <= viewer.row + radius; y += 1) {
-    for (let x = viewer.col - radius; x <= viewer.col + radius; x += 1) {
-      if (!existing.has(key(x, y))) continue;
-      if (!lineBlocked(viewer.col, viewer.row, x, y, blocksSight, walls)) visible.push([x, y]);
-    }
-  }
-  return visible;
+  return cellsWithinSight(map, viewer, fluidRadius ? Math.min(normalRadius, fluidRadius) : normalRadius);
 }

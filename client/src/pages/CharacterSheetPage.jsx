@@ -15,8 +15,9 @@ import {
   spellSaveDC,
   spellcastingAbility,
 } from '../lib/dnd.js';
-import { rollAttack } from '../lib/dice.js';
+import { rollAttack, rollDie } from '../lib/dice.js';
 import { castSpellRoll } from '../lib/spellcasting.js';
+import { armorPenaltyAppliesTo, wearingUnproficientArmor } from '../lib/proficiency.js';
 import { uploadCharacterAvatar, generateCharacterAvatar, removeCharacterAvatar } from '../lib/characterAvatar.js';
 import { useCharacter } from '../hooks/useCharacter.js';
 import { useDice } from '../store/dice.js';
@@ -29,6 +30,7 @@ import { saveStat, skillStat } from '../lib/statGlossary.js';
 import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 import CustomSections from '../components/CustomSections.jsx';
+import LevelUpDialog from '../components/LevelUpDialog.jsx';
 import { resolveCharacterReturn } from '../lib/characterReturn.js';
 import { srdCampaignPath } from '../lib/srdCampaign.js';
 import {
@@ -37,6 +39,7 @@ import {
   raceAutomaticSkills,
   racialAbilityBonuses,
 } from '../lib/wizard.js';
+import { availableSlotsFor, computeArmorClass, equipItem, inventoryItemFromEntry, SLOT_LABELS } from '../lib/equipment.js';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -118,7 +121,7 @@ function NumberField({ label, value, onChange, min = 0, max = 999, disabled, mon
 
 export default function CharacterSheetPage() {
   const { id } = useParams();
-  const { char, editable, saveState, error, patch } = useCharacter(id);
+  const { char, editable, saveState, error, patch, leveling, rest, reload } = useCharacter(id);
   const [classes, setClasses] = useState([]);
   const [races, setRaces] = useState([]);
   const [classDetails, setClassDetails] = useState({});
@@ -130,8 +133,14 @@ export default function CharacterSheetPage() {
   const [lastRoll, setLastRoll] = useState(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
+  const [levelUpOpen, setLevelUpOpen] = useState(false);
+  const [hitDiceBusy, setHitDiceBusy] = useState(false);
+  const [hitDiceResult, setHitDiceResult] = useState('');
 
   const joinRoom = useRoom((s) => s.joinRoom);
+  // Fase D: si el DM concede un nivel mientras tienes la ficha abierta, el
+  // botón «Subir de nivel» aparece solo, sin recargar.
+  const grantedLevelVersion = useRoom((s) => s.grantedLevelVersion);
   const submitRoll = useDice((s) => s.submitRoll);
   const [searchParams, setSearchParams] = useSearchParams();
   const returnTarget = resolveCharacterReturn(searchParams);
@@ -219,6 +228,10 @@ export default function CharacterSheetPage() {
     if (char?.campaign_id) joinRoom(char.campaign_id);
   }, [char?.campaign_id, joinRoom]);
 
+  useEffect(() => {
+    if (grantedLevelVersion > 0) reload();
+  }, [grantedLevelVersion, reload]);
+
   async function runAvatarAction(action) {
     setAvatarBusy(true);
     setAvatarError('');
@@ -242,8 +255,20 @@ export default function CharacterSheetPage() {
     setLastRoll(roll);
   }
 
-  function rollCheck(label, bonus, kind = 'check') {
-    onRoll({ ...rollAttack(bonus, { label, actorName: char.name }), kind });
+  // Llevar armadura o escudo sin competencia da desventaja en TODA prueba y
+  // salvación de FUE o DES, no solo en los ataques (regla 2014). Se aplica
+  // aquí y se dice en la propia etiqueta de la tirada, para que en la mesa se
+  // vea de dónde sale.
+  function rollCheck(label, bonus, { kind = 'check', ability = null } = {}) {
+    const penalizada = ability ? armorPenaltyAppliesTo(char, ability) : false;
+    onRoll({
+      ...rollAttack(bonus, {
+        advantage: penalizada ? 'disadvantage' : 'none',
+        label: penalizada ? `${label} (desventaja: armadura sin competencia)` : label,
+        actorName: char.name,
+      }),
+      kind,
+    });
   }
 
   if (error) {
@@ -278,15 +303,24 @@ export default function CharacterSheetPage() {
     char.wizard_data.raceAbilityChoice ?? []
   );
   const baseAbilities = char.wizard_data.baseAbilities ?? null;
+  // Puntos ganados con las mejoras de característica de la subida de nivel
+  // (Fase D). Se muestran como su propia fuente para que el desglose de la
+  // ficha siga cuadrando con el número final.
+  const abilityImprovements = char.wizard_data.abilityImprovements ?? {};
   const customFeatures = [
     ...(classDetail?.custom_features ?? []).map((feature) => ({ ...feature, source: 'Clase' })),
     ...(raceDetail?.custom_features ?? []).map((feature) => ({ ...feature, source: 'Raza' })),
   ];
 
   const prof = proficiencyBonus(char.level);
-  const weapons = char.inventory.filter((i) => i.weapon && i.equipped);
+  const weapons = char.inventory.filter((i) => i.weapon && (i.slot === 'mano-principal' || i.slot === 'mano-secundaria'));
+  const armorPenalty = wearingUnproficientArmor(char);
   const preparedSet = new Set(char.spells.prepared ?? []);
   const ro = !editable;
+  // La CA de un PJ la recalcula el servidor al guardar, pero el espejo del
+  // cliente la enseña ya al equipar o desequipar, sin esperar a la respuesta
+  // ni a una recarga (`char.ac` es todavía el valor anterior).
+  const derivedAc = char.kind === 'boss' ? char.ac : computeArmorClass(char);
 
   function changeClass(classIndex) {
     const detail = classIndex ? classDetails[classIndex] : null;
@@ -328,7 +362,9 @@ export default function CharacterSheetPage() {
       patch({ abilities: { ...char.abilities, [abilityKey]: score } });
       return;
     }
-    const bonus = abilityBonuses[abilityKey] ?? 0;
+    // El total se reparte entre base, bono racial y mejoras de nivel: al
+    // editar a mano solo se mueve la base, las otras dos fuentes se respetan.
+    const bonus = (abilityBonuses[abilityKey] ?? 0) + (abilityImprovements[abilityKey] ?? 0);
     const base = Math.max(1, Math.min(30, score - bonus));
     patch({
       abilities: { ...char.abilities, [abilityKey]: Math.max(1, Math.min(30, base + bonus)) },
@@ -339,30 +375,29 @@ export default function CharacterSheetPage() {
     });
   }
 
+  // Gastar un dado de golpe: se tira aquí y el servidor comprueba que cabe en
+  // el dado, que quedan dados y que no se pasa de los PG máximos.
+  async function spendHitDie() {
+    if (!rest || rest.available === 0) return;
+    setHitDiceBusy(true);
+    setHitDiceResult('');
+    try {
+      const roll = rollDie(rest.hitDie);
+      const { healed } = await api(`/characters/${id}/dados-de-golpe`, {
+        method: 'POST',
+        body: { rolls: [roll] },
+      });
+      setHitDiceResult(`d${rest.hitDie}: ${roll} → +${healed} PG`);
+      await reload();
+    } catch (e) {
+      setHitDiceResult(e.message || 'No se pudo gastar el dado.');
+    } finally {
+      setHitDiceBusy(false);
+    }
+  }
+
   function addItem(entry) {
-    const meta = entry.meta ?? {};
-    const item = {
-      id: crypto.randomUUID(),
-      srdIndex: entry.index,
-      name: entry.name,
-      qty: 1,
-      equipped: Boolean(meta.damage),
-      weapon: meta.damage
-        ? {
-            damageDice: meta.damage.dice,
-            damageType: meta.damage.type,
-            versatileDice: meta.twoHandedDamage?.dice ?? null,
-            properties: meta.properties ?? [],
-            weaponRange: meta.weaponRange,
-            range: meta.range ?? null,
-            throwRange: meta.throwRange ?? null,
-            magical: false,
-            silvered: false,
-            adamantine: false,
-          }
-        : null,
-    };
-    patch({ inventory: [...char.inventory, item] });
+    patch({ inventory: [...char.inventory, inventoryItemFromEntry(entry, 1)] });
     setPicker(null);
   }
 
@@ -371,7 +406,7 @@ export default function CharacterSheetPage() {
     patch({
       inventory: [
         ...char.inventory,
-        { id: crypto.randomUUID(), srdIndex: null, name: customItem.trim(), qty: 1, equipped: false, weapon: null },
+        { id: crypto.randomUUID(), srdIndex: null, name: customItem.trim(), qty: 1, slot: null, weapon: null, armor: null },
       ],
     });
     setCustomItem('');
@@ -379,6 +414,10 @@ export default function CharacterSheetPage() {
 
   function updateItem(itemId, fields) {
     patch({ inventory: char.inventory.map((i) => (i.id === itemId ? { ...i, ...fields } : i)) });
+  }
+
+  function setItemSlot(itemId, slot) {
+    patch({ inventory: equipItem(char.inventory, itemId, slot) });
   }
 
   function addCustomProficiency() {
@@ -507,7 +546,33 @@ export default function CharacterSheetPage() {
               onChange={changeRace}
             />
           </label>
-          <NumberField label="Nivel" value={char.level} min={1} max={20} disabled={ro} onChange={(v) => patch({ level: v })} />
+          {/* Fase D: el nivel de un PJ lo concede el DM por milestone; solo
+              las fichas del DM (jefe, enemigo, PNJ) lo llevan a mano. */}
+          {char.kind === 'boss' ? (
+            <NumberField label="Nivel" value={char.level} min={1} max={20} disabled={ro} onChange={(v) => patch({ level: v })} />
+          ) : (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-wider text-bone/50">Nivel</span>
+              <span className="rounded-sm border border-bone/10 bg-night-950 px-2 py-1.5 text-center font-mono text-bone">
+                {char.level}
+              </span>
+              {!ro && leveling?.canLevelUp && (
+                <button
+                  onClick={() => setLevelUpOpen(true)}
+                  className="rounded-sm bg-gold px-2 py-1 font-display text-xs tracking-wide text-night-950 hover:bg-gold/90"
+                >
+                  Subir de nivel
+                </button>
+              )}
+              {!ro && !leveling?.canLevelUp && (
+                <span className="text-[0.65rem] text-bone/40">
+                  {char.campaign_id
+                    ? `Tu DM ha concedido hasta el ${leveling?.grantedLevel ?? char.level}.`
+                    : 'Sin campaña no hay quien conceda niveles.'}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <StatTooltip stat="competencia" className="text-xs uppercase tracking-wider text-bone/50">
               Competencia
@@ -578,7 +643,37 @@ export default function CharacterSheetPage() {
             </div>
           </div>
           <NumberField stat="hp-temp" label="HP temp." value={char.hp_temp} disabled={ro} onChange={(v) => patch({ hp_temp: v })} />
-          <NumberField stat="ca" label="CA" value={char.ac} max={40} disabled={ro} onChange={(v) => patch({ ac: v })} />
+          {char.kind === 'boss' ? (
+            <NumberField stat="ca" label="CA" value={char.ac} max={40} disabled={ro} onChange={(v) => patch({ ac: v })} />
+          ) : (
+            <div className="flex flex-col gap-1">
+              <StatTooltip stat="ca" className="text-xs uppercase tracking-wider text-bone/50">CA</StatTooltip>
+              <span className="rounded-sm border border-bone/10 bg-night-950 px-2 py-1.5 text-center font-mono text-bone">
+                {derivedAc}
+              </span>
+              {!ro && (
+                <label className="flex items-center gap-1 text-[0.65rem] text-bone/50">
+                  <input
+                    type="checkbox"
+                    checked={char.ac_override != null}
+                    onChange={(e) => patch({ ac_override: e.target.checked ? derivedAc : null })}
+                    className="accent-gold"
+                  />
+                  Forzar manualmente
+                </label>
+              )}
+              {!ro && char.ac_override != null && (
+                <input
+                  type="number"
+                  value={char.ac_override}
+                  min={0}
+                  max={40}
+                  onChange={(e) => patch({ ac_override: Math.max(0, Math.min(40, parseInt(e.target.value, 10) || 0)) })}
+                  className="w-full rounded-sm border border-gold/30 bg-night-950 px-2 py-1 text-center font-mono text-xs text-gold"
+                />
+              )}
+            </div>
+          )}
           <NumberField stat="velocidad" label="Velocidad" value={char.speed} max={300} disabled={ro} onChange={(v) => patch({ speed: v })} />
           <NumberField
             stat="darkvision"
@@ -589,6 +684,38 @@ export default function CharacterSheetPage() {
             onChange={(v) => patch({ darkvision: v })}
           />
         </div>
+
+        {/* Dados de golpe (Fase F): la mitad del descanso corto que decide
+            cada jugador. El servidor comprueba cuántos quedan y cuánto curan. */}
+        {rest && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-bone/10 pt-3">
+            <div>
+              <StatTooltip stat="dados-de-golpe" className="text-xs uppercase tracking-wider text-bone/50">
+                Dados de golpe
+              </StatTooltip>
+              <p className="font-mono text-bone">
+                {rest.available}/{rest.total} <span className="text-bone/50">d{rest.hitDie}</span>
+              </p>
+            </div>
+            {!ro && (
+              <button
+                onClick={spendHitDie}
+                disabled={rest.available === 0 || char.hp_current >= char.hp_max || hitDiceBusy}
+                title={
+                  rest.available === 0
+                    ? 'No te quedan dados de golpe: recupéralos con un descanso largo'
+                    : char.hp_current >= char.hp_max
+                      ? 'Ya estás a tope de PG'
+                      : 'Gasta un dado de golpe para curarte (descanso corto)'
+                }
+                className="rounded-sm border border-moss px-3 py-1.5 text-sm text-bone/90 hover:bg-moss/20 disabled:opacity-40"
+              >
+                {hitDiceBusy ? 'Curando…' : `Gastar 1d${rest.hitDie}`}
+              </button>
+            )}
+            {hitDiceResult && <span className="text-xs text-moss">{hitDiceResult}</span>}
+          </div>
+        )}
       </Card>
 
       {/* Características */}
@@ -600,7 +727,7 @@ export default function CharacterSheetPage() {
             return (
               <div key={a.key} className="rounded-sm border border-bone/10 bg-night-950/50 p-2 text-center">
                 <button
-                  onClick={() => rollCheck(`Prueba de ${a.name}`, mod)}
+                  onClick={() => rollCheck(`Prueba de ${a.name}`, mod, { ability: a.key })}
                   className="w-full font-display text-xs uppercase tracking-wider text-gold/90 hover:text-gold"
                   title={`Tirar prueba de ${a.name}`}
                 >
@@ -615,9 +742,12 @@ export default function CharacterSheetPage() {
                   onChange={(e) => changeAbility(a.key, parseInt(e.target.value, 10) || 10)}
                   className="w-full border-none bg-transparent text-center font-mono text-xl text-bone focus:outline-none"
                 />
-                {baseAbilities && (abilityBonuses[a.key] ?? 0) !== 0 && (
+                {baseAbilities && ((abilityBonuses[a.key] ?? 0) !== 0 || (abilityImprovements[a.key] ?? 0) > 0) && (
                   <p className="whitespace-nowrap text-[10px] text-gold/65">
-                    {baseAbilities[a.key]} base {(abilityBonuses[a.key] ?? 0) > 0 ? '+' : '−'} {Math.abs(abilityBonuses[a.key])} raza
+                    {baseAbilities[a.key]} base
+                    {(abilityBonuses[a.key] ?? 0) !== 0 &&
+                      ` ${(abilityBonuses[a.key] ?? 0) > 0 ? '+' : '−'} ${Math.abs(abilityBonuses[a.key])} raza`}
+                    {(abilityImprovements[a.key] ?? 0) > 0 && ` + ${abilityImprovements[a.key]} mejora`}
                   </p>
                 )}
                 <StatTooltip stat={a.key} as="div" className="font-mono text-sm text-bone/60">
@@ -684,7 +814,7 @@ export default function CharacterSheetPage() {
                     className="accent-gold"
                   />
                   <button
-                    onClick={() => rollCheck(`Salvación de ${a.name}`, bonus)}
+                    onClick={() => rollCheck(`Salvación de ${a.name}`, bonus, { ability: a.key })}
                     className="flex flex-1 items-baseline justify-between rounded-sm px-1 py-0.5 text-left hover:bg-gold/10"
                   >
                     <StatTooltip {...saveStat(a.name)} focusable={false} className="text-sm">
@@ -720,7 +850,7 @@ export default function CharacterSheetPage() {
                     title={automatic ? 'Competencia concedida por la raza' : undefined}
                   />
                   <button
-                    onClick={() => rollCheck(sk.name, bonus)}
+                    onClick={() => rollCheck(sk.name, bonus, { ability: sk.ability })}
                     className="flex flex-1 items-baseline justify-between rounded-sm px-1 py-0.5 text-left hover:bg-gold/10"
                   >
                     <StatTooltip
@@ -777,6 +907,12 @@ export default function CharacterSheetPage() {
 
       {/* Ataques */}
       <Card title="Ataques">
+        {armorPenalty && (
+          <p className="mb-3 rounded-sm border border-ochre/40 bg-ochre/5 p-2 text-xs text-ochre">
+            Llevas armadura o escudo sin competencia: desventaja en pruebas, salvaciones y ataques de
+            Fuerza o Destreza, y no puedes lanzar conjuros mientras la lleves.
+          </p>
+        )}
         {lastRoll && (
           <div className="mb-3">
             <RollCard roll={lastRoll} />
@@ -811,21 +947,33 @@ export default function CharacterSheetPage() {
       >
         {char.inventory.length === 0 && <p className="text-sm text-bone/50">Inventario vacío.</p>}
         <ul className="space-y-1.5">
-          {char.inventory.map((item) => (
+          {char.inventory.map((item) => {
+            const slotOptions = availableSlotsFor(item);
+            return (
             <li key={item.id} className="flex items-center gap-2 rounded-sm border border-bone/10 px-2 py-1.5">
-              {item.weapon && (
-                <input
-                  type="checkbox"
-                  checked={item.equipped}
+              {slotOptions.length > 0 && (
+                <select
+                  value={item.slot ?? ''}
                   disabled={ro}
-                  onChange={(e) => updateItem(item.id, { equipped: e.target.checked })}
-                  title="Equipada"
-                  className="accent-gold"
-                />
+                  onChange={(e) => setItemSlot(item.id, e.target.value || null)}
+                  className="rounded-sm border border-bone/20 bg-night-950 px-1.5 py-1 text-xs text-bone/80"
+                >
+                  <option value="">Mochila</option>
+                  {slotOptions.map((slot) => (
+                    <option key={slot} value={slot}>{SLOT_LABELS[slot]}</option>
+                  ))}
+                </select>
               )}
               <span className="min-w-0 flex-1 text-sm">
                 {item.name}
                 {item.weapon && <span className="ml-2 font-mono text-xs text-bone/50">{item.weapon.damageDice}</span>}
+                {item.armor && (
+                  <span className="ml-2 font-mono text-xs text-bone/50">
+                    CA {item.armor.base}
+                    {item.armor.dexBonus ? ' + DES' : ''}
+                    {Number.isFinite(item.armor.maxBonus) ? ` (máx +${item.armor.maxBonus})` : ''}
+                  </span>
+                )}
                 {item.weapon && (
                   <span className="mt-1 flex flex-wrap gap-2 text-[0.65rem] text-bone/50">
                     {[
@@ -870,7 +1018,8 @@ export default function CharacterSheetPage() {
                 </button>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
         {!ro && (
           <div className="mt-3 flex gap-2">
@@ -906,6 +1055,11 @@ export default function CharacterSheetPage() {
             {ABILITIES.find((ability) => ability.key === spellcastingAbility(rulesChar))?.name}
           </p>
         )}
+        {canCastSpells && armorPenalty && (
+          <p className="mb-2 rounded-sm border border-ochre/40 bg-ochre/5 p-2 text-xs text-ochre">
+            No puedes lanzar conjuros mientras lleves armadura o escudo sin competencia.
+          </p>
+        )}
         {(char.spells.known ?? []).length === 0 ? (
           <p className="text-sm text-bone/50">Sin hechizos conocidos.</p>
         ) : (
@@ -931,12 +1085,20 @@ export default function CharacterSheetPage() {
                       </span>
                     </span>
                     {spell.attackType && (
-                      <button onClick={() => castSpell(spell, 'attack')} className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold hover:bg-gold/10">
+                      <button
+                        onClick={() => castSpell(spell, 'attack')}
+                        disabled={armorPenalty}
+                        className="rounded-sm border border-gold/40 px-2 py-0.5 text-xs text-gold hover:bg-gold/10 disabled:opacity-30"
+                      >
                         Ataque
                       </button>
                     )}
                     {spell.hasDamage && (
-                      <button onClick={() => castSpell(spell, 'damage')} className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10">
+                      <button
+                        onClick={() => castSpell(spell, 'damage')}
+                        disabled={armorPenalty}
+                        className="rounded-sm border border-bone/30 px-2 py-0.5 text-xs hover:bg-bone/10 disabled:opacity-30"
+                      >
                         Daño
                       </button>
                     )}
@@ -1029,6 +1191,21 @@ export default function CharacterSheetPage() {
           onPick={addSpell}
           onClose={() => setPicker(null)}
           renderMeta={(e) => (e.meta?.level === 0 ? 'truco' : `nv. ${e.meta?.level}`)}
+        />
+      )}
+
+      {levelUpOpen && leveling?.preview && (
+        <LevelUpDialog
+          characterId={id}
+          character={char}
+          preview={leveling.preview}
+          onClose={() => setLevelUpOpen(false)}
+          onDone={() => {
+            setLevelUpOpen(false);
+            // La subida la aplica el servidor entera (PG, características,
+            // espacios): la ficha se vuelve a leer en vez de adivinarla.
+            reload();
+          }}
         />
       )}
 

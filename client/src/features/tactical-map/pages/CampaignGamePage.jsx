@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { api } from '../../../api.js';
+import { formatClock } from '../../../lib/clock.js';
 import { useAuth } from '../../../store/auth.js';
 import { useRoom } from '../../../store/socket.js';
 import TacticalMap from '../components/TacticalMap.jsx';
@@ -37,6 +38,7 @@ export default function CampaignGamePage() {
   const [campaignLoading, setCampaignLoading] = useState(true);
   const [doorError, setDoorError] = useState('');
   const [directorError, setDirectorError] = useState('');
+  const [restBusy, setRestBusy] = useState(false);
   const [floorId, setFloorId] = useState(null);
   const [playerView, setPlayerView] = useState(false);
   const combat = useRoom((s) => s.combat);
@@ -121,6 +123,43 @@ export default function CampaignGamePage() {
     version: worldVersion,
   });
   const elapsedDays = world?.elapsedDays ?? campaign?.elapsedDays ?? 0;
+
+  // --- Descanso y reloj (Fase F) -----------------------------------------
+  // El descanso lo declara quien dirige: el DM, o la cuenta que juega sola una
+  // escaramuza. El reloj es opcional y, apagado, no se pinta en ningún sitio.
+  const clockEnabled = Boolean(campaign?.clockEnabled);
+  const clockLabel = formatClock(campaign?.dayMinutes ?? 0);
+  const canRest = Boolean(campaign) && (campaign.role === 'dm' || Boolean(campaign.soloMode));
+
+  async function rest(tipo) {
+    setRestBusy(true);
+    setDirectorError('');
+    try {
+      const { clock } = await api(`/campaigns/${campaignId}/descanso`, { method: 'POST', body: { tipo } });
+      if (clock) {
+        setCampaign((current) =>
+          current ? { ...current, dayMinutes: clock.dayMinutes, elapsedDays: clock.elapsedDays } : current
+        );
+      }
+    } catch (error) {
+      setDirectorError(error.message || 'No se pudo descansar.');
+    } finally {
+      setRestBusy(false);
+    }
+  }
+
+  async function toggleClock() {
+    setDirectorError('');
+    try {
+      const { clockEnabled: enabled, dayMinutes } = await api(`/campaigns/${campaignId}/reloj`, {
+        method: 'POST',
+        body: { enabled: !clockEnabled },
+      });
+      setCampaign((current) => (current ? { ...current, clockEnabled: enabled, dayMinutes } : current));
+    } catch (error) {
+      setDirectorError(error.message || 'No se pudo cambiar el reloj.');
+    }
+  }
   const currentLocationId = world?.currentLocationId ?? null;
   const currentLocation =
     world?.maps?.flatMap((m) => m.locations).find((l) => l.id === currentLocationId) ?? null;
@@ -271,6 +310,15 @@ export default function CampaignGamePage() {
                 Día {elapsedDays}
               </span>
             )}
+            {/* El reloj solo existe si la campaña lo ha encendido (Fase F). */}
+            {clockEnabled && (
+              <span
+                className="rounded-sm border border-gold/30 bg-night-950/60 px-2 py-0.5 font-mono text-xs tracking-wide text-gold/80"
+                title="Hora de la campaña"
+              >
+                {clockLabel}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-bone/60">
             {user?.displayName || user?.username || 'Usuario'} · {isSolo ? 'Aventurero' : isDm ? 'DM' : 'Jugador'}
@@ -323,7 +371,7 @@ export default function CampaignGamePage() {
               {isLive ? 'Cerrar sesión de juego' : 'Abrir sesión de juego'}
             </button>
           )}
-          {isSolo && (
+          {isSolo && screen !== 'board' && (
             <button
               type="button"
               onClick={toggleDirector}
@@ -340,7 +388,7 @@ export default function CampaignGamePage() {
         </div>
       </header>
 
-      {directorError && (
+      {directorError && screen !== 'board' && (
         <p className="border-b border-blood/30 bg-blood/10 px-4 py-2 text-sm text-blood">{directorError}</p>
       )}
       {isSolo && !ownCharacterId && (
@@ -540,6 +588,9 @@ export default function CampaignGamePage() {
         onSelectFloor={setFloorId}
         playerView={playerView}
         onTogglePlayerView={() => setPlayerView((v) => !v)}
+        canControlEnemyAi={isDm || isSolo}
+        onToggleEnemyAi={toggleDirector}
+        tableControlError={directorError}
         pings={pings}
         onPing={(world) =>
           sendPing({
@@ -554,6 +605,12 @@ export default function CampaignGamePage() {
         }
         ownCharacterId={ownCharacterId}
         campaignId={campaignId}
+        canRest={canRest}
+        clockEnabled={clockEnabled}
+        clockLabel={clockLabel}
+        restBusy={restBusy}
+        onRest={rest}
+        onToggleClock={toggleClock}
       />
     );
   }

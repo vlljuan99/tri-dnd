@@ -51,6 +51,10 @@ export const useRoom = create((set, get) => ({
   spellAims: [],
   spellFx: [],
   bestiaryVersion: 0,
+  // Nivel concedido por el DM (Fase D). Se guarda el número y un contador,
+  // para que quien esté en la mesa vea el aviso sin recargar.
+  grantedLevel: null,
+  grantedLevelVersion: 0,
 
   ensureSocket() {
     if (socket) return socket;
@@ -135,6 +139,9 @@ export const useRoom = create((set, get) => ({
       }, 1700);
     });
     socket.on('bestiario:actualizado', () => set((state) => ({ bestiaryVersion: state.bestiaryVersion + 1 })));
+    socket.on('campana:nivel', ({ grantedLevel }) =>
+      set((state) => ({ grantedLevel, grantedLevelVersion: state.grantedLevelVersion + 1 }))
+    );
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
     socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
     socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));

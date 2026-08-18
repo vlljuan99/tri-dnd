@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { TACTICAL_CAMERA_DISTANCE } from '../domain/weather.js';
+import { TILT_INITIAL, orbitBy as orbitView, rotateBy, viewDegrees, withTilt } from '../domain/camera.js';
 
 const DEFAULT_ZOOM = 52;
 const MIN_ZOOM = 24;
 const MAX_ZOOM = 120;
-// Inclinación inicial de la cámara respecto a la vertical (debe coincidir
-// con el escalón inicial de TILT_STEPS_DEG en TacticalMap, 26°). El comando
-// 'tilt' trae el ángulo elegido en radianes (0 = cenital puro) y 'rotate'
-// gira el tablero en pasos de 45°; la geometría generaliza el caso cenital
-// (tilt 0 y azimut 0 reproducen exactamente la vista y el `up` originales).
-const TILT_INITIAL = (26 * Math.PI) / 180;
-const TILT_MAX = 1.1; // tope de seguridad (~63°)
-const AZIMUTH_STEP = Math.PI / 4; // 45° por pulsación
+// Orientación (inclinación y azimut) y sus topes viven en domain/camera.js:
+// el comando 'tilt' trae el ángulo elegido en radianes (0 = cenital puro) y
+// 'rotate' gira el tablero en pasos de 45°; la geometría de abajo generaliza
+// el caso cenital (tilt 0 y azimut 0 reproducen la vista y el `up` originales).
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -22,11 +19,16 @@ function pointerDistance(a, b) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
-export default function TacticalCamera({ map, command }) {
+export default function TacticalCamera({ map, command, onViewChange }) {
   const cameraRef = useRef(null);
   const pointersRef = useRef(new Map());
   const lastPointerRef = useRef(null);
   const lastPinchDistanceRef = useRef(null);
+  const lastPinchCenterRef = useRef(null);
+  // Botón derecho (o dos dedos) = orbitar; botón izquierdo = arrastrar el mapa
+  const orbitingRef = useRef(false);
+  const onViewChangeRef = useRef(onViewChange);
+  onViewChangeRef.current = onViewChange;
   const targetRef = useRef({ x: map.width / 2, z: map.height / 2 });
   const focusRef = useRef(null);
   const shakeUntilRef = useRef(0);
@@ -67,6 +69,15 @@ export default function TacticalCamera({ map, command }) {
     camera.lookAt(targetRef.current.x, 0, targetRef.current.z);
     camera.updateProjectionMatrix();
     invalidate();
+  }
+
+  // Órbita: el arrastre gira el tablero (azimut) y gradúa la inclinación, con
+  // los mismos topes que los botones del dock. El HUD necesita saber el ángulo
+  // real para no seguir enseñando el del último escalón.
+  function orbitBy(dx, dy) {
+    viewRef.current = orbitView(viewRef.current, dx, dy);
+    applyCamera();
+    onViewChangeRef.current?.(viewDegrees(viewRef.current));
   }
 
   function clampTarget() {
@@ -120,12 +131,16 @@ export default function TacticalCamera({ map, command }) {
     }
     // Rotar el tablero 45° por pulsación (dir +1 = horario en pantalla)
     if (command.type === 'rotate') {
-      viewRef.current.azimuth += AZIMUTH_STEP * (command.dir === -1 ? -1 : 1);
+      viewRef.current = rotateBy(viewRef.current, command.dir);
       applyCamera();
     }
     // Graduar la inclinación: el comando trae el ángulo en radianes (0 = cenital)
     if (command.type === 'tilt') {
-      viewRef.current.tilt = Math.min(TILT_MAX, Math.max(0, Number(command.tilt) || 0));
+      viewRef.current = withTilt(viewRef.current, command.tilt);
+      applyCamera();
+    }
+    if (command.type === 'reset-view') {
+      viewRef.current = { tilt: TILT_INITIAL, azimuth: 0 };
       applyCamera();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,12 +177,25 @@ export default function TacticalCamera({ map, command }) {
       setZoom(cameraRef.current.zoom * zoomFactor);
     }
 
+    function handleContextMenu(event) {
+      // El botón derecho orbita: sin esto el menú del navegador se come el gesto
+      event.preventDefault();
+    }
+
     function handlePointerDown(event) {
-      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (event.pointerType === 'mouse' && event.button === 0) orbitingRef.current = false;
+      else if (event.pointerType === 'mouse' && (event.button === 2 || event.button === 1)) orbitingRef.current = true;
+      else if (event.pointerType === 'mouse') return;
       pointersRef.current.set(event.pointerId, event);
       lastPointerRef.current = { x: event.clientX, y: event.clientY };
       const pointers = [...pointersRef.current.values()];
-      if (pointers.length === 2) lastPinchDistanceRef.current = pointerDistance(pointers[0], pointers[1]);
+      if (pointers.length === 2) {
+        lastPinchDistanceRef.current = pointerDistance(pointers[0], pointers[1]);
+        lastPinchCenterRef.current = {
+          x: (pointers[0].clientX + pointers[1].clientX) / 2,
+          y: (pointers[0].clientY + pointers[1].clientY) / 2,
+        };
+      }
     }
 
     function handlePointerMove(event) {
@@ -175,16 +203,34 @@ export default function TacticalCamera({ map, command }) {
       pointersRef.current.set(event.pointerId, event);
       const pointers = [...pointersRef.current.values()];
 
+      // Dos dedos: separarlos/juntarlos acerca y aleja; moverlos a la vez
+      // orbita. Es el equivalente táctil del botón derecho, para que el móvil
+      // llegue a la misma cámara sin más botones en pantalla.
       if (pointers.length >= 2 && cameraRef.current) {
         const distance = pointerDistance(pointers[0], pointers[1]);
+        const center = {
+          x: (pointers[0].clientX + pointers[1].clientX) / 2,
+          y: (pointers[0].clientY + pointers[1].clientY) / 2,
+        };
         if (lastPinchDistanceRef.current) {
           setZoom(cameraRef.current.zoom * (distance / lastPinchDistanceRef.current));
         }
+        if (lastPinchCenterRef.current) {
+          orbitBy(center.x - lastPinchCenterRef.current.x, center.y - lastPinchCenterRef.current.y);
+        }
         lastPinchDistanceRef.current = distance;
+        lastPinchCenterRef.current = center;
         return;
       }
 
       if (!lastPointerRef.current || !cameraRef.current) return;
+
+      if (orbitingRef.current) {
+        orbitBy(event.clientX - lastPointerRef.current.x, event.clientY - lastPointerRef.current.y);
+        lastPointerRef.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+
       const dx = event.clientX - lastPointerRef.current.x;
       const dy = event.clientY - lastPointerRef.current.y;
       // El arrastre se traduce a mundo según la orientación de la vista: el
@@ -206,9 +252,12 @@ export default function TacticalCamera({ map, command }) {
       pointersRef.current.delete(event.pointerId);
       lastPointerRef.current = null;
       lastPinchDistanceRef.current = null;
+      lastPinchCenterRef.current = null;
+      if (pointersRef.current.size === 0) orbitingRef.current = false;
     }
 
     element.addEventListener('wheel', handleWheel, { passive: false });
+    element.addEventListener('contextmenu', handleContextMenu);
     element.addEventListener('pointerdown', handlePointerDown);
     element.addEventListener('pointermove', handlePointerMove);
     element.addEventListener('pointerup', handlePointerUp);
@@ -216,6 +265,7 @@ export default function TacticalCamera({ map, command }) {
 
     return () => {
       element.removeEventListener('wheel', handleWheel);
+      element.removeEventListener('contextmenu', handleContextMenu);
       element.removeEventListener('pointerdown', handlePointerDown);
       element.removeEventListener('pointermove', handlePointerMove);
       element.removeEventListener('pointerup', handlePointerUp);

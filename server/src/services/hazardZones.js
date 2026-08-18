@@ -4,6 +4,7 @@ import { conditionTimer, normalizeConditionTimers } from './combatLifecycle.js';
 import {
   applyEnvironmentalDamage,
   environmentalSavingThrowBonus,
+  environmentalSaveAdvantage,
   resolveEnvironmentalTarget,
 } from './fluidEffects.js';
 import { notifyCombatVisual, postSystemMessage } from './liveMap.js';
@@ -135,6 +136,7 @@ function resolveZone(campaignId, target, zone, triggerText) {
   if (zone.save_ability) {
     const roll = buildServerD20Roll({
       bonus: environmentalSavingThrowBonus(target, zone.save_ability),
+      advantage: environmentalSaveAdvantage(target, zone.save_ability),
       label: `Salvación contra ${zone.name}`,
       actorName: target.name,
     });

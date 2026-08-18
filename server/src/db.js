@@ -7,7 +7,10 @@ db.pragma('foreign_keys = ON');
 
 // Migraciones incrementales controladas por PRAGMA user_version.
 // Cada entrada se ejecuta una sola vez y en orden; añadir nuevas al final.
-const migrations = [
+// Se exporta para poder probar una migración concreta sobre una base
+// temporal (ver services/__tests__/migrations.test.js): ninguna debe perder
+// datos de partidas ya jugadas.
+export const migrations = [
   // v1 — modelo base: usuarios, campañas, personajes, mesa de juego y compendio SRD
   `
   CREATE TABLE users (
@@ -1247,13 +1250,208 @@ const migrations = [
           AND campaign.campaign_type = 'escaramuza'
      );
   `,
+
+  // v68 — Sonidos personalizados de la mesa. El catálogo (qué sonidos existen)
+  // vive en el código; aquí solo se guarda QUIÉN ha sustituido cuál por un
+  // fichero propio.
+  //
+  // `scope` nace preparado para las dos capas acordadas: hoy solo se usa
+  // 'global' (los sonidos por defecto de toda la instalación, que cambia el
+  // administrador) y más adelante entrará 'campaign' con el `scope_id` de la
+  // mesa, para que cada DM pueda pisar los globales sin que estos desaparezcan.
+  // Por eso el índice único incluye el ámbito: la misma clave puede tener un
+  // sonido global y otro por campaña conviviendo.
+  `
+  CREATE TABLE IF NOT EXISTS sound_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL DEFAULT 'global',
+    scope_id INTEGER,
+    event_key TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    original_name TEXT,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS sound_overrides_scope_key
+    ON sound_overrides (scope, IFNULL(scope_id, 0), event_key);
+  `,
+
+  // v69 — Fase A de la rebanada vertical: slots de equipamiento reales en vez
+  // de `equipped: bool`, y CA derivada de la armadura/escudo equipados.
+  // `ac_override` (NULL = derivada) fuerza un valor manual para lo que las
+  // reglas aún no cubren (ver server/src/rules/equipment.js).
+  //
+  // Migración de datos conservadora sobre fichas ya jugadas: el modelo
+  // anterior permitía varias armas "equipadas" a la vez (sin slots
+  // exclusivos), así que solo la primera pasa a la mano principal y el resto
+  // vuelve a la mochila en vez de arriesgarse a violar los slots nuevos.
+  (db) => {
+    db.exec('ALTER TABLE characters ADD COLUMN ac_override INTEGER');
+    const rows = db.prepare('SELECT id, inventory FROM characters').all();
+    const update = db.prepare('UPDATE characters SET inventory = ? WHERE id = ?');
+    for (const row of rows) {
+      let inventory;
+      try {
+        inventory = JSON.parse(row.inventory);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(inventory)) continue;
+      let mainHandTaken = false;
+      const migrated = inventory.map((item) => {
+        const { equipped, ...rest } = item ?? {};
+        let slot = null;
+        if (equipped && rest.weapon && !mainHandTaken) {
+          slot = 'mano-principal';
+          mainHandTaken = true;
+        }
+        return { ...rest, slot, armor: rest.armor ?? null };
+      });
+      update.run(JSON.stringify(migrated), row.id);
+    }
+  },
+
+  // v70 — Fase B de la rebanada vertical: competencia real de armas y
+  // armaduras. `weapon_proficiencies`/`armor_proficiencies` guardan tokens
+  // del compendio ("simple-weapons", "dagger", "light-armor", "all-armor"...)
+  // resueltos desde la clase (server/src/services/classProficiencies.js).
+  //
+  // Esa competencia nunca se guardó antes, pero SÍ se puede reconstruir: la
+  // concede la clase, que la ficha ya tiene. Así que se deriva del compendio
+  // para cada personaje en vez de borrar las fichas de la beta — una
+  // migración jamás debe llevarse por delante datos de partidas jugadas.
+  //
+  // Una ficha sin clase, con una clase propia del DM o creada antes de
+  // sincronizar el SRD se queda con la lista vacía: es exactamente lo que
+  // significa (no consta competencia), y basta con reelegir la clase en la
+  // ficha para que el servidor la vuelva a derivar.
+  (db) => {
+    db.exec(`
+      ALTER TABLE characters ADD COLUMN weapon_proficiencies TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE characters ADD COLUMN armor_proficiencies TEXT NOT NULL DEFAULT '[]';
+    `);
+    const characters = db.prepare("SELECT id, class_index FROM characters WHERE kind = 'pj'").all();
+    if (characters.length === 0) return;
+    const classRow = db.prepare("SELECT data FROM srd_entries WHERE category = 'classes' AND idx = ?");
+    const profRow = db.prepare("SELECT data FROM srd_entries WHERE category = 'proficiencies' AND idx = ?");
+    const update = db.prepare('UPDATE characters SET weapon_proficiencies = ?, armor_proficiencies = ? WHERE id = ?');
+    for (const character of characters) {
+      const weapon = new Set();
+      const armor = new Set();
+      const index = character.class_index;
+      if (typeof index === 'string' && index && !index.startsWith('custom:')) {
+        const row = classRow.get(index);
+        for (const ref of row ? JSON.parse(row.data || '{}').proficiencies ?? [] : []) {
+          if (!ref?.index) continue;
+          if (ref.index === 'all-armor') {
+            armor.add('all-armor');
+            continue;
+          }
+          const found = profRow.get(ref.index);
+          if (!found) continue;
+          const data = JSON.parse(found.data || '{}');
+          const token = data.reference?.index;
+          if (!token) continue;
+          if (data.type === 'Weapons') weapon.add(token);
+          else if (data.type === 'Armor') armor.add(token);
+        }
+      }
+      update.run(JSON.stringify([...weapon]), JSON.stringify([...armor]), character.id);
+    }
+  },
+
+  // v71 — Fase C de la rebanada vertical: progresión de clase por nivel, que
+  // el SRD publica en /api/2014/classes/{index}/levels (dentro de la clase
+  // llegaba solo como una URL sin expandir). 12 clases × 20 niveles.
+  //
+  // Vive en su propia tabla y NO en `srd_entries` a propósito: la lista de
+  // categorías del compendio alimenta también el buscador transversal, el
+  // índice FTS y las referencias del chat, así que 240 entradas tipo
+  // «wizard-3» solo ensuciarían las búsquedas (riesgo 5 de
+  // docs/VERTICAL-SLICE.md). Los rasgos narrativos siguen viniendo de la
+  // categoría `features`, que ya trae `class` y `level`.
+  //
+  // `spell_slots` es el array de 9 posiciones (nivel 1 → 9) tal cual lo
+  // publica el SRD; `class_specific` guarda sin tocar lo propio de cada clase
+  // (usos de furia, dados de superioridad, ki…) para que la subida de nivel
+  // pueda leerlo sin otra migración.
+  `
+  CREATE TABLE IF NOT EXISTS class_levels (
+    class_index TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    prof_bonus INTEGER NOT NULL,
+    ability_score_bonuses INTEGER NOT NULL DEFAULT 0,
+    cantrips_known INTEGER,
+    spells_known INTEGER,
+    spell_slots TEXT NOT NULL DEFAULT '[]',
+    class_specific TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (class_index, level)
+  );
+  `,
+
+  // v72 — Fase D de la rebanada vertical: el nivel de un PJ deja de ser un
+  // campo libre. La campaña fija el nivel INICIAL con el que se crean los
+  // personajes y el nivel CONCEDIDO al que puede subir el grupo; el modo por
+  // defecto es milestone (el DM concede, no hay XP).
+  //
+  // `character_levelups` guarda el histórico: qué nivel se ganó, cuántos PG y
+  // por qué camino (valor fijo o tirada del dado de golpe), y qué mejora de
+  // característica se eligió. Es lo que permite explicar una ficha meses
+  // después sin fiarse de la memoria de nadie.
+  //
+  // Migración de datos conservadora: el nivel concedido de una campaña ya en
+  // marcha arranca en el nivel más alto que tenga su grupo, para que nadie
+  // baje de nivel ni se quede sin poder subir al que ya tenía.
+  (db) => {
+    db.exec(`
+      ALTER TABLE campaigns ADD COLUMN starting_level INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE campaigns ADD COLUMN granted_level INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE campaigns ADD COLUMN level_mode TEXT NOT NULL DEFAULT 'milestone';
+      CREATE TABLE IF NOT EXISTS character_levelups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        from_level INTEGER NOT NULL,
+        to_level INTEGER NOT NULL,
+        hp_gained INTEGER NOT NULL,
+        hp_method TEXT NOT NULL,
+        hp_roll INTEGER,
+        ability_increases TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_levelups_character ON character_levelups(character_id, to_level);
+      UPDATE campaigns SET granted_level = MAX(1, IFNULL((
+        SELECT MAX(level) FROM characters
+         WHERE characters.campaign_id = campaigns.id AND characters.kind = 'pj'
+      ), 1));
+      UPDATE campaigns SET starting_level = granted_level;
+    `);
+  },
+
+  // v73 — Fase F de la rebanada vertical: descansos y reloj de campaña.
+  //
+  // `hit_dice_spent` es el único dato nuevo del personaje: los dados de golpe
+  // disponibles son su nivel menos los gastados, así que no hay que migrar
+  // nada en fichas existentes (nadie ha gastado ninguno todavía).
+  //
+  // El reloj es una CAPACIDAD OPCIONAL y nace apagada (invariante 7 de
+  // docs/ARQUITECTURA.md): ninguna regla puede depender de él. Extiende el
+  // contador de jornadas que ya existía (`elapsed_days`, v52) con la hora del
+  // día en minutos; encenderlo o apagarlo a mitad de campaña no cambia nada
+  // más, el valor se conserva y deja de verse.
+  `
+  ALTER TABLE characters ADD COLUMN hit_dice_spent INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE campaigns ADD COLUMN clock_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE campaigns ADD COLUMN day_minutes INTEGER NOT NULL DEFAULT 480;
+  `,
 ];
 
 export function runMigrations() {
   const current = db.pragma('user_version', { simple: true });
   for (let v = current; v < migrations.length; v++) {
     db.transaction(() => {
-      db.exec(migrations[v]);
+      const migration = migrations[v];
+      if (typeof migration === 'function') migration(db);
+      else db.exec(migration);
       db.pragma(`user_version = ${v + 1}`);
     })();
     console.log(`[db] migración aplicada: v${v + 1}`);

@@ -1,9 +1,18 @@
-import { useRef } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { DICE_TYPES } from '../lib/dice.js';
 import { useDice } from '../store/dice.js';
 import { useRoom } from '../store/socket.js';
+import { useAuth } from '../store/auth.js';
+import { dadosDeTirada } from '../features/dice-tray/lib/supported.js';
+import { latestMessageId, pickIncomingRoll } from '../features/dice-tray/lib/incoming.js';
 import RollCard from './RollCard.jsx';
+
+// La bandeja arrastra three.js y react-three-fiber. Este tirador vive en el
+// bundle principal (el botón flotante está en todas las pantallas), así que la
+// bandeja se carga aparte y solo la primera vez que ruedan dados de verdad: en
+// la pantalla de acceso o en la ficha no se descarga nada de 3D.
+const DiceTray = lazy(() => import('../features/dice-tray/components/DiceTray.jsx'));
 
 // Posición del botón flotante, recordada por navegador (offsets negativos
 // desde su esquina inferior derecha por defecto)
@@ -59,6 +68,53 @@ export default function DiceOverlay() {
   // mano si abrir el tirador según cuánto se movió el dedo/cursor.
   const dragDistance = useRef(0);
 
+  // El número no se enseña hasta que los dados paran: si el total aparece
+  // antes, el vuelo del dado no significa nada. `revealedId` marca la última
+  // tirada ya asentada en la bandeja.
+  const [revealedId, setRevealedId] = useState(0);
+  // Quien haya pedido menos animación al sistema ve el resultado directo.
+  const reduceMotion = useMemo(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+    []
+  );
+  // Una tirada sin dados con cuerpo (solo modificador, por ejemplo) se lee al
+  // instante en la tarjeta, sin esperar a una bandeja que no va a rodar.
+  const tieneDadosFisicos = dadosDeTirada(dice.lastRoll).length > 0 && !reduceMotion;
+  const resultadoVisible = !tieneDadosFisicos || revealedId >= dice.rollId;
+  // `lastRoll` se queda en el store para siempre, así que "hay dados" no sirve
+  // para saber si AHORA MISMO está rodando algo: eso es que la última tirada
+  // propia aún no se ha asentado.
+  const propiaEnVuelo = tieneDadosFisicos && revealedId < dice.rollId;
+
+  // Las tiradas de los demás también ruedan: en una mesa, cuando alguien saca un
+  // 20 se ve caer el dado, no llega una línea de texto. Se leen del store de la
+  // sala y arrancan desde el último mensaje ya presente, para que al entrar no
+  // se ponga a rodar el historial entero.
+  const messages = useRoom((s) => s.messages);
+  const selfId = useAuth((s) => s.user?.id);
+  const baselineRef = useRef(null);
+  if (baselineRef.current === null) baselineRef.current = latestMessageId(messages);
+  const [ajena, setAjena] = useState(null);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    const entrante = pickIncomingRoll(messages, { selfId, sinceId: baselineRef.current });
+    if (!entrante) return;
+    baselineRef.current = entrante.id;
+    setAjena(entrante);
+  }, [messages, reduceMotion, selfId]);
+
+  // Red de seguridad: la bandeja se descarga bajo demanda y podría no llegar
+  // (red caída, chunk que falla). El resultado de una tirada nunca puede
+  // quedarse oculto por un problema de presentación, así que pasado el tiempo
+  // máximo de un vuelo se enseña igualmente.
+  const rollIdActual = dice.rollId;
+  useEffect(() => {
+    if (!tieneDadosFisicos || !rollIdActual) return undefined;
+    const timer = setTimeout(() => setRevealedId(rollIdActual), 4000);
+    return () => clearTimeout(timer);
+  }, [rollIdActual, tieneDadosFisicos]);
+
   function saveFabPosition() {
     window.localStorage.setItem(
       FAB_POSITION_KEY,
@@ -68,6 +124,36 @@ export default function DiceOverlay() {
 
   return (
     <>
+      {/* Los dados ruedan sobre toda la pantalla, no dentro del panel: se ven
+          igual con el tirador abierto o cerrado, y también cuando la tirada
+          nace de la ficha o de un ataque. */}
+      {/* Sin respaldo visible: mientras se descarga la bandeja no debe aparecer
+          nada tapando la pantalla; el panel ya dice "Rodando…". */}
+      {tieneDadosFisicos && (
+        <Suspense fallback={null}>
+          <DiceTray
+            key={dice.rollId}
+            roll={dice.lastRoll}
+            rollId={dice.rollId}
+            onSettled={() => setRevealedId(dice.rollId)}
+          />
+        </Suspense>
+      )}
+
+      {/* La tirada de otro jugador rueda con su nombre: en la mesa se ve quién
+          tira. No compite con la propia porque solo una está en vuelo. */}
+      {ajena && !propiaEnVuelo && (
+        <Suspense fallback={null}>
+          <DiceTray
+            key={`ajena-${ajena.id}`}
+            roll={ajena.roll}
+            rollId={ajena.id}
+            autorNombre={ajena.authorName}
+            onSettled={() => setAjena(null)}
+          />
+        </Suspense>
+      )}
+
       {/* Botón flotante: arrastrable, cada cual lo deja donde no le estorbe.
           onTap (y no onClick) para que soltar tras arrastrar no lo abra. */}
       <motion.button
@@ -212,9 +298,17 @@ export default function DiceOverlay() {
               Tirar
             </button>
 
+            {/* Mientras los dados ruedan por la pantalla, el panel no se queda
+                en blanco: dice que la tirada está en el aire. */}
+            {dice.lastRoll && !resultadoVisible && (
+              <p className="mt-3 rounded-sm border border-gold/20 bg-night-950/60 px-3 py-2 text-center font-display text-sm tracking-widest text-gold/70">
+                Rodando…
+              </p>
+            )}
+
             {/* Resultado con animación de giro/aparición */}
             <AnimatePresence mode="wait">
-              {dice.lastRoll && (
+              {dice.lastRoll && resultadoVisible && (
                 <motion.div
                   key={dice.rollId}
                   initial={{ opacity: 0, scale: 0.6, rotate: -12 }}

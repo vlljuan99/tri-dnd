@@ -144,10 +144,14 @@ export function buildMeta(category, data = {}) {
           ? { dice: data.two_handed_damage.damage_dice, type: referenceIndex(data.two_handed_damage.damage_type) }
           : null,
         properties: referenceIndexes(data.properties),
+        weaponCategory: data.weapon_category ?? null,
         weaponRange: data.weapon_range ?? null,
         range: data.range ?? null,
         throwRange: data.throw_range ?? null,
         armorClass: data.armor_class ?? null,
+        armorCategory: data.armor_category ?? null,
+        strMinimum: Number.isFinite(data.str_minimum) ? data.str_minimum : null,
+        stealthDisadvantage: Boolean(data.stealth_disadvantage),
         cost: data.cost ?? null,
         weight: data.weight ?? null,
       };

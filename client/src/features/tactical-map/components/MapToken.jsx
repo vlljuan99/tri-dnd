@@ -106,7 +106,85 @@ function FloatingCombatText({ visual, size }) {
   );
 }
 
-export default function MapToken({ token, selected, active, movable, saving, visuals = [], onSelect }) {
+function GraveCross({ size, visible }) {
+  const groupRef = useRef(null);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const targetScale = visible ? 1 : 0.01;
+    const scale = THREE.MathUtils.lerp(groupRef.current.scale.x, targetScale, 0.14);
+    groupRef.current.scale.setScalar(scale);
+    groupRef.current.position.y = THREE.MathUtils.lerp(
+      groupRef.current.position.y,
+      visible ? size * 0.08 : -size * 0.2,
+      0.14
+    );
+  });
+
+  return (
+    <group
+      ref={groupRef}
+      position={[0, -size * 0.2, 0]}
+      rotation={[0.12, -0.24, -0.08]}
+      scale={0.01}
+    >
+      <mesh position={[0, size * 0.48, 0]} raycast={() => null}>
+        <boxGeometry args={[size * 0.15, size * 0.96, size * 0.13]} />
+        <meshStandardMaterial color="#77736b" roughness={1} />
+      </mesh>
+      <mesh position={[0, size * 0.64, 0]} raycast={() => null}>
+        <boxGeometry args={[size * 0.58, size * 0.14, size * 0.13]} />
+        <meshStandardMaterial color="#89847a" roughness={1} />
+      </mesh>
+    </group>
+  );
+}
+
+// Aro bajo el objetivo mientras apuntas: verde si el golpe llega, ámbar si
+// sale a distancia larga (desventaja) y rojo si no llega o no lo ves. Es la
+// respuesta a "¿le alcanzo desde aquí?" sin abrir ningún panel.
+const RANGE_COLORS = {
+  alcance: '#7bb661',
+  larga: '#d8a13a',
+  fuera: '#c2452d',
+  'sin-vision': '#7a6f66',
+};
+
+function RangeIndicator({ size, state }) {
+  const materialRef = useRef(null);
+  const color = state ? RANGE_COLORS[state] ?? RANGE_COLORS.fuera : null;
+
+  useFrame(({ clock }) => {
+    if (!materialRef.current) return;
+    materialRef.current.opacity = 0.55 + Math.sin(clock.elapsedTime * 3.2) * 0.2;
+  });
+
+  if (!color) return null;
+  return (
+    <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.05, 0]} raycast={() => null}>
+      <torusGeometry args={[size * 0.58, 0.05, 8, 40]} />
+      <meshBasicMaterial ref={materialRef} color={color} transparent opacity={0.6} toneMapped={false} />
+    </mesh>
+  );
+}
+
+export default function MapToken({
+  token,
+  selected,
+  active,
+  dead = false,
+  movable,
+  saving,
+  visuals = [],
+  onSelect,
+  // Altura del suelo bajo el token: sobre una cornisa, la ficha se apoya en la
+  // plataforma. Sin esto quedaba enterrada dentro del bloque y desde la cámara
+  // cenital solo asomaba su etiqueta.
+  groundY = 0,
+  // Veredicto del arma que llevas empuñada sobre ESTE objetivo, o null si no
+  // estás apuntando: 'alcance' | 'larga' | 'fuera' | 'sin-vision'.
+  rangeState = null,
+}) {
   const groupRef = useRef(null);
   const discRef = useRef(null);
   const baseMaterialRef = useRef(null);
@@ -115,13 +193,13 @@ export default function MapToken({ token, selected, active, movable, saving, vis
   const flashRef = useRef(0);
   const missRef = useRef(0);
   const targetPosition = useMemo(
-    () => new THREE.Vector3(token.position.x, 0.12, token.position.z),
-    [token.position.x, token.position.z]
+    () => new THREE.Vector3(token.position.x, groundY + 0.12, token.position.z),
+    [groundY, token.position.x, token.position.z]
   );
   const segments = tokenShapeSegments(token.type);
-  // El disco se vuelca al caer inconsciente (0 PG), no al acumular el tercer
-  // fallo de muerte. El estado final vive en el tracker, no en la pose.
-  const dead = isTokenDowned(token);
+  // El disco se vuelca con 0 PG. La cruz, en cambio, depende del estado final
+  // del tracker que llega por separado desde el servidor.
+  const downed = isTokenDowned(token);
   const baseColor = useMemo(() => new THREE.Color(token.color || '#6e7c55'), [token.color]);
   const rimColor = useMemo(() => new THREE.Color(movable ? '#f1c96a' : '#3a332c'), [movable]);
   const deadBaseColor = useMemo(() => new THREE.Color('#626462'), []);
@@ -145,19 +223,19 @@ export default function MapToken({ token, selected, active, movable, saving, vis
     if (discRef.current) {
       discRef.current.rotation.x = THREE.MathUtils.lerp(
         discRef.current.rotation.x,
-        dead ? Math.PI / 2 : 0,
+        downed ? Math.PI / 2 : 0,
         0.16
       );
     }
     baseMaterialRef.current?.color.lerp(
-      flashRef.current > Date.now() ? impactColor : dead ? deadBaseColor : baseColor,
+      flashRef.current > Date.now() ? impactColor : downed ? deadBaseColor : baseColor,
       flashRef.current > Date.now() ? 0.7 : 0.16
     );
-    rimMaterialRef.current?.color.lerp(dead ? deadRimColor : rimColor, 0.16);
+    rimMaterialRef.current?.color.lerp(downed ? deadRimColor : rimColor, 0.16);
     if (grayOverlayMaterialRef.current) {
       grayOverlayMaterialRef.current.opacity = THREE.MathUtils.lerp(
         grayOverlayMaterialRef.current.opacity,
-        dead ? 0.68 : 0,
+        downed ? 0.68 : 0,
         0.16
       );
     }
@@ -166,13 +244,14 @@ export default function MapToken({ token, selected, active, movable, saving, vis
   return (
     <group
       ref={groupRef}
-      position={[token.position.x, 0.12, token.position.z]}
+      position={[token.position.x, groundY + 0.12, token.position.z]}
       onPointerDown={(event) => {
         event.stopPropagation();
         onSelect(token.id);
       }}
     >
       {selected && <SelectionIndicator size={token.size} />}
+      <RangeIndicator size={token.size} state={rangeState} />
       {active && <TurnIndicator size={token.size} />}
       <group ref={discRef}>
         <mesh>
@@ -202,6 +281,7 @@ export default function MapToken({ token, selected, active, movable, saving, vis
           />
         </mesh>
       </group>
+      <GraveCross size={token.size} visible={dead && downed} />
       {saving && (
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
           <ringGeometry args={[token.size * 0.53, token.size * 0.61, 24]} />

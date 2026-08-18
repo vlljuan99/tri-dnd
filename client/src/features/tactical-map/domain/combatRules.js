@@ -50,6 +50,7 @@ export function resolveAttackEffects({
   addIf(disadvantageReasons, attacker.has('asustado'), 'atacante asustado');
   addIf(disadvantageReasons, attacker.has('derribado'), 'atacante derribado');
   addIf(disadvantageReasons, attacker.has('apresado'), 'atacante apresado');
+  addIf(disadvantageReasons, attacker.has('armadura-no-competente'), 'armadura sin competencia');
   addIf(disadvantageReasons, target.has('invisible'), 'objetivo invisible');
   addIf(disadvantageReasons, ranged && longRange, 'distancia larga');
   addIf(disadvantageReasons, target.has('derribado') && distance > 1, 'objetivo derribado a distancia');

@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { disabledCellsToSet, cellKey } from '../domain/cells.js';
+import { ELEV_STEP } from '../domain/elevation.js';
 import { FLUID_TYPE_KEYS } from '../domain/fluids.js';
 
 // Construye la geometría del suelo de una sala: un cuadrado por casilla
@@ -89,7 +90,17 @@ function RoomImageFloor({ room, gridSize }) {
 
   return (
     <mesh geometry={geometry} raycast={() => null}>
-      <meshStandardMaterial map={texture} roughness={1} {...dimmedProps(room)} />
+      {/* Conservamos StandardMaterial para que antorchas y relieve sigan
+          afectando al arte, pero la misma textura emite un 20 % de sí: así la
+          ilustración mantiene detalle mínimo sin convertirse en un plano sin luz. */}
+      <meshStandardMaterial
+        map={texture}
+        emissive="#ffffff"
+        emissiveMap={texture}
+        emissiveIntensity={0.2}
+        roughness={1}
+        {...dimmedProps(room)}
+      />
     </mesh>
   );
 }
@@ -158,8 +169,6 @@ function RoomWalls({ room, gridSize, wallColor, doorEdges }) {
 // direccional, las caras superiores quedan más iluminadas que las laterales,
 // dando sensación de relieve incluso en vista cenital. Subir cuesta
 // movimiento extra (validado en servidor); aquí solo se pinta.
-const ELEV_STEP = 0.4; // altura de mundo por nivel (5 pies)
-
 function RoomElevation({ room, gridSize }) {
   const cells = room.elevationCells ?? [];
   if (!cells.length) return null;
@@ -422,7 +431,7 @@ function BoardLights({ map }) {
             />
           </mesh>
           {index < MAX_REAL_LIGHTS && !light.dim && (
-            <pointLight color="#ff9a3c" intensity={2.4} distance={map.gridSize * 4.5} decay={1.7} />
+            <pointLight color="#ff9a3c" intensity={3} distance={map.gridSize * 4.5} decay={1.7} />
           )}
         </group>
       ))}

@@ -140,5 +140,99 @@ export function emptyWizardData() {
     raceAbilityChoice: [],
     raceLanguageChoice: null,
     otherProficiencyChoices: {},
+    equipmentGroupChoice: {},
+    equipmentCategoryPicks: {},
   };
+}
+
+/**
+ * Resuelve una opción de `starting_equipment_options` del SRD a algo que la
+ * UI pueda pintar sin conocer los combinadores del compendio
+ * (`counted_reference`, `multiple`, `choice` con `equipment_category`).
+ */
+function resolveEquipmentPart(part) {
+  if (!part || typeof part !== 'object') return { kind: 'unknown' };
+  switch (part.option_type) {
+    case 'counted_reference':
+      return part.of
+        ? { kind: 'fixed', index: part.of.index, name: part.of.name, qty: part.count ?? 1 }
+        : { kind: 'unknown' };
+    case 'multiple':
+      return { kind: 'bundle', parts: (part.items ?? []).map(resolveEquipmentPart) };
+    case 'choice': {
+      const inner = part.choice ?? {};
+      if (inner.from?.option_set_type === 'equipment_category' && inner.from.equipment_category?.index) {
+        return {
+          kind: 'category',
+          categoryIndex: inner.from.equipment_category.index,
+          categoryName: inner.from.equipment_category.name,
+          choose: inner.choose ?? 1,
+        };
+      }
+      return { kind: 'unknown' };
+    }
+    default:
+      return { kind: 'unknown' };
+  }
+}
+
+// El `data` de la clase trae los nombres del SRD en inglés. `translate` deja
+// que quien pinta la etiqueta los sustituya por el nombre en español del
+// compendio ya cargado; sin traductor se queda el nombre original.
+const RAW_NAME = (_index, name) => name;
+
+export function partLabel(part, translate = RAW_NAME) {
+  switch (part.kind) {
+    case 'fixed': {
+      const name = translate(part.index, part.name);
+      return part.qty > 1 ? `${name} ×${part.qty}` : name;
+    }
+    case 'bundle':
+      return part.parts.map((p) => partLabel(p, translate)).join(' + ');
+    case 'category':
+      return `Elige ${part.choose} de ${translate(part.categoryIndex, part.categoryName)}`;
+    default:
+      return 'Equipo no reconocido (añádelo luego a mano)';
+  }
+}
+
+// Aplana una opción resuelta en sus objetos fijos y sus "huecos" de elección
+// por categoría (p. ej. "un arma marcial"), cada uno con una clave estable
+// para guardar la elección del jugador en wizard_data.
+function extractOption(rawOption, groupIndex, optionIndex) {
+  const resolved = resolveEquipmentPart(rawOption);
+  const key = `equip-${groupIndex}-${optionIndex}`;
+  const fixedGrants = [];
+  const categorySlots = [];
+  function walk(part, path) {
+    if (part.kind === 'fixed') fixedGrants.push({ index: part.index, name: part.name, qty: part.qty });
+    else if (part.kind === 'category') {
+      categorySlots.push({
+        pathKey: `${key}-cat-${path}`,
+        categoryIndex: part.categoryIndex,
+        categoryName: part.categoryName,
+        choose: part.choose,
+      });
+    } else if (part.kind === 'bundle') {
+      part.parts.forEach((p, i) => walk(p, `${path}-${i}`));
+    }
+  }
+  walk(resolved, '0');
+  return { key, part: resolved, label: partLabel(resolved), fixedGrants, categorySlots };
+}
+
+/** Equipo inicial de una clase: fijo (`starting_equipment`) + grupos a elegir. */
+export function parseStartingEquipment(classDetail) {
+  const fixed = (classDetail?.starting_equipment ?? [])
+    .map((entry) => ({ index: entry.equipment?.index, name: entry.equipment?.name, qty: entry.quantity ?? 1 }))
+    .filter((entry) => entry.index);
+
+  const groups = (classDetail?.starting_equipment_options ?? []).map((group, i) => ({
+    key: `equip-${i}`,
+    desc: group.desc,
+    choose: group.choose ?? 1,
+    options: (group.from?.options ?? []).map((option, j) => extractOption(option, i, j)),
+  }));
+
+  return { fixed, groups };
 }

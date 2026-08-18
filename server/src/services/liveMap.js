@@ -61,6 +61,13 @@ export function notifyCampaignMap(campaignId) {
   ioRef?.to(`campaign:${campaignId}`).emit('mapa:actualizado');
 }
 
+// El DM ha concedido un nivel (Fase D): el aviso es público —el grupo entero
+// sube— y solo lleva el número, nunca las fichas. Cada cliente vuelve a pedir
+// la suya para saber si le toca subir.
+export function notifyCampaignLevel(campaignId, grantedLevel) {
+  ioRef?.to(`campaign:${campaignId}`).emit('campana:nivel', { grantedLevel });
+}
+
 // Eventos visuales efímeros: nunca contienen estadísticas privadas, solo el
 // objetivo público y el número ya narrado en mesa.
 export function notifyCombatVisual(campaignId, visual) {

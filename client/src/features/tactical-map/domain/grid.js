@@ -38,6 +38,28 @@ export function snapToMapGrid(position, map) {
   return gridToWorld(clampGridCell(worldToGrid(position, map.gridSize), map), map.gridSize);
 }
 
+// Devuelve únicamente las aristas expuestas del conjunto de casillas. Una
+// arista interior desaparece porque la casilla vecina la comparte; los huecos
+// sí conservan sus cuatro lados y, por tanto, quedan delineados también.
+export function outlineEdges(cells = []) {
+  const occupied = new Set(cells.map(({ col, row }) => `${col},${row}`));
+  const directions = [
+    { side: 'n', col: 0, row: -1 },
+    { side: 'e', col: 1, row: 0 },
+    { side: 's', col: 0, row: 1 },
+    { side: 'o', col: -1, row: 0 },
+  ];
+  const edges = [];
+
+  for (const cell of cells) {
+    for (const direction of directions) {
+      if (occupied.has(`${cell.col + direction.col},${cell.row + direction.row}`)) continue;
+      edges.push({ col: cell.col, row: cell.row, side: direction.side });
+    }
+  }
+  return edges;
+}
+
 // El tablero compuesto se dibuja en coordenadas relativas al origen de la
 // planta (`map.origin`), mientras que el servidor guarda y valida las
 // absolutas del editor. Toda casilla que cruce el socket (apuntado, centro de

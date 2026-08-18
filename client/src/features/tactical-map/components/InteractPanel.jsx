@@ -13,7 +13,7 @@ const DOOR_LABELS = { puerta: 'Puerta', escalera: 'Escalera', portal: 'Portal' }
  * El servidor ya validó adyacencia y turno antes de llegar aquí; si rechaza,
  * el error se muestra tal cual.
  */
-export default function InteractPanel({ type, target, campaignId, characterId, combat, onClose }) {
+export default function InteractPanel({ type, target, campaignId, characterId, combat, onLooted, onClose }) {
   const [char, setChar] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,6 +34,9 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
         body: { characterId },
       });
       setLooted(resp.looted ?? []);
+      // El botín ya está en la ficha: el hotbar y el panel de inventario
+      // tienen que volver a leerla para poder equiparlo ahora mismo (Fase E).
+      onLooted?.();
       setLootConsequence(
         resp.consequence
           ? { text: resp.consequence, scope: resp.consequenceScope ?? 'player' }
@@ -132,11 +135,16 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
                   <li key={i}>
                     {l.name}
                     {l.qty > 1 ? ` ×${l.qty}` : ''}
+                    {l.equipable && <span className="ml-1.5 text-gold/70">se puede equipar</span>}
                   </li>
                 ))
               )}
             </ul>
-            <p className="mt-1 text-[0.65rem] text-bone/40">Añadido a tu inventario.</p>
+            <p className="mt-1 text-[0.65rem] text-bone/40">
+              {looted.some((l) => l.equipable)
+                ? 'Añadido a tu inventario: puedes equiparlo desde ahí sin salir de la mesa.'
+                : 'Añadido a tu inventario.'}
+            </p>
             {lootConsequence && (
               <div className="mt-2 rounded-sm border border-blood/25 bg-blood/10 p-2">
                 <p className="text-[0.65rem] uppercase tracking-widest text-blood">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 
 /**
@@ -9,20 +9,34 @@ import { api } from '../api.js';
 export function useCharacter(id) {
   const [char, setChar] = useState(null);
   const [editable, setEditable] = useState(false);
+  // Estado de nivel (Fase D): hasta dónde ha concedido la campaña, qué
+  // ganaría al subir y el histórico. Solo llega en la ficha propia.
+  const [leveling, setLeveling] = useState(null);
+  // Estado de descanso (Fase F): dados de golpe disponibles y su dado.
+  const [rest, setRest] = useState(null);
   const [saveState, setSaveState] = useState('saved'); // saved | pending | saving | error
   const [error, setError] = useState('');
 
   const pendingRef = useRef({});
   const timerRef = useRef(null);
 
+  const reload = useCallback(
+    () =>
+      api(`/characters/${id}`)
+        .then(({ character, editable, leveling, rest: restState }) => {
+          setChar(character);
+          setEditable(editable);
+          setLeveling(leveling ?? null);
+          setRest(restState ?? null);
+          return character;
+        })
+        .catch((e) => setError(e.message)),
+    [id]
+  );
+
   useEffect(() => {
-    api(`/characters/${id}`)
-      .then(({ character, editable }) => {
-        setChar(character);
-        setEditable(editable);
-      })
-      .catch((e) => setError(e.message));
-  }, [id]);
+    reload();
+  }, [reload]);
 
   async function flush() {
     const body = pendingRef.current;
@@ -46,5 +60,5 @@ export function useCharacter(id) {
     timerRef.current = setTimeout(flush, 800);
   }
 
-  return { char, editable, saveState, error, patch };
+  return { char, editable, saveState, error, patch, leveling, rest, reload };
 }

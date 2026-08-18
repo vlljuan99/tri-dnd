@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../../../api.js';
 import {
   abilityModifier,
   proficiencyBonus,
@@ -9,10 +8,13 @@ import {
   formatModifier,
   DAMAGE_TYPE_NAMES,
 } from '../../../lib/dnd.js';
+import { isProficientWithWeapon, wearingUnproficientArmor } from '../../../lib/proficiency.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
 import { resolveAttackEffects } from '../domain/combatRules.js';
 import { rangeValidation, weaponGeometry } from '../domain/combatGeometry.js';
+import { useCharacterWeapons } from '../hooks/useCharacterWeapons.js';
+import { isWielded } from '../domain/weaponSlots.js';
 
 // Golpe desarmado de 5e: ataque FUE + competencia, daño fijo 1 + FUE
 function unarmedWeapon(char) {
@@ -70,6 +72,9 @@ export default function AttackPanel({
   target,
   attackerCombatant,
   targetCombatant,
+  // Arma empuñada desde el hotbar: abre el panel con ella arriba y marcada,
+  // para no volver a buscarla en la lista.
+  weaponId = null,
   distance = Infinity,
   highGround = false,
   lineOfSight = true,
@@ -77,7 +82,9 @@ export default function AttackPanel({
 }) {
   const attackTarget = useRoom((s) => s.attackTarget);
   const dealDamage = useRoom((s) => s.dealDamage);
-  const [char, setChar] = useState(null);
+  // La ficha con el alcance de cada arma la carga el hook compartido: el
+  // hotbar pinta los mismos slots que este panel usa para tirar.
+  const { character: char, error: loadError } = useCharacterWeapons(attacker.characterId);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [thrownModes, setThrownModes] = useState({});
@@ -86,45 +93,6 @@ export default function AttackPanel({
   // { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
   const [feedback, setFeedback] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setChar(null);
-    setFeedback(null);
-    setError('');
-    api(`/characters/${attacker.characterId}`)
-      .then(async ({ character }) => {
-        const inventory = await Promise.all(
-          character.inventory.map(async (item) => {
-            if (!item.weapon || item.weapon.range || !item.srdIndex) return item;
-            try {
-              const detail = await api(`/srd/equipment/${item.srdIndex}`);
-              return {
-                ...item,
-                weapon: {
-                  ...item.weapon,
-                  range: detail.data?.range ?? null,
-                  throwRange: detail.data?.throw_range ?? null,
-                  properties:
-                    item.weapon.properties?.length
-                      ? item.weapon.properties
-                      : (detail.data?.properties ?? []).map((property) => property.index),
-                },
-              };
-            } catch {
-              return item;
-            }
-          })
-        );
-        if (!cancelled) setChar({ ...character, inventory });
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e.message || 'No se pudo cargar tu ficha.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [attacker.characterId]);
-
   // Al cambiar de objetivo se descarta el resultado pendiente
   useEffect(() => setFeedback(null), [target.id]);
 
@@ -132,8 +100,12 @@ export default function AttackPanel({
     ? { kind: 'marcador', id: target.serverId }
     : { kind: 'personaje', id: target.characterId };
 
-  const weapons = char ? char.inventory.filter((i) => i.weapon && i.equipped) : [];
-  const rows = char ? [...weapons, unarmedWeapon(char)] : [];
+  const weapons = char
+    ? char.inventory.filter((i) => i.weapon && (i.slot === 'mano-principal' || i.slot === 'mano-secundaria'))
+    : [];
+  const allRows = char ? [...weapons, unarmedWeapon(char)] : [];
+  const armed = weaponId != null ? allRows.find((row) => row.id === weaponId) ?? null : null;
+  const rows = armed ? [armed, ...allRows.filter((row) => row !== armed)] : allRows;
 
   function effectsFor(row, manualAdvantage = 'none', thrown = false) {
     const geometry = row.unarmed
@@ -143,6 +115,7 @@ export default function AttackPanel({
     const attackerConditions = [
       ...(attackerCombatant?.conditions ?? []),
       ...(attackerCombatant?.downed ? ['inconsciente'] : []),
+      ...(char && wearingUnproficientArmor(char) ? ['armadura-no-competente'] : []),
     ];
     const targetConditions = [
       ...(targetCombatant?.conditions ?? []),
@@ -182,7 +155,7 @@ export default function AttackPanel({
     }
     setBusy(true);
     setError('');
-    const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
+    const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row);
     const roll = rollAttack(bonus, {
       advantage: effects.advantage,
       label: `${row.name} — ataque contra ${target.name}`,
@@ -284,14 +257,18 @@ export default function AttackPanel({
         </button>
       </div>
 
-      {!char && !error && <p className="text-sm text-bone/50">Cargando armas…</p>}
-      {error && <p className="mb-2 text-xs text-blood">{error}</p>}
+      {!char && !loadError && <p className="text-sm text-bone/50">Cargando armas…</p>}
+      {(error || loadError) && <p className="mb-2 text-xs text-blood">{error || loadError}</p>}
 
       <div className="space-y-2">
         {rows.map((row) => {
           const thrown = !row.unarmed && Boolean(thrownModes[row.id]);
           const canThrow = Boolean(row.weapon?.properties?.includes('thrown'));
-          const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row.weapon);
+          const bonus = row.unarmed ? row.attackBonus : weaponAttackBonus(char, row);
+          const proficient =
+            row.unarmed ||
+            char.kind === 'boss' ||
+            isProficientWithWeapon(char.weapon_proficiencies, row.srdIndex, row.weapon.weaponCategory);
           const fb = feedback?.weaponId === row.id ? feedback : null;
           const automaticEffects = effectsFor(row, 'none', thrown);
           const geometry = row.unarmed
@@ -306,10 +283,20 @@ export default function AttackPanel({
                 ? automaticEffects.disadvantageReasons
                 : [];
           return (
-            <div key={row.id} className="rounded-sm border border-bone/10 bg-night-950/60 p-2">
+            <div
+              key={row.id}
+              className={`rounded-sm border p-2 ${
+                row === armed ? 'border-gold/60 bg-gold/5' : 'border-bone/10 bg-night-950/60'
+              }`}
+            >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">
                   {row.name}
+                  {!proficient && (
+                    <span className="ml-1.5 rounded-sm border border-bone/20 px-1 py-0.5 text-[0.6rem] uppercase tracking-wider text-bone/50">
+                      sin competencia
+                    </span>
+                  )}
                   {automaticEffects.advantage !== 'none' && (
                     <span className="ml-1.5 rounded-sm border border-moss/60 bg-moss/15 px-1 py-0.5 text-[0.6rem] uppercase tracking-wider text-bone/90">
                       {automaticEffects.advantage === 'adv' ? 'ventaja' : 'desventaja'} · {automaticReasons.join(', ')}

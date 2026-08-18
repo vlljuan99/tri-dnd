@@ -264,8 +264,24 @@ export function ensureCharacterTokens(map, campaignId) {
 // map_token_id). HP y CA salen del compendio SRD si el marcador tiene
 // monster_index. `startCombat=false` permite preparar un escenario antes de
 // que haya PJ sin crear un turno huérfano entre enemigos.
+export function spawnEncounterTransition({
+  added,
+  startCombat,
+  combatActiveBefore,
+  activeEnemiesBefore,
+}) {
+  const canStart = added > 0 && startCombat;
+  return {
+    turnModeActivated: canStart && !combatActiveBefore,
+    // Es un encuentro nuevo si la aparición reactiva una mesa libre O si es
+    // el primer enemigo vivo que entra mientras la mesa ya contaba rondas. Si
+    // ya había enemigos vivos, es un refuerzo y no repite el cartel.
+    encounterStarted: canStart && (!combatActiveBefore || !activeEnemiesBefore),
+  };
+}
+
 export function spawnRoomEnemies(campaignId, roomIds, { startCombat = true } = {}) {
-  if (!roomIds.length) return 0;
+  if (!roomIds.length) return { added: 0, turnModeActivated: false, encounterStarted: false };
   const placeholders = roomIds.map(() => '?').join(', ');
   const enemies = db
     .prepare(
@@ -273,7 +289,21 @@ export function spawnRoomEnemies(campaignId, roomIds, { startCombat = true } = {
        AND kind = 'enemigo' AND hidden = 0`
     )
     .all(...roomIds);
-  if (!enemies.length) return 0;
+  if (!enemies.length) return { added: 0, turnModeActivated: false, encounterStarted: false };
+
+  const tableBefore = db
+    .prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?')
+    .get(campaignId);
+  const activeEnemiesBefore = Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM combatants
+         WHERE campaign_id = ? AND kind = 'enemigo'
+           AND (hp_current IS NULL OR hp_current > 0)
+         LIMIT 1`
+      )
+      .get(campaignId)
+  );
 
   const already = new Set(
     db
@@ -351,22 +381,23 @@ export function spawnRoomEnemies(campaignId, roomIds, { startCombat = true } = {
     added += 1;
   }
   if (discovered.length) discoverCreatures(campaignId, discovered);
-  let startedCombat = false;
+  const transition = spawnEncounterTransition({
+    added,
+    startCombat,
+    combatActiveBefore: Boolean(tableBefore?.combat_active),
+    activeEnemiesBefore,
+  });
   if (added > 0 && startCombat) {
-    // Encuentro nuevo: si la mesa había vuelto a modo libre (p. ej. tras
-    // caer el último enemigo), un enemigo nuevo reactiva los turnos con
-    // iniciativas frescas; si ya estaba en turnos, solo arranca si no había orden
-    const table = db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId);
-    if (!table?.combat_active) {
+    if (transition.turnModeActivated) {
       activateTurnMode(campaignId);
-      startedCombat = true;
     } else {
       ensureTurnStarted(campaignId);
     }
   }
-  // startedCombat: el combate estaba en modo libre y estos enemigos lo
-  // reactivaron → quien llama lanza el aviso (cartel + chat).
-  return { added, startedCombat };
+  // encounterStarted es el contrato para cartel + chat. No depende solo de
+  // activar el modo: en una escaramuza la mesa puede estar ya en turnos antes
+  // del primer enemigo. Los refuerzos de un combate en marcha no lo repiten.
+  return { added, ...transition };
 }
 
 function loadMapContents(map) {

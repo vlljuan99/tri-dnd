@@ -16,6 +16,7 @@ import {
 } from './combatLifecycle.js';
 import { consumeMonsterAttack, parseMultiattackState } from './monsterActions.js';
 import { syncBossResources } from './bossActions.js';
+import { abilityModifier } from '../rules/abilities.js';
 
 let conditionExpirationNotifier = null;
 let turnStartEffectsNotifier = null;
@@ -39,10 +40,6 @@ export function bindTurnStartEffectsNotifier(fn) {
 // turno (más una acción adicional y una reacción por ronda, gestionadas
 // aparte). Este módulo no sabe nada de sockets ni de mensajes de chat: solo
 // datos y reglas; quien lo llama decide qué avisar y a quién.
-
-function abilityModifier(score) {
-  return Math.floor((Number(score) - 10) / 2);
-}
 
 function rollD20() {
   return 1 + Math.floor(Math.random() * 20);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gridToWorld, snapToGrid, snapToMapGrid, worldToGrid } from '../domain/grid.js';
+import { gridToWorld, outlineEdges, snapToGrid, snapToMapGrid, worldToGrid } from '../domain/grid.js';
 import { canMoveToken } from '../domain/permissions.js';
 import { isTokenDowned, updateTokenPosition } from '../domain/tokens.js';
 import {
@@ -28,6 +28,36 @@ test('ajusta una posición al centro de la casilla', () => {
 test('limita el ajuste de casillas a los bordes del mapa', () => {
   const map = { width: 4, height: 3, gridSize: 1 };
   assert.deepEqual(snapToMapGrid({ x: 9, y: 0, z: -2 }, map), { x: 3.5, y: 0, z: 0.5 });
+});
+
+test('calcula el contorno exterior e interior de un conjunto de casillas', () => {
+  assert.equal(outlineEdges([{ col: 0, row: 0 }]).length, 4);
+
+  const square = [
+    { col: 0, row: 0 }, { col: 1, row: 0 },
+    { col: 0, row: 1 }, { col: 1, row: 1 },
+  ];
+  assert.equal(outlineEdges(square).length, 8);
+
+  const lShape = [{ col: 0, row: 0 }, { col: 1, row: 0 }, { col: 0, row: 1 }];
+  assert.equal(outlineEdges(lShape).length, 8);
+
+  const ring = [];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      if (col !== 1 || row !== 1) ring.push({ col, row });
+    }
+  }
+  const ringEdges = outlineEdges(ring);
+  assert.equal(ringEdges.length, 16);
+  assert.deepEqual(
+    new Set(ringEdges.map((edge) => `${edge.col},${edge.row},${edge.side}`)),
+    new Set([
+      '0,0,n', '0,0,o', '1,0,n', '1,0,s', '2,0,n', '2,0,e',
+      '0,1,o', '0,1,e', '2,1,o', '2,1,e',
+      '0,2,s', '0,2,o', '1,2,n', '1,2,s', '2,2,e', '2,2,s',
+    ])
+  );
 });
 
 test('valida permisos básicos de movimiento', () => {
@@ -139,7 +169,7 @@ test('la visión de un enemigo respeta alcance, obstáculos y puertas cerradas',
     }],
     doors: [{ id: 1, kind: 'puerta', col: 0, row: 1, dirX: 1, dirY: 0, edge: true, isOpen: false }],
   };
-  const visible = new Set(computeBoardVision(map, { col: 0, row: 1, radius: 4 }).map(([x, y]) => `${x},${y}`));
+  const visible = new Set(computeBoardVision(map, { col: 0, row: 1, radius: 4 }).map(({ col, row }) => `${col},${row}`));
 
   assert.equal(visible.has('0,1'), true);
   assert.equal(visible.has('1,1'), false);
@@ -147,7 +177,7 @@ test('la visión de un enemigo respeta alcance, obstáculos y puertas cerradas',
 
   map.doors[0].isOpen = true;
   const withOpenDoor = new Set(
-    computeBoardVision(map, { col: 0, row: 1, radius: 4 }).map(([x, y]) => `${x},${y}`)
+    computeBoardVision(map, { col: 0, row: 1, radius: 4 }).map(({ col, row }) => `${col},${row}`)
   );
   assert.equal(withOpenDoor.has('1,1'), true);
   assert.equal(withOpenDoor.has('2,1'), true);
@@ -164,7 +194,7 @@ test('la niebla tóxica limita la visión mientras el token está encima', () =>
     doors: [],
   };
   const visible = computeBoardVision(map, { col: 4, row: 0, radius: 6 });
-  assert.equal(visible.some(([col]) => col === 1), false);
-  assert.equal(visible.some(([col]) => col === 2), true);
-  assert.equal(visible.some(([col]) => col === 6), true);
+  assert.equal(visible.some(({ col }) => col === 1), false);
+  assert.equal(visible.some(({ col }) => col === 2), true);
+  assert.equal(visible.some(({ col }) => col === 6), true);
 });

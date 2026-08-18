@@ -18,6 +18,8 @@ import {
   serializeCustomEntry,
 } from '../services/customLibrary.js';
 import { campaignDmForMember, visibleCustomOwnerIds } from '../services/customLibraryAccess.js';
+import { resolveCombatProficiencies } from '../services/classProficiencies.js';
+import { classLevel, classProgression } from '../services/classProgression.js';
 
 export const srdRouter = Router();
 srdRouter.use(requireAuth);
@@ -466,6 +468,30 @@ srdRouter.get('/:category', (req, res) => {
   res.json({ results, total, offset, limit, hasMore: offset + results.length < total });
 });
 
+// Progresión de una clase (Fase C): la tabla del manual nivel a nivel —
+// competencia, mejoras de característica, trucos, conjuros y espacios— más los
+// rasgos que se ganan en cada uno. Sin `?nivel` devuelve los 20 niveles.
+//
+// No pasa por `/:category/:idx` porque la progresión no vive en el compendio:
+// tiene tabla propia justo para no aparecer en el buscador (ver v71).
+srdRouter.get('/classes/:index/niveles', (req, res) => {
+  const { index } = req.params;
+  if (req.query.nivel !== undefined) {
+    const level = Number(req.query.nivel);
+    if (!Number.isInteger(level) || level < 1 || level > 20) {
+      return res.status(400).json({ error: 'El nivel debe estar entre 1 y 20' });
+    }
+    const entry = classLevel(index, level);
+    if (!entry) return res.status(404).json({ error: 'Esa clase no tiene progresión sincronizada' });
+    return res.json({ level: entry });
+  }
+  const levels = classProgression(index);
+  if (!levels.length) {
+    return res.status(404).json({ error: 'Esa clase no tiene progresión sincronizada' });
+  }
+  res.json({ levels });
+});
+
 // Detalle de una entrada, con datos completos del SRD o de la biblioteca propia
 srdRouter.get('/:category/:idx', (req, res) => {
   const { category, idx } = req.params;
@@ -488,5 +514,10 @@ srdRouter.get('/:category/:idx', (req, res) => {
     .get(category, idx);
   if (!row) return res.status(404).json({ error: 'Entrada no encontrada' });
   const [entry] = attachMonsterUserData([toEntry(row, { full: true })], req.user.id);
+  if (category === 'classes' && entry.data) {
+    const { weaponProficiencies, armorProficiencies } = resolveCombatProficiencies(entry.data.proficiencies);
+    entry.data.weapon_proficiencies_resolved = weaponProficiencies;
+    entry.data.armor_proficiencies_resolved = armorProficiencies;
+  }
   res.json(entry);
 });

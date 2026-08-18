@@ -10,8 +10,8 @@ export default function StepIdentidad({ char, patch, campaigns, errors }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-bone/70">
-        El nombre, la campaña y el nivel identifican al personaje. El resto de datos puede
-        completarse ahora o más adelante.
+        El nombre y la campaña identifican al personaje. El resto de datos puede completarse
+        ahora o más adelante.
       </p>
 
       <label className={labelClass}>
@@ -29,17 +29,17 @@ export default function StepIdentidad({ char, patch, campaigns, errors }) {
       </label>
 
       <div className="grid grid-cols-2 gap-3">
-        <label className={labelClass}>
-          <span className={labelTextClass}>Nivel inicial *</span>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            value={char.level}
-            onChange={(e) => patch({ level: Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)) })}
-            className={`${inputClass} font-mono`}
-          />
-        </label>
+        {/* Fase D: el nivel no es un campo libre. Lo fija la campaña como
+            nivel inicial y, a partir de ahí, solo sube por milestone del DM. */}
+        <div className={labelClass}>
+          <span className={labelTextClass}>Nivel inicial</span>
+          <p className={`${inputClass} font-mono`}>{char.level}</p>
+          <span className="text-[0.7rem] text-bone/50">
+            {char.campaign_id
+              ? 'Lo fija tu campaña; a partir de ahí lo concede el DM.'
+              : 'Sin campaña se empieza en el nivel 1.'}
+          </span>
+        </div>
         <label className={labelClass}>
           <span className={labelTextClass}>Campaña</span>
           <select

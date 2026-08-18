@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { ABILITIES, SKILLS } from '../../lib/dnd.js';
+import { api } from '../../api.js';
+import { srdCampaignPath } from '../../lib/srdCampaign.js';
 import { parseProficiencyChoices, classAutoProficiencies } from '../../lib/wizard.js';
 import HelpBlock from './HelpBlock.jsx';
 
@@ -8,6 +11,23 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
   const wd = char.wizard_data;
   const raceSkills = wd.appliedRaceSkillProficiencies ?? [];
   const chosenSkills = char.skill_proficiencies.filter((key) => !raceSkills.includes(key));
+
+  // El `data` de la clase trae los nombres de sus competencias en inglés; el
+  // compendio ya los tiene traducidos, así que se piden y se sustituyen. Si
+  // una no está traducida todavía, se queda el nombre del SRD.
+  const [profNames, setProfNames] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    api(srdCampaignPath('proficiencies', char.campaign_id))
+      .then(({ results }) => {
+        if (!cancelled) setProfNames(Object.fromEntries(results.map((entry) => [entry.index, entry.name])));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [char.campaign_id]);
+  const profName = (entry) => profNames[entry.index] ?? entry.name;
 
   function toggleSkill(key) {
     const current = chosenSkills;
@@ -27,7 +47,9 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
     else return;
     const nextChoices = { ...currentChoices, [group.groupKey]: nextKeys };
     const allNames = (otherChoices ?? []).flatMap((g) =>
-      (nextChoices[g.groupKey] ?? []).map((k) => g.options.find((o) => o.key === k)?.name).filter(Boolean)
+      (nextChoices[g.groupKey] ?? [])
+        .map((k) => profNames[k] ?? g.options.find((o) => o.key === k)?.name)
+        .filter(Boolean)
     );
     patch({ wizard_data: { ...wd, otherProficiencyChoices: nextChoices }, other_proficiencies: allNames });
   }
@@ -61,7 +83,7 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
           <p className="mb-1.5 text-xs uppercase tracking-wider text-bone/50">Armas y armaduras (automáticas)</p>
           <div className="flex flex-wrap gap-1.5">
             {autoProf.map((p) => (
-              <span key={p.index} className="rounded-sm border border-bone/15 px-2 py-1 text-xs text-bone/60">{p.name}</span>
+              <span key={p.index} className="rounded-sm border border-bone/15 px-2 py-1 text-xs text-bone/60">{profName(p)}</span>
             ))}
           </div>
         </div>
@@ -136,7 +158,7 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
                     } ${disabled ? 'opacity-40' : 'cursor-pointer hover:bg-bone/5'}`}
                   >
                     <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleOther(group, o.key)} className="accent-gold" />
-                    {o.name}
+                    {profNames[o.key] ?? o.name}
                   </label>
                 );
               })}

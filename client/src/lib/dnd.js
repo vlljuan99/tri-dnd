@@ -1,5 +1,6 @@
 // Reglas básicas de D&D 5e para la ficha semiautomática.
 // Los nombres en español coinciden con las traducciones del compendio SRD.
+import { isProficientWithWeapon } from './proficiency.js';
 
 export const ABILITIES = [
   { key: 'str', name: 'Fuerza', short: 'FUE' },
@@ -163,10 +164,13 @@ export function weaponAbility(character, weapon) {
   return 'str';
 }
 
-/** Bonificador de ataque de un arma (se asume competencia con el arma equipada) */
-export function weaponAttackBonus(character, weapon) {
-  const mod = abilityModifier(character.abilities[weaponAbility(character, weapon)]);
-  return mod + proficiencyBonus(character.level);
+/** Bonificador de ataque de un arma del inventario (item con srdIndex + weapon): mod. + competencia SOLO si es competente. Las fichas del DM (jefe/enemigo/PNJ) no pasan por el asistente y se tratan como siempre competentes. */
+export function weaponAttackBonus(character, item) {
+  const mod = abilityModifier(character.abilities[weaponAbility(character, item.weapon)]);
+  const proficient =
+    character.kind === 'boss' ||
+    isProficientWithWeapon(character.weapon_proficiencies, item.srdIndex, item.weapon.weaponCategory);
+  return mod + (proficient ? proficiencyBonus(character.level) : 0);
 }
 
 /** Modificador de daño de un arma */
