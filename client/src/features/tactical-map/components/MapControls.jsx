@@ -1,10 +1,12 @@
+import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CAMERA_KEYS, keyLabel } from '../domain/shortcuts.js';
+import './tactical-hud.css';
 
 const PANEL =
-  'rounded-xl border border-gold/25 bg-night-950/90 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-md';
+  'tactical-controls-panel border border-gold/25 p-1.5';
 const SLOT =
-  'group relative grid h-9 w-9 place-items-center rounded-lg border border-bone/15 bg-night-900/85 text-bone/65 transition hover:border-gold/60 hover:bg-gold/10 hover:text-gold disabled:cursor-not-allowed disabled:opacity-25';
+  'tactical-control-slot group relative grid h-9 w-9 place-items-center rounded-sm border border-bone/15 bg-night-900/85 text-bone/65 transition hover:border-gold/60 hover:bg-gold/10 hover:text-gold disabled:cursor-not-allowed disabled:opacity-25';
 const SLOT_ON = 'border-gold/70 bg-gold/15 text-gold shadow-[inset_0_0_12px_rgba(232,195,104,0.12)]';
 
 function Icon({ name, className = 'h-[1.05rem] w-[1.05rem]' }) {
@@ -69,6 +71,7 @@ function IconButton({ label, icon, shortcut = null, active = false, className = 
     <button
       type="button"
       aria-label={label}
+      aria-pressed={active || undefined}
       aria-keyshortcuts={key ?? undefined}
       title={key ? `${label} · Tecla ${key}` : label}
       className={`${SLOT} ${active ? SLOT_ON : ''} ${className} ${key ? 'relative' : ''}`}
@@ -125,11 +128,14 @@ export default function MapControls({
   drawerOpen,
   onToggleDrawer,
 }) {
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const cameraId = useId();
+
   return (
-    <div className="pointer-events-auto flex w-[7.25rem] flex-col gap-1.5">
+    <div className="tactical-controls pointer-events-auto flex w-[7.25rem] flex-col gap-1.5">
       {canNudgeSelected && (
         <div className={PANEL}>
-          <p className="mb-1 truncate px-1 text-center font-display text-[0.58rem] uppercase tracking-[0.14em] text-gold/55">
+          <p className="tactical-control-heading mb-1 truncate px-1 text-center font-display text-[0.58rem] uppercase tracking-[0.14em] text-gold/55">
             {selectedToken.name}
           </p>
           <div className="grid grid-cols-3 gap-1">
@@ -144,7 +150,20 @@ export default function MapControls({
       )}
 
       <div className={PANEL} aria-label="Cámara" title="Arrastra con el botón derecho para orbitar; con dos dedos en móvil">
-        <div className="grid grid-cols-3 gap-1">
+        <p className="tactical-control-heading tactical-camera-heading">Cámara</p>
+        <button
+          type="button"
+          className="tactical-camera-toggle"
+          aria-label={cameraOpen ? 'Ocultar controles de cámara' : 'Mostrar controles de cámara'}
+          aria-expanded={cameraOpen}
+          aria-controls={cameraId}
+          onClick={() => setCameraOpen((open) => !open)}
+        >
+          <Icon name="center" />
+          Cámara
+          <span aria-hidden="true">{cameraOpen ? '▾' : '▴'}</span>
+        </button>
+        <div id={cameraId} className={`tactical-camera-grid grid grid-cols-3 gap-1 ${cameraOpen ? 'is-open' : ''}`}>
           <IconButton
             label="Rotar 45° a la izquierda"
             icon="rotate-left"
@@ -167,7 +186,7 @@ export default function MapControls({
           />
           <span
             title="Inclinación actual"
-            className="grid h-9 w-9 place-items-center rounded-lg border border-gold/15 bg-night-900/70 font-mono text-[0.65rem] text-gold/65"
+            className="tactical-camera-angle grid h-9 w-9 place-items-center rounded-sm border border-gold/15 bg-night-900/70 font-mono text-[0.65rem] text-gold/65"
           >
             {tiltLabel}
           </span>
@@ -187,6 +206,7 @@ export default function MapControls({
       </div>
 
       <div className={PANEL} aria-label="Herramientas del tablero">
+        <p className="tactical-control-heading">Mesa</p>
         <div className="grid grid-cols-3 gap-1">
           <IconButton
             label={showGrid ? 'Ocultar rejilla' : 'Mostrar rejilla'}

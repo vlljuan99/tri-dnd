@@ -4,12 +4,13 @@ import * as THREE from 'three';
 import { disabledCellsToSet, cellKey } from '../domain/cells.js';
 import { ELEV_STEP } from '../domain/elevation.js';
 import { FLUID_TYPE_KEYS } from '../domain/fluids.js';
+import { BoardMaterials, StoneBlock, StoneMaterial } from './BoardMaterials.jsx';
 
 // Construye la geometría del suelo de una sala: un cuadrado por casilla
 // activa (las desactivadas se omiten, quedando como vacío/oscuro). Las UV de
 // cada casilla apuntan a su porción de la textura de la sala, para que una
 // imagen rectangular se "recorte" a la forma de la sala.
-function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells }) {
+function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells, stone = false }) {
   const disabled = disabledCellsToSet(disabledCells);
   const positions = [];
   const uvs = [];
@@ -30,7 +31,12 @@ function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells })
       const v1 = 1 - (r + 1) / height;
 
       positions.push(x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1);
-      uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
+      if (stone) {
+        uvs.push(x0 / gridSize / 4, -z0 / gridSize / 4, x1 / gridSize / 4, -z0 / gridSize / 4,
+          x1 / gridSize / 4, -z1 / gridSize / 4, x0 / gridSize / 4, -z1 / gridSize / 4);
+      } else {
+        uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
+      }
       // Orden de índices invertido para que la cara quede orientada hacia
       // +Y (la cámara cenital mira hacia abajo): si no, el culling por
       // defecto de FrontSide oculta el suelo entero.
@@ -47,11 +53,13 @@ function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells })
   return geometry;
 }
 
-function useRoomGeometry(room, gridSize) {
-  return useMemo(
-    () => buildRoomGeometry({ ...room, gridSize }),
-    [room.col, room.row, room.width, room.height, room.disabledCells, gridSize]
+function useRoomGeometry(room, gridSize, stone = false) {
+  const geometry = useMemo(
+    () => buildRoomGeometry({ ...room, gridSize, stone }),
+    [room.col, room.row, room.width, room.height, room.disabledCells, gridSize, stone]
   );
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return geometry;
 }
 
 // Las salas sin revelar solo llegan al DM: se pintan atenuadas para que
@@ -89,7 +97,7 @@ function RoomImageFloor({ room, gridSize }) {
   const geometry = useRoomGeometry(room, gridSize);
 
   return (
-    <mesh geometry={geometry} raycast={() => null}>
+    <mesh geometry={geometry} receiveShadow raycast={() => null}>
       {/* Conservamos StandardMaterial para que antorchas y relieve sigan
           afectando al arte, pero la misma textura emite un 20 % de sí: así la
           ilustración mantiene detalle mínimo sin convertirse en un plano sin luz. */}
@@ -97,7 +105,7 @@ function RoomImageFloor({ room, gridSize }) {
         map={texture}
         emissive="#ffffff"
         emissiveMap={texture}
-        emissiveIntensity={0.2}
+        emissiveIntensity={0.25}
         roughness={1}
         {...dimmedProps(room)}
       />
@@ -106,10 +114,10 @@ function RoomImageFloor({ room, gridSize }) {
 }
 
 function RoomPlainFloor({ room, gridSize }) {
-  const geometry = useRoomGeometry(room, gridSize);
+  const geometry = useRoomGeometry(room, gridSize, true);
   return (
-    <mesh geometry={geometry} raycast={() => null}>
-      <meshStandardMaterial color="#2b241d" roughness={1} metalness={0} {...dimmedProps(room)} />
+    <mesh geometry={geometry} receiveShadow raycast={() => null}>
+      <StoneMaterial {...dimmedProps(room)} />
     </mesh>
   );
 }
@@ -122,14 +130,15 @@ function RoomObstacles({ room, gridSize }) {
   return (
     <group>
       {cells.map(([c, r]) => (
-        <mesh
+        <StoneBlock
           key={`${c},${r}`}
           position={[(room.col + c + 0.5) * gridSize, 0.2, (room.row + r + 0.5) * gridSize]}
+          dimensions={[gridSize * 0.86, 0.4, gridSize * 0.86]}
+          castShadow={room.revealed !== false} receiveShadow
           raycast={() => null}
         >
-          <boxGeometry args={[gridSize * 0.86, 0.4, gridSize * 0.86]} />
-          <meshStandardMaterial color="#463526" roughness={0.95} {...dimmedProps(room)} />
-        </mesh>
+          <StoneMaterial color="#8b8270" {...dimmedProps(room)} />
+        </StoneBlock>
       ))}
     </group>
   );
@@ -152,12 +161,11 @@ function RoomWalls({ room, gridSize, wallColor, doorEdges }) {
         const x = (room.col + c + (side === 'e' ? 1 : horizontal ? 0.5 : 0)) * gridSize;
         const z = (room.row + r + (side === 's' ? 1 : horizontal ? 0 : 0.5)) * gridSize;
         return (
-          <mesh key={`${c},${r},${side}`} position={[x, height / 2, z]} raycast={() => null}>
-            <boxGeometry
-              args={horizontal ? [gridSize + thickness, height, thickness] : [thickness, height, gridSize + thickness]}
-            />
-            <meshStandardMaterial color={wallColor || '#9b8555'} roughness={0.9} {...dimmedProps(room)} />
-          </mesh>
+          <StoneBlock key={`${c},${r},${side}`} position={[x, height / 2, z]} raycast={() => null}
+            dimensions={horizontal ? [gridSize + thickness, height, thickness] : [thickness, height, gridSize + thickness]}
+            castShadow={room.revealed !== false} receiveShadow>
+            <StoneMaterial color={wallColor || '#b0aa96'} {...dimmedProps(room)} />
+          </StoneBlock>
         );
       })}
     </group>
@@ -178,15 +186,16 @@ function RoomElevation({ room, gridSize }) {
         const h = Math.abs(level) * ELEV_STEP;
         // Positivo: bloque desde el suelo hacia arriba. Negativo: hacia abajo.
         const yCenter = level > 0 ? h / 2 : -h / 2;
-        const color = level > 0 ? '#7a6446' : '#241c14';
+        const color = level > 0 ? '#aba28c' : '#544f46';
         return (
           <mesh
             key={`${c},${r}`}
             position={[(room.col + c + 0.5) * gridSize, yCenter, (room.row + r + 0.5) * gridSize]}
             raycast={() => null}
+            castShadow={room.revealed !== false} receiveShadow
           >
             <boxGeometry args={[gridSize, h, gridSize]} />
-            <meshStandardMaterial color={color} roughness={0.95} {...dimmedProps(room)} />
+            <StoneMaterial color={color} {...dimmedProps(room)} />
           </mesh>
         );
       })}
@@ -199,7 +208,7 @@ function RoomElevation({ room, gridSize }) {
 // casilla, pero solo un draw-call por tipo y sin texturas, luces ni ruido.
 const FLUID_LAYER_Y = 0.045;
 const FLUID_CONFIG = {
-  agua: { kind: 0, colorA: '#0d4f78', colorB: '#62c7e8', opacity: 0.58 },
+  agua: { kind: 0, colorA: '#1c3e45', colorB: '#789b9c', opacity: 0.52 },
   lava: { kind: 1, colorA: '#5e0e08', colorB: '#ff7a18', opacity: 0.82 },
   niebla: { kind: 2, colorA: '#315b32', colorB: '#a4cf68', opacity: 0.3 },
   veneno: { kind: 3, colorA: '#26351d', colorB: '#71823b', opacity: 0.64 },
@@ -229,6 +238,17 @@ const fluidFragmentShader = `
   varying vec2 vCoord;
   varying float vOpacity;
 
+  float noise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 blend = fract(p);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    float a = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+    float b = fract(sin(dot(cell + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+    float c = fract(sin(dot(cell + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+    float d = fract(sin(dot(cell + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+  }
+
   void main() {
     float waveA = sin(vCoord.x * 3.7 + uTime * 0.75);
     float waveB = sin(vCoord.y * 4.3 - uTime * 0.58);
@@ -239,10 +259,14 @@ const fluidFragmentShader = `
     vec3 color = mix(uColorA, uColorB, mixValue);
 
     if (uKind < 0.5) {
-      // Agua: ondulación suave y una cresta especular que se desplaza.
-      float glint = pow(max(0.0, sin(vCoord.x * 7.0 - vCoord.y * 5.0 + uTime * 1.25)), 12.0);
-      color += vec3(0.32, 0.42, 0.48) * glint;
-      alphaFactor = 0.9 + crossed * 0.08;
+      // Ondas irregulares y reflejos cortos: el agua deja ver el arte bajo
+      // su superficie sin bandas diagonales uniformes sobre cada casilla.
+      float drift = noise(vCoord * 2.6 + vec2(uTime * 0.07, -uTime * 0.04));
+      float detail = noise(vCoord * 8.0 - vec2(uTime * 0.1, uTime * 0.03));
+      float glint = smoothstep(0.72, 0.94, drift * 0.65 + detail * 0.35);
+      color = mix(uColorA, uColorB, 0.2 + drift * 0.42);
+      color += vec3(0.18, 0.22, 0.22) * glint;
+      alphaFactor = 0.76 + drift * 0.2;
     } else if (uKind < 1.5) {
       // Lava: base naranja-roja con vetas oscuras de flujo lento.
       float vein = abs(sin(vCoord.x * 3.2 + vCoord.y * 5.4 - uTime * 0.28) + waveC * 0.38);
@@ -422,7 +446,15 @@ function BoardLights({ map }) {
     <group>
       {lights.map((light, index) => (
         <group key={`${light.x},${light.z}`} position={[light.x, light.y, light.z]}>
-          <mesh raycast={() => null}>
+          {/* Cazoleta de hierro: ancla la brasa al escenario. Las fuentes
+              decorativas lejanas conservan una sola malla. */}
+          {index < MAX_REAL_LIGHTS && (
+            <mesh position={[0, -0.095, 0]} raycast={() => null}>
+              <cylinderGeometry args={[map.gridSize * 0.1, map.gridSize * 0.06, 0.1, 10]} />
+              <meshStandardMaterial color="#39352e" metalness={0.62} roughness={0.65} />
+            </mesh>
+          )}
+          <mesh scale={[0.75, 1.45, 0.75]} raycast={() => null}>
             <sphereGeometry args={[map.gridSize * 0.08, 8, 8]} />
             <meshStandardMaterial
               color="#ffcf6e"
@@ -431,7 +463,7 @@ function BoardLights({ map }) {
             />
           </mesh>
           {index < MAX_REAL_LIGHTS && !light.dim && (
-            <pointLight color="#ff9a3c" intensity={3} distance={map.gridSize * 4.5} decay={1.7} />
+            <pointLight color="#ffb668" intensity={2.8} distance={map.gridSize * 4.5} decay={1.7} />
           )}
         </group>
       ))}
@@ -459,7 +491,7 @@ export default function MapFloor({ map }) {
   const doorEdges = useMemo(() => boardDoorEdges(map.doors), [map.doors]);
 
   return (
-    <group>
+    <BoardMaterials>
       {rooms.map((room) => (
         <group key={room.id}>
           {room.backgroundUrl ? (
@@ -476,6 +508,6 @@ export default function MapFloor({ map }) {
       ))}
       <BoardFluids rooms={rooms} gridSize={map.gridSize} />
       <BoardLights map={map} />
-    </group>
+    </BoardMaterials>
   );
 }

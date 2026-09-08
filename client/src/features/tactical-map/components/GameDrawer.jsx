@@ -14,6 +14,7 @@ import {
   splitMessageReferences,
 } from '../../../lib/chatReferences.js';
 import BestiaryJournalPanel from './BestiaryJournalPanel.jsx';
+import './tactical-hud.css';
 
 const ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g;
 
@@ -61,8 +62,8 @@ function ReferencedText({ message, onOpenReference }) {
 function Message({ message, selfId, onOpenReference }) {
   if (message.type === 'system') {
     return (
-      <p className="py-1 text-center font-display text-xs uppercase tracking-widest text-gold/60">
-        — <NarratedText text={message.body} /> —
+      <p className="tactical-journal-event py-1 text-center font-display text-xs uppercase tracking-widest text-gold/60">
+        <NarratedText text={message.body} />
       </p>
     );
   }
@@ -76,7 +77,7 @@ function Message({ message, selfId, onOpenReference }) {
   }
   const mine = message.author?.id === selfId;
   return (
-    <p className="text-sm leading-relaxed">
+    <p className="tactical-journal-message text-sm leading-relaxed">
       <span className={`mr-2 font-display text-xs tracking-wide ${mine ? 'text-gold' : 'text-gold/70'}`}>
         {message.author?.name ?? '—'}
       </span>
@@ -217,13 +218,24 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
   }
 
   return (
-    <div className="absolute inset-y-0 right-0 z-30 flex w-full flex-col border-l border-gold/20 bg-night-900/95 text-bone shadow-2xl backdrop-blur sm:w-96">
-      <div className="flex items-center justify-between border-b border-gold/15 px-3 py-2">
-        <div className="flex gap-1">
+    <div className="tactical-journal absolute inset-y-0 right-0 z-30 flex w-full flex-col border-l border-gold/20 bg-night-900/95 text-bone shadow-2xl backdrop-blur sm:w-96" aria-label="Diario de la mesa">
+      <div className="tactical-journal-heading flex items-center justify-between px-4 py-3">
+        <div>
+          <p className="tactical-eyebrow">Mesa compartida</p>
+          <h2 className="font-display text-lg tracking-wide">Diario de campaña</h2>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Cerrar panel" className="tactical-journal-close text-bone/60 hover:text-bone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <div className="border-b border-gold/15 px-3">
+        <div className="tactical-journal-tabs flex gap-1" aria-label="Secciones de la mesa">
           {TABS.map(([value, label]) => (
             <button
               key={value}
+              type="button"
               onClick={() => setTab(value)}
+              aria-pressed={tab === value}
               className={`rounded-sm px-2 py-1 font-display text-xs uppercase tracking-widest transition-colors ${
                 tab === value ? 'bg-gold/15 text-gold' : 'text-bone/50 hover:text-bone'
               }`}
@@ -232,14 +244,11 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
             </button>
           ))}
         </div>
-        <button onClick={onClose} aria-label="Cerrar panel" className="px-1 text-bone/60 hover:text-bone">
-          ✕
-        </button>
       </div>
 
       {tab === 'registro' && (
         <>
-          <div ref={logRef} className="flex-1 space-y-2 overflow-y-auto p-3">
+          <div ref={logRef} className="tactical-journal-log min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-label="Registro de la partida">
             {room.messages.length === 0 && (
               <p className="pt-8 text-center italic text-bone/40">
                 El registro está vacío. Saluda al grupo o tira unos dados.
@@ -249,12 +258,13 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               <Message key={m.id} message={m} selfId={userId} onOpenReference={openReference} />
             ))}
           </div>
-          <form onSubmit={send} className="border-t border-gold/15 p-3">
+          <form onSubmit={send} className="tactical-journal-composer border-t border-gold/15 p-3">
             {commandError && <p className="mb-2 text-xs text-blood">{commandError}</p>}
             <div className="flex gap-2">
             <div className="relative min-w-0 flex-1">
             <input
               ref={inputRef}
+              aria-label="Mensaje para la mesa"
               value={text}
               onChange={updateText}
               onClick={(event) => setCursor(event.currentTarget.selectionStart ?? text.length)}
@@ -285,7 +295,7 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
             </div>
             <button
               type="submit"
-              className="rounded-sm bg-gold px-3 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"
+              className="tactical-journal-send rounded-sm bg-gold px-3 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"
             >
               Enviar
             </button>
@@ -303,7 +313,7 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
       {tab === 'mesa' && (
         <ul className="space-y-2 overflow-y-auto p-4">
           {room.online.map((member) => (
-            <li key={member.id} className="flex items-center gap-2 text-sm">
+            <li key={member.id} className="tactical-journal-member flex items-center gap-2 text-sm">
               <span className="h-2 w-2 rounded-full bg-moss" />
               <span className="truncate">{member.name}</span>
               {member.id === userId && <span className="text-xs text-bone/40">(tú)</span>}

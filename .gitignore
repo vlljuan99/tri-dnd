@@ -30,3 +30,6 @@ deploy/.last-backup
 deploy/backups/
 deploy/src/
 deploy/src.tar.gz
+
+# Capturas y arneses de QA visual local (no forman parte del producto)
+/artifacts/
