@@ -8,6 +8,8 @@
 export const TILT_INITIAL = (26 * Math.PI) / 180;
 export const TILT_MAX = 1.1; // ~63°: más allá la cámara ortográfica rasa el suelo
 export const AZIMUTH_STEP = Math.PI / 4; // 45° por pulsación de Q/E
+export const MIN_ZOOM = 8;
+export const MAX_ZOOM = 120;
 
 // Sensibilidad del arrastre, en radianes por píxel.
 const ORBIT_AZIMUTH = 0.006;
@@ -15,6 +17,21 @@ const ORBIT_TILT = 0.005;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+// Encuadre inicial según la superficie disponible: el tablero entra entre la
+// iniciativa y el hotbar incluso en móvil. Girar y hacer zoom sigue siendo libre.
+export function fitBoardZoom(map, viewport, view = { tilt: TILT_INITIAL, azimuth: 0 }) {
+  const mobile = viewport.width < 768;
+  const usableWidth = Math.max(160, viewport.width - (mobile ? 40 : 200));
+  const usableHeight = Math.max(160, viewport.height - (mobile ? 340 : 260));
+  const width = Math.max(Number(map.width) || 1, 1);
+  const height = Math.max(Number(map.height) || 1, 1);
+  const cos = Math.abs(Math.cos(view.azimuth));
+  const sin = Math.abs(Math.sin(view.azimuth));
+  const projectedWidth = width * cos + height * sin;
+  const projectedHeight = (width * sin + height * cos) * Math.cos(view.tilt) + 1;
+  return Math.min(usableWidth / projectedWidth, usableHeight / projectedHeight, 85);
 }
 
 /**

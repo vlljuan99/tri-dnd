@@ -1,10 +1,10 @@
 export const TACTICAL_CAMERA_DISTANCE = 60;
 
 const TIME_COLORS = {
-  amanecer: '#392b2a',
-  dia: '#14110f',
-  atardecer: '#2b1c20',
-  noche: '#070a13',
+  amanecer: '#202022',
+  dia: '#15191b',
+  atardecer: '#1d1b20',
+  noche: '#080e17',
 };
 
 function clamp(value, min, max) {

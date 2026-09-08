@@ -9,52 +9,55 @@ import { isTokenDowned } from '../domain/tokens.js';
 function tokenShapeSegments(type) {
   if (type === 'enemy') return 6;
   if (type === 'npc') return 4;
-  return 32;
+  return 64;
 }
 
-// Barra de vida plana sobre el suelo, junto al token: fondo oscuro y
-// relleno proporcional que va del verde al rojo según lo herido que esté
-function HpBar({ token }) {
-  if (!Number.isInteger(token.hp) || !Number.isInteger(token.hpMax) || token.hpMax <= 0) return null;
-  const ratio = Math.max(0, Math.min(1, token.hp / token.hpMax));
-  const width = token.size * 0.9;
-  const color = ratio > 0.5 ? '#5e8c4a' : ratio > 0.25 ? '#c98f2e' : '#b33939';
+function makeTokenSurfaces() {
+  const grainCanvas = document.createElement('canvas');
+  grainCanvas.width = 96;
+  grainCanvas.height = 96;
+  const grainContext = grainCanvas.getContext('2d');
+  const pixels = grainContext.createImageData(96, 96);
+  for (let index = 0; index < 96 * 96; index += 1) {
+    const x = index % 96;
+    const y = Math.floor(index / 96);
+    const noise = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    const value = 160 + Math.floor((noise - Math.floor(noise)) * 60);
+    pixels.data.set([value, value, value, 255], index * 4);
+  }
+  grainContext.putImageData(pixels, 0, 0);
+  const grain = new THREE.CanvasTexture(grainCanvas);
+  grain.wrapS = grain.wrapT = THREE.RepeatWrapping;
 
-  return (
-    <group position={[0, 0.02, -token.size * 0.62]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-        <planeGeometry args={[width, 0.14]} />
-        <meshBasicMaterial color="#14110f" transparent opacity={0.85} />
-      </mesh>
-      {ratio > 0 && (
-        <mesh
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[(-width * (1 - ratio)) / 2, 0.005, 0]}
-          raycast={() => null}
-        >
-          <planeGeometry args={[width * ratio, 0.1]} />
-          <meshBasicMaterial color={color} />
-        </mesh>
-      )}
-    </group>
-  );
+  const shadowCanvas = document.createElement('canvas');
+  shadowCanvas.width = 64;
+  shadowCanvas.height = 64;
+  const shadowContext = shadowCanvas.getContext('2d');
+  const gradient = shadowContext.createRadialGradient(32, 32, 13, 32, 32, 31);
+  gradient.addColorStop(0, 'rgba(0, 0, 0, .5)');
+  gradient.addColorStop(0.6, 'rgba(0, 0, 0, .22)');
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  shadowContext.fillStyle = gradient;
+  shadowContext.fillRect(0, 0, 64, 64);
+  const shadow = new THREE.CanvasTexture(shadowCanvas);
+  return { grain, shadow };
 }
 
 function TurnIndicator({ size }) {
   const materialRef = useRef(null);
   const meshRef = useRef(null);
   useFrame(({ clock }) => {
-    const wave = (Math.sin(clock.elapsedTime * 4.2) + 1) / 2;
-    if (materialRef.current) materialRef.current.opacity = 0.35 + wave * 0.45;
+    const wave = (Math.sin(clock.elapsedTime * 2.4) + 1) / 2;
+    if (materialRef.current) materialRef.current.opacity = 0.4 + wave * 0.2;
     if (meshRef.current) {
-      const scale = 0.96 + wave * 0.14;
+      const scale = 0.99 + wave * 0.035;
       meshRef.current.scale.setScalar(scale);
     }
   });
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.075, 0]} raycast={() => null}>
-      <ringGeometry args={[size * 0.53, size * 0.66, 40]} />
-      <meshBasicMaterial ref={materialRef} color="#f6d77b" transparent opacity={0.6} depthWrite={false} />
+      <ringGeometry args={[size * 0.54, size * 0.59, 64]} />
+      <meshBasicMaterial ref={materialRef} color="#edcc8e" transparent opacity={0.6} depthWrite={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -101,7 +104,7 @@ function FloatingCombatText({ visual, size }) {
   if (!label) return null;
   return (
     <sprite ref={spriteRef} position={[0, size * 1.05, 0]} scale={[size * 1.8, size * 0.6, 1]} raycast={() => null}>
-      <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} />
+      <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
     </sprite>
   );
 }
@@ -128,11 +131,11 @@ function GraveCross({ size, visible }) {
       rotation={[0.12, -0.24, -0.08]}
       scale={0.01}
     >
-      <mesh position={[0, size * 0.48, 0]} raycast={() => null}>
+      <mesh castShadow position={[0, size * 0.48, 0]} raycast={() => null}>
         <boxGeometry args={[size * 0.15, size * 0.96, size * 0.13]} />
         <meshStandardMaterial color="#77736b" roughness={1} />
       </mesh>
-      <mesh position={[0, size * 0.64, 0]} raycast={() => null}>
+      <mesh castShadow position={[0, size * 0.64, 0]} raycast={() => null}>
         <boxGeometry args={[size * 0.58, size * 0.14, size * 0.13]} />
         <meshStandardMaterial color="#89847a" roughness={1} />
       </mesh>
@@ -197,11 +200,18 @@ export default function MapToken({
     [groundY, token.position.x, token.position.z]
   );
   const segments = tokenShapeSegments(token.type);
+  // El retrato circular queda dentro de la cara de las peanas cuadradas.
+  const portraitRadius = token.size * (token.type === 'npc' ? 0.305 : 0.385);
+  const surfaces = useMemo(makeTokenSurfaces, []);
+  useEffect(() => () => {
+    surfaces.grain.dispose();
+    surfaces.shadow.dispose();
+  }, [surfaces]);
   // El disco se vuelca con 0 PG. La cruz, en cambio, depende del estado final
   // del tracker que llega por separado desde el servidor.
   const downed = isTokenDowned(token);
-  const baseColor = useMemo(() => new THREE.Color(token.color || '#6e7c55'), [token.color]);
-  const rimColor = useMemo(() => new THREE.Color(movable ? '#f1c96a' : '#3a332c'), [movable]);
+  const baseColor = useMemo(() => new THREE.Color(token.color || '#6e7c55').lerp(new THREE.Color('#363a35'), 0.48), [token.color]);
+  const rimColor = useMemo(() => new THREE.Color(movable ? '#b69b66' : '#77786e'), [movable]);
   const deadBaseColor = useMemo(() => new THREE.Color('#626462'), []);
   const deadRimColor = useMemo(() => new THREE.Color('#8a8c88'), []);
   const impactColor = useMemo(() => new THREE.Color('#ff3f32'), []);
@@ -253,25 +263,40 @@ export default function MapToken({
       {selected && <SelectionIndicator size={token.size} />}
       <RangeIndicator size={token.size} state={rangeState} />
       {active && <TurnIndicator size={token.size} />}
+      {/* Contacto suave incluso con sombras de resolución reducida;
+          la peana conserva el mismo centro y huella lógica de la ficha. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.113, 0]} raycast={() => null}>
+        <planeGeometry args={[token.size * 1.24, token.size * 1.24]} />
+        <meshBasicMaterial map={surfaces.shadow} transparent opacity={0.7} depthWrite={false} />
+      </mesh>
       <group ref={discRef}>
-        <mesh>
-          <cylinderGeometry args={[token.size * 0.43, token.size * 0.43, 0.16, segments]} />
-          <meshStandardMaterial ref={baseMaterialRef} color={token.color || '#6e7c55'} roughness={0.82} />
+        <mesh castShadow receiveShadow position={[0, -0.055, 0]}>
+          <cylinderGeometry args={[token.size * 0.48, token.size * 0.45, 0.11, segments]} />
+          <meshStandardMaterial color="#323632" roughness={0.95} bumpMap={surfaces.grain} bumpScale={0.018} />
         </mesh>
-        <mesh position={[0, 0.087, 0]}>
-          <cylinderGeometry args={[token.size * 0.48, token.size * 0.48, 0.035, segments]} />
-          <meshBasicMaterial
+        <mesh castShadow receiveShadow position={[0, 0.02, 0]}>
+          <cylinderGeometry args={[token.size * 0.46, token.size * 0.48, 0.1, segments]} />
+          <meshStandardMaterial ref={baseMaterialRef} color={baseColor} roughness={0.76} metalness={0.18} bumpMap={surfaces.grain} bumpScale={0.01} />
+        </mesh>
+        <mesh castShadow receiveShadow position={[0, 0.092, 0]}>
+          <cylinderGeometry args={[token.size * 0.447, token.size * 0.48, 0.045, segments]} />
+          <meshStandardMaterial
             ref={rimMaterialRef}
-            color={movable ? '#f1c96a' : '#3a332c'}
-            transparent
-            opacity={movable ? 0.9 : 0.72}
+            color={rimColor}
+            roughness={0.4}
+            metalness={0.64}
+            roughnessMap={surfaces.grain}
           />
         </mesh>
-        <TokenIcon imageUrl={token.imageUrl} radius={token.size * 0.4} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.117, 0]} raycast={() => null}>
+          <ringGeometry args={[portraitRadius, portraitRadius + token.size * 0.018, 64]} />
+          <meshStandardMaterial color="#272b27" roughness={0.65} metalness={0.3} />
+        </mesh>
+        <TokenIcon imageUrl={token.imageUrl} radius={portraitRadius} color={token.color} name={token.name} />
         {/* Velo gris sobre el retrato: desatura también las texturas sin
             necesitar un shader adicional y desaparece al recuperar PG. */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.112, 0]} raycast={() => null}>
-          <circleGeometry args={[token.size * 0.405, 32]} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.123, 0]} raycast={() => null}>
+          <circleGeometry args={[portraitRadius, 64]} />
           <meshBasicMaterial
             ref={grayOverlayMaterialRef}
             color="#737773"
@@ -283,13 +308,12 @@ export default function MapToken({
       </group>
       <GraveCross size={token.size} visible={dead && downed} />
       {saving && (
-        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]} raycast={() => null}>
           <ringGeometry args={[token.size * 0.53, token.size * 0.61, 24]} />
-          <meshBasicMaterial color="#e8dfc9" transparent opacity={0.55} />
+          <meshBasicMaterial color="#e8dfc9" transparent opacity={0.55} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
-      <HpBar token={token} />
-      <TokenLabel token={token} />
+      <TokenLabel token={token} selected={selected} active={active} />
       {visuals
         .filter((visual) => ['damage', 'heal', 'miss', 'legendary', 'lair'].includes(visual.type))
         .map((visual) => <FloatingCombatText key={visual.id} visual={visual} size={token.size} />)}

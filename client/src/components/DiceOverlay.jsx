@@ -180,7 +180,7 @@ export default function DiceOverlay() {
         }}
         aria-label="Tirador de dados (arrastra para recolocarlo)"
         title="Arrastra para recolocarlo"
-        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 cursor-grab items-center justify-center rounded-full border border-gold/50 bg-night-900 text-gold shadow-lg shadow-black/40 active:cursor-grabbing"
+        className={`${inRoom ? 'tactical-dice-fab' : ''} fixed bottom-20 right-4 z-40 flex h-14 w-14 cursor-grab items-center justify-center rounded-full border border-gold/50 bg-night-900 text-gold shadow-lg shadow-black/40 active:cursor-grabbing`}
       >
         <D20Icon className="h-8 w-8" />
       </motion.button>

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { buildInitiativeStrip } from '../domain/initiativeStrip.js';
-import { conditionLabel, conditionSymbol } from '../domain/conditions.js';
+import { conditionLabel } from '../domain/conditions.js';
 import InitiativeOrder from './InitiativeOrder.jsx';
+import './tactical-hud.css';
 
 // Tira de iniciativa (Fase 2 de la reforma del HUD): el orden de turnos deja
 // de ser una lista de texto en el lateral y pasa a ser una fila de retratos
@@ -73,7 +74,7 @@ function InitiativeCard({ entry, selected, onSelect }) {
       aria-label={entryTitle(entry)}
       title={entryTitle(entry)}
       onClick={() => entry.tokenId && onSelect(entry.tokenId)}
-      className={`relative flex w-12 shrink-0 flex-col items-center gap-1 rounded-sm px-0.5 py-1 transition-transform duration-200 disabled:cursor-default ${
+      className={`tactical-initiative-card relative flex w-12 shrink-0 flex-col items-center gap-1 rounded-sm px-0.5 py-1 transition-transform duration-200 disabled:cursor-default ${
         entry.active ? '-translate-y-1' : ''
       } ${selected ? 'bg-gold/10' : entry.tokenId ? 'hover:bg-bone/5' : ''}`}
     >
@@ -84,7 +85,7 @@ function InitiativeCard({ entry, selected, onSelect }) {
       )}
 
       <span
-        className={`relative mt-1.5 flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 bg-night-950 ${portraitRing(
+        className={`tactical-initiative-portrait relative mt-1.5 flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 bg-night-950 ${portraitRing(
           entry
         )} ${dead ? 'grayscale' : ''}`}
       >
@@ -122,15 +123,15 @@ function InitiativeCard({ entry, selected, onSelect }) {
       {entry.state === 'dying' ? (
         <DeathSaveMiniDots saves={entry.deathSaves} />
       ) : entry.hp ? (
-        <span className="h-1 w-full overflow-hidden rounded-sm bg-night-950">
-          <span className={`block h-full ${hpColor(entry.hp.ratio)}`} style={{ width: `${entry.hp.ratio * 100}%` }} />
+        <span className="tactical-hp-track h-1 w-full overflow-hidden rounded-sm bg-night-950">
+          <span className={`tactical-hp-fill block h-full ${hpColor(entry.hp.ratio)}`} style={{ width: `${entry.hp.ratio * 100}%` }} />
         </span>
       ) : (
         <span className="h-1 w-full" />
       )}
 
       <span
-        className={`w-full truncate text-center text-[0.55rem] leading-tight ${
+        className={`tactical-initiative-name w-full truncate text-center text-[0.55rem] leading-tight ${
           entry.active ? 'text-gold' : dead ? 'text-bone/30 line-through' : 'text-bone/60'
         }`}
       >
@@ -143,8 +144,8 @@ function InitiativeCard({ entry, selected, onSelect }) {
           {entry.dashed && <span className="text-moss">»</span>}
           {entry.stance && <span className="text-gold/80">{entry.stance === 'esquivar' ? '◈' : '↔'}</span>}
           {visibleConditions.map((cond) => (
-            <span key={cond} className="text-blood/90">
-              {conditionSymbol(cond)}
+            <span key={cond} className="tactical-condition text-blood/90">
+              {conditionLabel(cond).slice(0, 3)}
             </span>
           ))}
           {extraConditions > 0 && <span className="text-blood/70">+{extraConditions}</span>}
@@ -178,8 +179,12 @@ export default function InitiativeStrip({
   // crecer por encima del tablero (y de la caja de identidad, en móvil).
   return (
     <div className="pointer-events-none flex w-full min-w-0 flex-col items-center gap-1.5">
-      <div className="pointer-events-auto flex max-w-full min-w-0 items-stretch gap-1 rounded-sm border border-gold/20 bg-night-900/85 px-1.5 py-1 shadow-xl backdrop-blur">
-        <div className="flex min-w-0 items-stretch gap-0.5 overflow-x-auto">
+      <div className="tactical-initiative pointer-events-auto flex max-w-full min-w-0 items-stretch gap-1 rounded-sm border px-1.5 py-1">
+        <div className="tactical-round" aria-label={`Ronda ${combat.round}`}>
+          <span>Ronda</span>
+          <strong>{combat.round}</strong>
+        </div>
+        <div className="tactical-initiative-track flex min-w-0 items-stretch gap-0.5 overflow-x-auto" aria-label="Orden de iniciativa">
           {entries.map((entry) => (
             <InitiativeCard
               key={entry.id}
@@ -195,8 +200,9 @@ export default function InitiativeStrip({
             type="button"
             onClick={() => setDetailOpen((open) => !open)}
             aria-expanded={detailOpen}
+            aria-label={detailOpen ? 'Cerrar el detalle de iniciativa' : 'Abrir el detalle de iniciativa'}
             title={detailOpen ? 'Cerrar el detalle de iniciativa' : 'Abrir el detalle de iniciativa'}
-            className="shrink-0 self-center rounded-sm border border-bone/20 px-1 py-2 text-[0.6rem] leading-none text-bone/60 hover:border-gold hover:text-gold"
+            className="tactical-initiative-expand shrink-0 self-center rounded-sm border border-bone/20 px-1 py-2 text-[0.6rem] leading-none text-bone/60 hover:border-gold hover:text-gold"
           >
             {detailOpen ? '▴' : '▾'}
           </button>
@@ -204,7 +210,7 @@ export default function InitiativeStrip({
       </div>
 
       {isDm && detailOpen && (
-        <div className="pointer-events-auto max-h-[46vh] w-60 overflow-y-auto rounded-sm border border-gold/20 bg-night-900/95 p-2 shadow-xl backdrop-blur">
+        <div className="tactical-surface pointer-events-auto max-h-[46vh] w-60 overflow-y-auto rounded-sm border border-gold/20 bg-night-900/95 p-2 shadow-xl backdrop-blur">
           <InitiativeOrder combat={combat} isDm={isDm} userId={userId} ownerByCharId={ownerByCharId} />
         </div>
       )}

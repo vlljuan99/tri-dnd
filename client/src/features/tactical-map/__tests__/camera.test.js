@@ -8,9 +8,33 @@ import {
   rotateBy,
   viewDegrees,
   withTilt,
+  fitBoardZoom,
 } from '../domain/camera.js';
 
 const inicial = { tilt: TILT_INITIAL, azimuth: 0 };
+
+test('el encuadre adapta el tablero a un móvil sin reutilizar el zoom de escritorio', () => {
+  const map = { width: 16, height: 12 };
+  const mobile = fitBoardZoom(map, { width: 390, height: 735 });
+  const desktop = fitBoardZoom(map, { width: 1440, height: 833 });
+  assert.ok(mobile < desktop);
+  assert.ok(map.width * mobile <= 350);
+  assert.ok((map.height * Math.cos(TILT_INITIAL) + 1) * mobile <= 395);
+});
+
+test('el encuadre considera la rotación de un tablero rectangular', () => {
+  const map = { width: 24, height: 6 };
+  const viewport = { width: 900, height: 800 };
+  const zoom = fitBoardZoom(map, viewport, { tilt: 0, azimuth: Math.PI / 2 });
+  assert.ok((map.width + 1) * zoom <= 540);
+  assert.ok(Number.isFinite(fitBoardZoom({ width: 0, height: 0 }, viewport)));
+});
+
+test('una sala de cien casillas también cabe al centrar desde un móvil', () => {
+  const zoom = fitBoardZoom({ width: 100, height: 100 }, { width: 390, height: 735 });
+  assert.ok(zoom > 0);
+  assert.ok(100 * zoom <= 350);
+});
 
 test('arrastrar hacia arriba levanta la vista y hacia abajo la aplana', () => {
   assert.ok(orbitBy(inicial, 0, -40).tilt > inicial.tilt, 'arriba = más escorzo');

@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import StatTooltip from '../../../components/StatTooltip.jsx';
-import { conditionLabel, conditionSymbol } from '../domain/conditions.js';
+import { conditionLabel } from '../domain/conditions.js';
 import { HOTBAR_KEYS, keyLabel, matchShortcut, weaponKey } from '../domain/shortcuts.js';
 import { rangeLabel, targetRangeState } from '../domain/weaponSlots.js';
+import './tactical-hud.css';
 
 // Hotbar de la mesa (Fase 3 de la reforma del HUD). Tres bloques con una
 // función cada uno, en vez de una fila de botones donde todo pesaba igual:
@@ -21,7 +22,7 @@ import { rangeLabel, targetRangeState } from '../domain/weaponSlots.js';
 // movimiento y el área de alcance del tablero.
 
 const SLOT_BASE =
-  'group relative grid h-11 w-11 place-items-center rounded-lg border transition disabled:cursor-not-allowed';
+  'tactical-action-slot group relative flex flex-col items-center justify-center border transition disabled:cursor-not-allowed';
 const SLOT_IDLE =
   'border-bone/15 bg-night-950/80 text-bone/70 hover:border-gold/60 hover:bg-gold/10 hover:text-gold disabled:opacity-25 disabled:hover:border-bone/15 disabled:hover:bg-night-950/80 disabled:hover:text-bone/70';
 const SLOT_ON = 'border-moss/70 bg-moss/20 text-bone shadow-[inset_0_0_12px_rgba(94,140,74,0.25)]';
@@ -81,9 +82,10 @@ function ActionSlot({ slot }) {
       className={`${SLOT_BASE} ${slot.on ? SLOT_ON : SLOT_IDLE}`}
     >
       <Icon name={slot.icon} />
+      <span aria-hidden="true" className="tactical-slot-label">{slot.key === 'buscar' ? 'Buscar' : slot.label}</span>
       <span
         aria-hidden="true"
-        className="absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
+        className="tactical-key absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
       >
         {keyLabel(key)}
       </span>
@@ -124,18 +126,19 @@ function WeaponSlot({ slot, index, aiming, range, onAim }) {
       title={`${slot.name}${key ? ` · Tecla ${keyLabel(key)}` : ''} — ${detail}. ${
         aiming ? 'Pulsa un enemigo para atacarlo (Esc para bajar el arma).' : 'Púlsala para empuñarla y elegir objetivo.'
       }`}
-      className={`group relative flex h-11 min-w-[3.6rem] max-w-[8rem] flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 transition ${
+      data-range={aiming ? range?.state ?? 'apuntando' : undefined}
+      className={`tactical-weapon-slot group relative flex min-w-[3.6rem] max-w-[8rem] flex-col items-center justify-center gap-0.5 border px-1.5 transition ${
         stateRing || SLOT_IDLE
       }`}
     >
       <Icon name={icon} />
-      <span className="max-w-full truncate text-[0.55rem] uppercase tracking-wider text-current/80">
+      <span className="tactical-slot-label max-w-full truncate">
         {slot.name}
       </span>
       {key && (
         <span
           aria-hidden="true"
-          className="absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
+          className="tactical-key absolute right-0.5 top-0 font-mono text-[0.55rem] leading-tight text-bone/35 group-hover:text-gold/70"
         >
           {keyLabel(key)}
         </span>
@@ -149,10 +152,11 @@ function ResourceChip({ stat, label, spent }) {
   return (
     <StatTooltip
       stat={stat}
-      className={`font-display text-[0.62rem] uppercase tracking-widest ${
+      className={`tactical-resource font-display text-[0.62rem] uppercase tracking-widest ${
         spent ? 'text-bone/25 line-through' : 'text-gold/90'
       }`}
     >
+      <span aria-hidden="true" className={`tactical-resource-dot ${spent ? 'is-spent' : ''}`} />
       {label}
     </StatTooltip>
   );
@@ -362,7 +366,7 @@ export default function PlayerHud({
   return (
     // Se acota el ancho para que el hotbar envuelva en dos filas antes de
     // pisar el dock de cámara de la esquina inferior izquierda.
-    <div className="pointer-events-auto relative flex w-fit max-w-[min(100%,54rem)] flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-sm border border-gold/25 bg-night-900/95 px-2.5 py-2 text-bone shadow-xl backdrop-blur">
+    <div className="tactical-hud pointer-events-auto relative flex w-fit max-w-[min(100%,58rem)] flex-wrap items-center justify-center gap-x-3 gap-y-2 border px-3 py-2.5 text-bone" data-turn={isMyTurn ? 'propio' : 'espera'}>
       {notice?.message && (
         <div
           key={notice.id}
@@ -374,19 +378,19 @@ export default function PlayerHud({
       )}
 
       {/* ── 1. Quién eres ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2.5">
-        <div className="relative">
+      <div className="tactical-hud-identity flex items-center gap-3">
+        <div className="tactical-portrait-frame relative">
           {token.imageUrl ? (
             <img
               src={token.imageUrl}
               alt=""
-              className={`h-11 w-11 rounded-full border-2 object-cover ${
+              className={`tactical-hud-portrait rounded-full border-2 object-cover ${
                 isMyTurn ? 'border-gold shadow-[0_0_12px_rgba(232,195,104,0.5)]' : 'border-gold/30'
               } ${dead ? 'grayscale' : ''}`}
             />
           ) : (
             <div
-              className={`flex h-11 w-11 items-center justify-center rounded-full border-2 bg-night-950 font-display text-lg text-gold/70 ${
+              className={`tactical-hud-portrait flex items-center justify-center rounded-full border-2 bg-night-950 font-display text-lg text-gold/70 ${
                 isMyTurn ? 'border-gold shadow-[0_0_12px_rgba(232,195,104,0.5)]' : 'border-gold/30'
               }`}
             >
@@ -401,12 +405,13 @@ export default function PlayerHud({
         </div>
 
         <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="tactical-eyebrow">{dead ? 'Caído' : isMyTurn ? 'Tu turno' : gated ? 'En combate' : 'Exploración'}</span>
           <div className="flex items-center gap-2">
-            <span className="max-w-[9rem] truncate font-display text-sm tracking-wide text-gold">{token.name}</span>
+            <span className="tactical-hud-name max-w-[9rem] truncate font-display text-sm tracking-wide text-gold">{token.name}</span>
             {ac != null && (
               <StatTooltip
                 stat="ca"
-                className="shrink-0 rounded-sm border border-bone/15 px-1.5 font-mono text-[0.68rem] text-bone/70"
+                className="tactical-armor shrink-0 rounded-sm border border-bone/15 px-1.5 font-mono text-[0.68rem] text-bone/70"
               >
                 CA {ac}
               </StatTooltip>
@@ -414,12 +419,12 @@ export default function PlayerHud({
           </div>
 
           {hasHp && (
-            <StatTooltip stat="hp" className="flex items-center gap-1.5">
-              <span className="block h-2.5 w-24 overflow-hidden rounded-sm bg-night-950">
-                <span className={`block h-full ${hpColor}`} style={{ width: `${hpRatio * 100}%` }} />
+            <StatTooltip stat="hp" className="tactical-vitals flex items-center gap-1.5">
+              <span className="tactical-hp-track block h-2.5 w-24 overflow-hidden rounded-sm bg-night-950">
+                <span className={`tactical-hp-fill block h-full ${hpColor}`} style={{ width: `${hpRatio * 100}%` }} />
               </span>
-              <span className="font-mono text-xs text-bone/70">
-                {hp}/{hpMax}
+              <span className="tactical-hp-value font-mono text-xs text-bone/70">
+                {hp}<span className="text-bone/45">/{hpMax}</span> <span className="tactical-hp-unit">PG</span>
               </span>
               {hpTemp > 0 && <span className="font-mono text-xs text-moss">+{hpTemp}</span>}
             </StatTooltip>
@@ -450,9 +455,10 @@ export default function PlayerHud({
                       ? `${conditionLabel(cond)} · ${conditionTimers[cond].remaining} rondas`
                       : conditionLabel(cond)
                   }
-                  className="rounded-sm border border-blood/40 bg-blood/10 px-1 text-[0.6rem] text-blood/90"
+                  aria-label={conditionLabel(cond)}
+                  className="tactical-condition rounded-sm border border-blood/40 bg-blood/10 px-1 text-[0.6rem] text-blood/90"
                 >
-                  {conditionSymbol(cond)}
+                  {conditionLabel(cond).slice(0, 3)}
                   {conditionTimers[cond] && <span className="ml-0.5 text-gold/80">{conditionTimers[cond].remaining}</span>}
                 </span>
               ))}
@@ -466,9 +472,9 @@ export default function PlayerHud({
           vertical a la izquierda de un bloque que ocupa todo el ancho no separa
           nada. */}
       {!dead && (
-        <div className="flex flex-col gap-1.5 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+        <div className="tactical-hud-actions flex min-w-0 flex-col gap-1.5 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
           {gated && !downed && (
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <div className="tactical-resources flex flex-wrap items-center gap-x-2.5 gap-y-1">
               {budget != null && movementRelevant && (
                 <StatTooltip
                   stat="mov"
@@ -515,7 +521,7 @@ export default function PlayerHud({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="tactical-action-row flex flex-wrap items-center gap-1">
             {weaponRow.slice(0, 4).map((weapon, index) => (
               <WeaponSlot
                 key={weapon.id}
@@ -554,9 +560,9 @@ export default function PlayerHud({
       )}
 
       {/* ── 3. Qué haces ahora ────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+      {(dead || dying || gated || (isMyTurn && onEndTurn)) && <div className="tactical-hud-turn flex items-center gap-2 border-t border-bone/10 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
         {dead ? (
-          <span className="font-display text-xs uppercase tracking-widest text-blood">☠ Muerto</span>
+          <span className="font-display text-xs uppercase tracking-widest text-blood">Muerto</span>
         ) : dying ? (
           <div className="flex items-center gap-2">
             <DeathSaveDots saves={combatant?.deathSaves} />
@@ -581,7 +587,7 @@ export default function PlayerHud({
             aria-keyshortcuts=" "
             aria-label="Terminar turno"
             title="Terminar turno · Tecla Espacio"
-            className="inline-flex min-h-10 items-center gap-2 rounded-sm bg-gold px-3.5 font-display text-xs uppercase tracking-widest text-night-950 shadow-[0_0_16px_rgba(232,195,104,0.35)] hover:bg-gold/90"
+            className="tactical-end-turn inline-flex min-h-10 items-center gap-2 rounded-sm bg-gold px-3.5 font-display text-xs uppercase tracking-widest text-night-950 hover:bg-gold/90"
           >
             Terminar turno
             <span aria-hidden="true" className="rounded-sm bg-night-950/20 px-1 font-mono text-[0.6rem] normal-case tracking-normal">
@@ -595,7 +601,7 @@ export default function PlayerHud({
             </span>
           )
         )}
-      </div>
+      </div>}
       <style>{`@keyframes hudNotice{0%{transform:translateY(5px);opacity:0}8%,78%{transform:translateY(0);opacity:1}100%{transform:translateY(-3px);opacity:0}}`}</style>
     </div>
   );

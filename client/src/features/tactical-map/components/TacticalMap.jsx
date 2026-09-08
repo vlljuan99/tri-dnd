@@ -1043,7 +1043,7 @@ export default function TacticalMap({
       )}
 
       {/* Arriba-izquierda: identidad y contexto estable, sin acciones. */}
-      <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[42vw] rounded-sm border border-gold/20 bg-night-900/90 px-3 py-2 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
+      <div className="tactical-surface pointer-events-none absolute left-3 top-3 z-10 max-w-[42vw] rounded-sm border border-gold/20 bg-night-900/90 px-3 py-2 text-bone shadow-xl backdrop-blur sm:left-4 sm:top-4">
         <p className="truncate font-display text-sm tracking-wide text-gold">{map.name}</p>
         <div className="mt-1 flex items-center gap-2 text-[0.65rem] uppercase tracking-widest text-bone/50">
           <span className="truncate">
@@ -1351,7 +1351,7 @@ export default function TacticalMap({
 
       {/* Abajo-izquierda: dock estrecho de cámara y sistema, pegado al borde
           como en un videojuego. En móvil sube para dejar sitio al hotbar. */}
-      <div className="pointer-events-none absolute bottom-[17rem] left-3 z-10 sm:bottom-[13rem] sm:left-4 md:bottom-[5rem]">
+      <div className="pointer-events-none absolute bottom-[17rem] left-3 z-10 sm:left-4 lg:bottom-[5rem]">
         <MapControls
           showGrid={showGrid}
           selectedToken={selectedToken}
@@ -1394,7 +1394,7 @@ export default function TacticalMap({
           {dmOnPjTurn ? (
             // Turno de un PJ visto por el DM: barra mínima, sin ficha ni
             // inventario del jugador. Solo "Saltar turno" por si está ausente.
-            <div className="flex w-fit items-center gap-3 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 shadow-xl backdrop-blur">
+            <div className="tactical-surface flex w-fit items-center gap-3 rounded-sm border border-gold/25 bg-night-900/95 px-3 py-2 shadow-xl backdrop-blur">
               <span className="font-display text-sm tracking-wide text-gold">
                 Turno de <span className="text-bone">{activeCombatant?.name}</span>
               </span>

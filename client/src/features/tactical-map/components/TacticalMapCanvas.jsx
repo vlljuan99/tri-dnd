@@ -19,6 +19,7 @@ import AimLine from './AimLine.jsx';
 import SpellFx from './SpellFx.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
 import WeatherLayer from './WeatherLayer.jsx';
+import SceneLighting from './SceneLighting.jsx';
 
 const HAZARD_COLORS = {
   fuego: '#ff6a2a',
@@ -90,6 +91,7 @@ export default function TacticalMapCanvas({
   showGrid,
   savingTokenId,
   cameraCommand,
+  onViewChange,
   onSelectToken,
   onGroundClick,
   onOpenDoor,
@@ -122,8 +124,7 @@ export default function TacticalMapCanvas({
   // mapa de niveles que usa el pathfinding para cobrar la subida.
   const elevation = useMemo(() => buildBoardElevation(map), [map]);
 
-  // Con antorchas o braseros en el mapa, el ambiente baja para que las pozas
-  // de luz cálida se noten; sin luces, iluminación plana como siempre
+  // Las antorchas suman luz cálida sobre una base siempre legible.
   const hasLights =
     (map.rooms ?? []).some((room) => room.lightCells?.length) ||
     ((map.wallLightEvery ?? 0) > 0 && (map.rooms ?? []).some((room) => room.wallEdges?.length));
@@ -134,17 +135,14 @@ export default function TacticalMapCanvas({
       className="h-full w-full"
       dpr={[1, 1.5]}
       frameloop="always"
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      shadows="percentage"
+      gl={{ antialias: true, powerPreference: 'high-performance', toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
       onPointerMissed={(event) => missedHandlerRef.current?.(event)}
     >
       <color attach="background" args={[lighting.background]} />
-      {/* Ambiente + una direccional en ángulo: las caras superiores de las
-          plataformas (elevación) y muros reciben más luz que las laterales,
-          dando relieve incluso en vista cenital */}
-      <ambientLight intensity={lighting.ambient} />
-      <directionalLight position={[-6, 12, -4]} intensity={lighting.directional} />
+      <SceneLighting map={map} lighting={lighting} />
       <WeatherLayer map={map} />
-      <TacticalCamera map={map} command={cameraCommand} />
+      <TacticalCamera map={map} command={cameraCommand} onViewChange={onViewChange} />
       <PointerMissedMovement
         measureMode={measureMode}
         onGroundClick={onGroundClick}

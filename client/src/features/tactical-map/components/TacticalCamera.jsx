@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { TACTICAL_CAMERA_DISTANCE } from '../domain/weather.js';
-import { TILT_INITIAL, orbitBy as orbitView, rotateBy, viewDegrees, withTilt } from '../domain/camera.js';
+import { TILT_INITIAL, MIN_ZOOM, MAX_ZOOM, fitBoardZoom, orbitBy as orbitView, rotateBy, viewDegrees, withTilt } from '../domain/camera.js';
 
-const DEFAULT_ZOOM = 52;
-const MIN_ZOOM = 24;
-const MAX_ZOOM = 120;
 // Orientación (inclinación y azimut) y sus topes viven en domain/camera.js:
 // el comando 'tilt' trae el ángulo elegido en radianes (0 = cenital puro) y
 // 'rotate' gira el tablero en pasos de 45°; la geometría de abajo generaliza
@@ -31,6 +28,7 @@ export default function TacticalCamera({ map, command, onViewChange }) {
   onViewChangeRef.current = onViewChange;
   const targetRef = useRef({ x: map.width / 2, z: map.height / 2 });
   const focusRef = useRef(null);
+  const autoFitRef = useRef(true);
   const shakeUntilRef = useRef(0);
   // Orientación de la vista: inclinada por defecto (se ve el relieve); el DM
   // gradúa la inclinación por escalones o rota el tablero en pasos de 45°
@@ -89,7 +87,8 @@ export default function TacticalCamera({ map, command, onViewChange }) {
   function setZoom(zoom) {
     const camera = cameraRef.current;
     if (!camera) return;
-    camera.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    autoFitRef.current = false;
+    camera.zoom = clamp(zoom, Math.min(MIN_ZOOM, fitBoardZoom(map, size, viewRef.current)), MAX_ZOOM);
     applyCamera();
   }
 
@@ -102,6 +101,7 @@ export default function TacticalCamera({ map, command, onViewChange }) {
     camera.right = size.width / 2;
     camera.top = size.height / 2;
     camera.bottom = -size.height / 2;
+    if (autoFitRef.current) camera.zoom = fitBoardZoom(map, size, viewRef.current);
     applyCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.width, size.height]);
@@ -109,7 +109,8 @@ export default function TacticalCamera({ map, command, onViewChange }) {
   useEffect(() => {
     targetRef.current = { ...center };
     const camera = cameraRef.current;
-    if (camera) camera.zoom = DEFAULT_ZOOM;
+    autoFitRef.current = true;
+    if (camera) camera.zoom = fitBoardZoom(map, size, viewRef.current);
     applyCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center]);
@@ -118,7 +119,8 @@ export default function TacticalCamera({ map, command, onViewChange }) {
     if (!command) return;
     if (command.type === 'center') {
       targetRef.current = { ...center };
-      if (cameraRef.current) cameraRef.current.zoom = DEFAULT_ZOOM;
+      autoFitRef.current = true;
+      if (cameraRef.current) cameraRef.current.zoom = fitBoardZoom(map, size, viewRef.current);
       applyCamera();
     }
     if (command.type === 'zoom-in' && cameraRef.current) setZoom(cameraRef.current.zoom * 1.2);
