@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { motion, useReducedMotion } from 'framer-motion';
 import { api } from '../api.js';
 import { abilityModifier, estimateHitPoints } from '../lib/dnd.js';
-import { applyRacialBonuses, mergeAutomaticSkills, raceAutomaticSkills } from '../lib/wizard.js';
+import { applyRacialBonuses, mergeAutomaticSkills, raceAutomaticSkills, restoreWizardDraft, randomBuild, parseStartingEquipment } from '../lib/wizard.js';
+import { deriveWizardPreview, wizardPreviewDeltas, previewCharacter, buildWizardEquipment } from '../lib/wizardPreview.js';
 import { srdCampaignPath } from '../lib/srdCampaign.js';
 import WizardProgress from '../components/wizard/WizardProgress.jsx';
 import WizardPreview from '../components/wizard/WizardPreview.jsx';
@@ -13,11 +15,13 @@ import StepCaracteristicas, { validateCaracteristicas } from '../components/wiza
 import StepCompetencias, { validateCompetencias } from '../components/wizard/StepCompetencias.jsx';
 import StepEquipo, { validateEquipo } from '../components/wizard/StepEquipo.jsx';
 import StepResumen from '../components/wizard/StepResumen.jsx';
+import StepCampana from '../components/wizard/StepCampana.jsx';
+import '../components/wizard/wizard.css';
 
 const STEPS = [
-  { id: 'identidad', label: 'Identidad', Component: StepIdentidad, validate: (char) => validateIdentidad(char) },
-  { id: 'clase', label: 'Clase', Component: StepClase, validate: (char) => validateClase(char) },
-  { id: 'raza', label: 'Raza o especie', Component: StepRaza, validate: (char) => validateRaza(char) },
+  { id: 'campana', label: 'Campaña', title: 'Elige tu mundo', Component: StepCampana, validate: () => ({}) },
+  { id: 'raza', label: 'Especie', title: 'Tus orígenes', Component: StepRaza, validate: (char, ctx) => validateRaza(char, ctx.raceDetail) },
+  { id: 'clase', label: 'Clase', title: 'Encuentra tu vocación', Component: StepClase, validate: (char) => validateClase(char) },
   {
     id: 'caracteristicas',
     label: 'Características',
@@ -36,12 +40,15 @@ const STEPS = [
     Component: StepEquipo,
     validate: (char, ctx) => validateEquipo(char, ctx.classDetail),
   },
-  { id: 'resumen', label: 'Resumen y confirmación', Component: StepResumen, validate: () => ({}) },
+  // G2 insertará Apariencia entre equipo e identidad; no existe aún en este recorrido.
+  { id: 'identidad', label: 'Identidad', title: 'Ponle nombre a tu leyenda', Component: StepIdentidad, validate: validateIdentidad },
+  { id: 'resumen', label: 'Resumen', title: 'Tu aventura empieza aquí', Component: StepResumen, validate: () => ({}) },
 ];
 
 export default function CharacterWizardPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const reducedMotion = useReducedMotion();
 
   const [char, setChar] = useState(null);
   const [saveState, setSaveState] = useState('saved'); // saved | pending | saving | error
@@ -57,10 +64,17 @@ export default function CharacterWizardPage() {
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState('');
   const [error, setError] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [randomBusy, setRandomBusy] = useState(false);
+  const [randomError, setRandomError] = useState('');
+  const [randomNotice, setRandomNotice] = useState('');
 
   const pendingRef = useRef({});
   const timerRef = useRef(null);
   const stepHeadingRef = useRef(null);
+  const savingRef = useRef(null);
+  const previewButtonRef = useRef(null);
+  const closePreviewRef = useRef(null);
 
   // Carga inicial: el personaje (con su progreso guardado) y sus campañas.
   // El compendio se carga después con el contexto de la campaña seleccionada.
@@ -75,9 +89,12 @@ export default function CharacterWizardPage() {
           navigate(`/personajes/${id}`, { replace: true });
           return;
         }
-        setChar(character);
-        setStep(Math.min(character.wizard_step ?? 0, STEPS.length - 1));
-        setMaxStepReached(Math.min(character.wizard_step ?? 0, STEPS.length - 1));
+        const restored = restoreWizardDraft(character);
+        setChar(restored);
+        setStep(restored.wizard_step);
+        setMaxStepReached(restored.wizard_step);
+        // La versión del recorrido se guarda con el siguiente cambio, sin migrar SQLite.
+        pendingRef.current = { wizard_data: restored.wizard_data, wizard_step: restored.wizard_step };
       })
       .catch((e) => setError(e.message));
     api('/campaigns').then(({ campaigns }) => setCampaigns(campaigns)).catch(() => {});
@@ -85,7 +102,7 @@ export default function CharacterWizardPage() {
   }, [id]);
 
   // Las clases y razas del DM solo se comparten dentro de una campaña de la
-  // que el jugador sea miembro. Al cambiar la campaña en Identidad se recarga
+  // que el jugador sea miembro. Al cambiar la campaña se recarga
   // el selector; sin campaña, el usuario conserva su propia Biblioteca.
   useEffect(() => {
     if (!char) return undefined;
@@ -104,6 +121,8 @@ export default function CharacterWizardPage() {
 
     setClasses([]);
     setRaces([]);
+    setClassDetails({});
+    setRaceDetails({});
     Promise.all([
       loadChoices('classes', setClasses, setClassDetails),
       loadChoices('races', setRaces, setRaceDetails),
@@ -117,11 +136,13 @@ export default function CharacterWizardPage() {
   }, [char?.campaign_id]);
 
   const flush = useCallback(async () => {
+    // Serializa los PUT: una respuesta antigua nunca pisa el siguiente guardado.
+    if (savingRef.current) await savingRef.current;
     const body = pendingRef.current;
     pendingRef.current = {};
-    if (Object.keys(body).length === 0) return;
+    if (Object.keys(body).length === 0) return true;
     setSaveState('saving');
-    try {
+    const request = (async () => { try {
       const { character } = await api(`/characters/${id}`, { method: 'PUT', body });
       // El servidor manda en los campos derivados (nivel inicial de la
       // campaña, competencias, CA): se recogen tal cual vuelven en vez de
@@ -129,16 +150,23 @@ export default function CharacterWizardPage() {
       setChar((current) =>
         current ? { ...current, level: character.level, ac: character.ac } : current
       );
-      setSaveState('saved');
+      setSaveState(Object.keys(pendingRef.current).length ? 'pending' : 'saved');
+      return true;
     } catch {
       setSaveState('error');
-      Object.assign(pendingRef.current, body);
-    }
+      pendingRef.current = { ...body, ...pendingRef.current };
+      return false;
+    } })();
+    savingRef.current = request;
+    const result = await request;
+    if (savingRef.current === request) savingRef.current = null;
+    return result;
   }, [id]);
 
   const patch = useCallback(
     (fields) => {
       setChar((c) => (c ? { ...c, ...fields } : c));
+      setStepErrors({});
       Object.assign(pendingRef.current, fields);
       setSaveState('pending');
       clearTimeout(timerRef.current);
@@ -149,14 +177,15 @@ export default function CharacterWizardPage() {
 
   async function flushNow() {
     clearTimeout(timerRef.current);
-    await flush();
+    return flush();
   }
 
   // Guarda cualquier cambio pendiente si el usuario cierra o abandona la pestaña
   useEffect(() => {
     function onBeforeUnload() {
       if (Object.keys(pendingRef.current).length > 0) {
-        navigator.sendBeacon?.(`/api/characters/${id}`, JSON.stringify(pendingRef.current));
+        fetch(`/api/characters/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingRef.current), credentials: 'same-origin', keepalive: true }).catch(() => {});
       }
     }
     window.addEventListener('beforeunload', onBeforeUnload);
@@ -170,15 +199,26 @@ export default function CharacterWizardPage() {
 
   // Foco accesible al cambiar de paso
   useEffect(() => {
+    setPreview(null);
     stepHeadingRef.current?.focus();
   }, [step]);
+
+  useEffect(() => {
+    if (!previewOpen) return undefined;
+    closePreviewRef.current?.focus();
+    const onKey = (event) => {
+      if (event.key === 'Escape') { setPreviewOpen(false); previewButtonRef.current?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewOpen]);
 
   // Competencias de salvación: siempre las fija la clase (no hay elección en 5e)
   useEffect(() => {
     if (!char?.class_index) return;
     const detail = classDetails[char.class_index];
     if (!detail) return;
-    const saves = detail.saving_throws.map((s) => s.index);
+    const saves = (detail.saving_throws ?? []).map((s) => s.index);
     if (JSON.stringify(saves) !== JSON.stringify(char.save_proficiencies)) {
       patch({ save_proficiencies: saves });
     }
@@ -247,13 +287,13 @@ export default function CharacterWizardPage() {
     return STEPS.map((s, i) => {
       if (i > maxStepReached) return 'locked';
       if (i === step) return 'current';
-      const errs = s.validate(char, { classDetail });
+      const errs = s.validate(char, { classDetail, raceDetail });
       return Object.keys(errs).length > 0 ? 'error' : 'done';
     });
-  }, [char, maxStepReached, step, classDetail]);
+  }, [char, maxStepReached, step, classDetail, raceDetail]);
 
   function goNext() {
-    const errs = STEPS[step].validate(char, { classDetail });
+    const errs = STEPS[step].validate(char, { classDetail, raceDetail });
     setStepErrors(errs);
     if (Object.keys(errs).length > 0) return;
     const next = Math.min(step + 1, STEPS.length - 1);
@@ -281,12 +321,14 @@ export default function CharacterWizardPage() {
   }
 
   async function saveAndExit() {
-    await flushNow();
-    navigate('/personajes');
+    if (await flushNow()) navigate('/personajes');
   }
 
   async function discardDraft() {
     if (!window.confirm('¿Descartar este borrador? Se perderá todo el progreso.')) return;
+    clearTimeout(timerRef.current);
+    if (savingRef.current) await savingRef.current;
+    pendingRef.current = {};
     await api(`/characters/${id}`, { method: 'DELETE' });
     navigate('/personajes');
   }
@@ -295,7 +337,9 @@ export default function CharacterWizardPage() {
     setFinishError('');
     setFinishing(true);
     try {
-      await flushNow();
+      const invalidStep = STEPS.findIndex((s) => Object.keys(s.validate(char, { classDetail, raceDetail })).length > 0);
+      if (invalidStep >= 0) { setStep(invalidStep); setStepErrors(STEPS[invalidStep].validate(char, { classDetail, raceDetail })); return; }
+      if (!await flushNow()) throw new Error('No se pudieron guardar los cambios. Reintenta antes de finalizar.');
       const conMod = abilityModifier(char.abilities.con);
       const hpMax = Math.max(1, estimateHitPoints(classDetail?.hit_die ?? 8, conMod, char.level));
       // La CA la deriva el servidor a partir del inventario (ya aplicada en el
@@ -313,6 +357,35 @@ export default function CharacterWizardPage() {
     }
   }
 
+  async function randomize() {
+    setRandomBusy(true);
+    setRandomError('');
+    try {
+      const indexes = [...new Set(Object.values(classDetails).flatMap(detail => parseStartingEquipment(detail).groups
+        .flatMap(group => group.options.flatMap(option => option.categorySlots.map(slot => slot.categoryIndex)))))];
+      const entries = await Promise.all(indexes.map(index => api(srdCampaignPath('equipment-categories', char.campaign_id, index))));
+      const categoryMembers = Object.fromEntries(entries.map((entry, i) => [indexes[i], entry.data?.equipment ?? []]));
+      const fields = randomBuild({ char, classDetails, raceDetails, categoryMembers });
+      const { fixed, groups } = parseStartingEquipment(classDetails[fields.class_index]);
+      const itemIndexes = new Set(fixed.map(item => item.index));
+      groups.forEach(group => {
+        const choice = group.options.find(option => option.key === fields.wizard_data.equipmentGroupChoice[group.key]);
+        choice?.fixedGrants.forEach(item => itemIndexes.add(item.index));
+        choice?.categorySlots.forEach(slot => (fields.wizard_data.equipmentCategoryPicks[slot.pathKey] ?? []).forEach(index => itemIndexes.add(index)));
+      });
+      const items = await Promise.all([...itemIndexes].map(index => api(srdCampaignPath('equipment', char.campaign_id, index))));
+      const built = buildWizardEquipment({ fixed, groups, groupChoice: fields.wizard_data.equipmentGroupChoice,
+        categoryPicks: fields.wizard_data.equipmentCategoryPicks, categoryMembers, itemsByIndex: Object.fromEntries(items.map(item => [item.index, item])) });
+      fields.inventory = built.inventory;
+      fields.wizard_data.appliedEquipmentSignature = built.signature;
+      patch(fields);
+      setPreview(null);
+      setMaxStepReached((value) => Math.max(value, 6));
+      setRandomNotice('Destino elegido. Revisa tus opciones; solo falta darle tu nombre.');
+    } catch (e) { setRandomError(e.message); }
+    finally { setRandomBusy(false); }
+  }
+
   if (error) {
     return (
       <div className="min-h-full bg-night-950 p-6 text-bone">
@@ -325,120 +398,75 @@ export default function CharacterWizardPage() {
     return <div className="min-h-full bg-night-950 p-6 text-bone/60">Cargando asistente…</div>;
   }
 
-  const saveLabels = { saved: 'Guardado ✓', pending: 'Cambios sin guardar…', saving: 'Guardando…', error: 'Error al guardar' };
-  const { Component } = STEPS[step];
+  const saveLabels = { saved: 'Guardado', pending: 'Cambios pendientes…', saving: 'Guardando…', error: 'Error al guardar · reintentar' };
+  const { Component, title, label } = STEPS[step];
   const steps = STEPS.map((s, i) => ({ id: s.id, label: s.label, status: stepStatuses[i] }));
+  const previewProps = { char, classDisplayName, raceName, classDetail, raceDetail, classDetails, raceDetails, preview };
+  const stats = deriveWizardPreview(char, { classDetail, raceDetail, classDetails, raceDetails });
+  const changes = preview?.fields ? wizardPreviewDeltas(stats, deriveWizardPreview(previewCharacter(char, preview.fields), { classDetail, raceDetail, classDetails, raceDetails })) : [];
 
   return (
-    <div className="min-h-full bg-night-950 text-bone">
-      <div className="mx-auto grid max-w-5xl gap-4 p-4 pb-28 sm:grid-cols-[220px_1fr] sm:pb-6 lg:grid-cols-[220px_1fr_260px]">
-        {/* Cabecera móvil */}
-        <div className="flex items-center justify-between sm:hidden">
-          <button onClick={discardDraft} className="text-sm text-bone/50 hover:text-blood">Cancelar</button>
-          <span className={`text-xs ${saveState === 'error' ? 'text-blood' : 'text-bone/50'}`}>{saveLabels[saveState]}</span>
+    <div className="character-creator min-h-full text-bone">
+      <header className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 border-b border-gold/15 px-4 py-5 sm:px-8">
+        <div><p className="text-[10px] uppercase tracking-[.3em] text-gold/70">TriDnD · D&D 5e 2014</p>
+          <h1 className="mt-1 font-display text-lg tracking-wide text-bone sm:text-2xl">Forja tu leyenda</h1></div>
+        <div className="flex items-center gap-3">
+          <button onClick={flushNow} className={`text-xs ${saveState === 'error' ? 'text-red-300' : 'text-bone/40'}`} aria-live="polite">{saveLabels[saveState]}</button>
+          <button onClick={saveAndExit} className="rounded border border-bone/20 px-3 py-2 text-xs text-bone/70 hover:border-gold">Guardar y salir</button>
         </div>
-
-        {/* Progreso */}
-        <aside className="sm:sticky sm:top-4 sm:self-start">
+      </header>
+      <div className="mx-auto grid max-w-[1500px] items-start gap-5 px-4 py-5 pb-36 sm:px-8 lg:grid-cols-[175px_minmax(0,1fr)_290px] lg:gap-7 lg:pb-8 xl:grid-cols-[190px_minmax(0,1fr)_320px]">
+        <aside className="min-w-0 lg:sticky lg:top-5">
           <WizardProgress steps={steps} current={step} onJump={jumpTo} />
+          <button onClick={discardDraft} className="mt-8 hidden text-xs text-bone/35 hover:text-red-300 lg:block">Descartar borrador</button>
         </aside>
-
-        {/* Paso actual */}
-        <main
-          ref={stepHeadingRef}
-          tabIndex={-1}
-          className="rounded-md border border-gold/15 bg-night-900 p-4 focus:outline-none"
-        >
-          <Component
-            char={char}
-            patch={patch}
-            errors={stepErrors}
-            classes={classes}
-            classDetails={classDetails}
-            classDetail={classDetail}
-            classDisplayName={classDisplayName}
-            races={races}
-            raceDetails={raceDetails}
-            raceDetail={raceDetail}
-            raceName={raceName}
-            campaigns={campaigns}
-            onFinish={finish}
-            finishing={finishing}
-            finishError={finishError}
-          />
-
-          <div className="mt-6 hidden items-center justify-between border-t border-bone/10 pt-4 sm:flex">
-            <div className="flex gap-2">
-              <button onClick={discardDraft} className="rounded-sm border border-bone/20 px-3 py-1.5 text-sm text-bone/60 hover:border-blood hover:text-blood">
-                Cancelar
-              </button>
-              <button onClick={saveAndExit} className="rounded-sm border border-bone/20 px-3 py-1.5 text-sm hover:bg-bone/10">
-                Guardar y salir
-              </button>
-            </div>
-            <span className={`text-xs ${saveState === 'error' ? 'text-blood' : 'text-bone/50'}`}>{saveLabels[saveState]}</span>
-            <div className="flex gap-2">
-              <button
-                onClick={goBack}
-                disabled={step === 0}
-                className="rounded-sm border border-bone/30 px-4 py-1.5 text-sm hover:bg-bone/10 disabled:opacity-30"
-              >
-                ← Atrás
-              </button>
-              {step < STEPS.length - 1 && (
-                <button onClick={goNext} className="rounded-sm bg-gold px-4 py-1.5 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90">
-                  Continuar →
-                </button>
-              )}
-            </div>
+        <main className="min-w-0">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div><p className="text-[10px] uppercase tracking-[.25em] text-gold/70">Capítulo {String(step + 1).padStart(2, '0')} · {label}</p>
+              <h2 ref={stepHeadingRef} tabIndex={-1} className="mt-2 font-display text-2xl text-bone outline-none sm:text-3xl">{title ?? label}</h2></div>
+            <button onClick={randomize} disabled={randomBusy || !classes.length || !races.length}
+              className="rounded-md border border-gold/35 bg-gold/5 px-3 py-2 text-xs text-gold hover:bg-gold/15 disabled:opacity-40">⚄ {randomBusy ? 'El destino decide…' : 'Personaje aleatorio'}</button>
+          </div>
+          {randomError && <p role="alert" className="mb-4 text-sm text-red-300">{randomError}</p>}
+          {randomNotice && <p role="status" className="mb-4 text-sm text-teal-200">{randomNotice}</p>}
+          <motion.div key={STEPS[step].id} initial={reducedMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reducedMotion ? 0 : 0.22 }} className="wizard-step min-w-0 rounded-lg border border-gold/15 bg-night-900/80 p-4 shadow-xl shadow-black/10 sm:p-5">
+            <Component char={char} patch={patch} errors={stepErrors} classes={classes} classDetails={classDetails}
+              classDetail={classDetail} classDisplayName={classDisplayName} races={races} raceDetails={raceDetails}
+              raceDetail={raceDetail} raceName={raceName} campaigns={campaigns} onFinish={finish}
+              finishing={finishing} finishError={finishError} onPreview={setPreview} />
+          </motion.div>
+          <div className="mt-5 hidden items-center justify-between gap-3 lg:flex">
+            <button onClick={goBack} disabled={step === 0} className="rounded border border-bone/20 px-5 py-2.5 text-sm text-bone/70 disabled:opacity-25">← Anterior</button>
+            <span className="text-xs italic text-bone/35">Cada elección escribe tu historia.</span>
+            {step < STEPS.length - 1 && <button onClick={goNext} className="rounded bg-gold px-6 py-2.5 font-display text-sm text-night-950 hover:bg-gold/90">Continuar →</button>}
           </div>
         </main>
-
-        {/* Vista previa — panel fijo en escritorio */}
-        <aside className="hidden rounded-md border border-gold/15 bg-night-900 p-4 lg:block">
-          <p className="mb-3 font-display text-sm tracking-wide text-gold">Vista previa</p>
-          <WizardPreview char={char} classDisplayName={classDisplayName} raceName={raceName} classDetail={classDetail} />
+        <aside className="hidden min-w-0 rounded-lg border border-gold/20 bg-night-900/90 p-5 lg:sticky lg:top-5 lg:block lg:max-h-[calc(100vh-40px)] lg:overflow-y-auto">
+          <p className="mb-4 text-[10px] uppercase tracking-[.25em] text-gold/65">Tu leyenda · Vista previa</p>
+          <WizardPreview {...previewProps} />
         </aside>
       </div>
-
-      {/* Navegación fija en móvil */}
-      <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 border-t border-gold/20 bg-night-900 p-3 sm:hidden">
-        <button
-          onClick={goBack}
-          disabled={step === 0}
-          aria-label="Paso anterior"
-          className="rounded-sm border border-bone/30 px-3 py-2 text-sm disabled:opacity-30"
-        >
-          ← Atrás
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gold/30 bg-night-950/95 px-4 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] shadow-xl lg:hidden">
+        {preview && <p role="status" className="line-clamp-2 text-[11px] text-teal-200">{preview.label}: {changes.slice(0, 4).join(' · ') || 'Sin cambios en las estadísticas'}</p>}
+        <button ref={previewButtonRef} onClick={() => setPreviewOpen(!previewOpen)} aria-expanded={previewOpen} aria-controls="wizard-preview-drawer"
+          className="flex w-full items-center justify-between gap-2 py-2 text-left text-xs text-gold">
+          <span className="min-w-0 truncate">◈ {stats.hp} PG · CA {stats.ac} · {stats.speed} pies</span><span className="shrink-0">Vista previa ↑</span>
         </button>
-        <button onClick={() => setPreviewOpen(true)} className="rounded-sm border border-bone/20 px-3 py-2 text-sm text-bone/70">
-          Vista previa
-        </button>
-        {step < STEPS.length - 1 ? (
-          <button onClick={goNext} className="flex-1 rounded-sm bg-gold px-4 py-2 font-display text-sm tracking-wide text-night-950">
-            Continuar
-          </button>
-        ) : (
-          <button onClick={saveAndExit} className="flex-1 rounded-sm border border-bone/30 px-4 py-2 text-sm">
-            Guardar y salir
-          </button>
-        )}
-      </div>
-
-      {previewOpen && (
-        <div className="fixed inset-0 z-40 flex items-end bg-black/60 sm:hidden" onClick={() => setPreviewOpen(false)}>
-          <div
-            className="max-h-[80vh] w-full overflow-y-auto rounded-t-lg border border-gold/25 bg-night-900 p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <p className="font-display text-sm tracking-wide text-gold">Vista previa</p>
-              <button onClick={() => setPreviewOpen(false)} aria-label="Cerrar vista previa" className="px-2 text-bone/60 hover:text-bone">✕</button>
-            </div>
-            <WizardPreview char={char} classDisplayName={classDisplayName} raceName={raceName} classDetail={classDetail} />
-          </div>
+        <div className="grid grid-cols-[auto_1fr] gap-3">
+          <button onClick={goBack} disabled={step === 0} className="rounded border border-bone/25 px-4 py-2.5 text-sm disabled:opacity-30">← Atrás</button>
+          {step < STEPS.length - 1 ? <button onClick={goNext} className="rounded bg-gold px-4 py-2.5 font-display text-sm text-night-950">Continuar →</button>
+            : <button onClick={saveAndExit} className="rounded border border-gold/40 px-4 py-2.5 text-sm text-gold">Guardar y salir</button>}
         </div>
-      )}
+      </div>
+      {previewOpen && <div className="fixed inset-0 z-40 flex items-end bg-black/70 lg:hidden" onClick={() => { setPreviewOpen(false); previewButtonRef.current?.focus(); }}>
+        <section id="wizard-preview-drawer" role="dialog" aria-modal="true" aria-label="Vista previa del personaje" onClick={(e) => e.stopPropagation()}
+          className="max-h-[85dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl border border-gold/30 bg-night-900 p-5">
+          <div className="mb-4 flex items-center justify-between"><p className="font-display text-gold">Tu personaje</p>
+            <button ref={closePreviewRef} onClick={() => { setPreviewOpen(false); previewButtonRef.current?.focus(); }} aria-label="Cerrar vista previa" className="rounded border border-bone/20 px-3 py-2">✕</button></div>
+          <WizardPreview {...previewProps} />
+        </section>
+      </div>}
     </div>
   );
 }

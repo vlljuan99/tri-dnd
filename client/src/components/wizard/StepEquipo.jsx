@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { srdCampaignPath } from '../../lib/srdCampaign.js';
 import { parseStartingEquipment, partLabel } from '../../lib/wizard.js';
-import { equipItem, inventoryItemFromEntry, isTwoHanded } from '../../lib/equipment.js';
+import { buildWizardEquipment } from '../../lib/wizardPreview.js';
+import StatTooltip from '../StatTooltip.jsx';
 import HelpBlock from './HelpBlock.jsx';
 
 // Paso «Equipo» (Fase A de la rebanada vertical): construye el inventario a
@@ -10,47 +11,7 @@ import HelpBlock from './HelpBlock.jsx';
 // Es el único camino de equipo inicial — nada de oro ni compra libre todavía
 // (ver docs/VERTICAL-SLICE.md, Fase A).
 
-// Coloca los objetos elegidos en sus slots por defecto (armadura → armadura,
-// escudo → escudo, primera arma → mano principal); `equipItem` ya resuelve
-// los conflictos de armas a dos manos.
-//
-// La segunda arma solo va a la mano secundaria si esa mano está libre de
-// verdad: con escudo equipado o con un arma a dos manos en la principal se
-// queda en la mochila, porque equiparla desplazaría al escudo (y quien elige
-// «arma marcial + escudo» en el manual quiere el escudo puesto).
-function autoEquip(items) {
-  let inventory = items;
-  const armor = items.find((i) => i.armor && i.armor.category !== 'Shield');
-  if (armor) inventory = equipItem(inventory, armor.id, 'armadura');
-  const shield = items.find((i) => i.armor?.category === 'Shield');
-  if (shield) inventory = equipItem(inventory, shield.id, 'escudo');
-  const weapons = items.filter((i) => i.weapon);
-  if (weapons[0]) inventory = equipItem(inventory, weapons[0].id, 'mano-principal');
-  if (weapons[1] && !shield && !isTwoHanded(weapons[0]?.weapon)) {
-    inventory = equipItem(inventory, weapons[1].id, 'mano-secundaria');
-  }
-  return inventory;
-}
-
-/** Elecciones completas (grupo elegido + huecos de categoría rellenos) → objetos concedidos. */
-function grantsFromChoices(groups, groupChoice, categoryPicks, categoryMembers) {
-  const grants = [];
-  for (const group of groups) {
-    const option = group.options.find((o) => o.key === groupChoice[group.key]);
-    if (!option) continue;
-    grants.push(...option.fixedGrants);
-    for (const slot of option.categorySlots) {
-      const picked = (categoryPicks[slot.pathKey] ?? []).filter(Boolean);
-      for (const index of picked) {
-        const member = categoryMembers[slot.categoryIndex]?.find((m) => m.index === index);
-        if (member) grants.push({ index, name: member.name, qty: 1 });
-      }
-    }
-  }
-  return grants;
-}
-
-export default function StepEquipo({ char, patch, classDetail, errors }) {
+export default function StepEquipo({ char, patch, classDetail, errors, onPreview }) {
   const { fixed, groups } = useMemo(() => parseStartingEquipment(classDetail), [classDetail]);
   const [itemsByIndex, setItemsByIndex] = useState({});
   const [categoryMembers, setCategoryMembers] = useState({});
@@ -122,32 +83,55 @@ export default function StepEquipo({ char, patch, classDetail, errors }) {
   // combinación de elecciones cambia de verdad (evita PUTs en bucle).
   useEffect(() => {
     if (loading || !classDetail) return;
-    const grants = [...fixed, ...grantsFromChoices(groups, groupChoice, categoryPicks, categoryMembers)];
-    const signature = JSON.stringify(grants);
+    const { signature, inventory } = equipmentFor(groupChoice, categoryPicks);
     if (char.wizard_data.appliedEquipmentSignature === signature) return;
-    const items = grants.map((grant) =>
-      inventoryItemFromEntry(itemsByIndex[grant.index] ?? { index: grant.index, name: grant.name, meta: {} }, grant.qty)
-    );
     patch({
-      inventory: autoEquip(items),
+      inventory,
       wizard_data: { ...char.wizard_data, appliedEquipmentSignature: signature },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, classDetail, fixed, groups, groupChoice, categoryPicks, categoryMembers, itemsByIndex]);
 
-  function chooseOption(group, optionKey) {
-    patch({
-      wizard_data: { ...char.wizard_data, equipmentGroupChoice: { ...groupChoice, [group.key]: optionKey } },
-    });
+  function equipmentFor(nextGroups, nextPicks) {
+    return buildWizardEquipment({ fixed, groups, groupChoice: nextGroups, categoryPicks: nextPicks, categoryMembers, itemsByIndex });
   }
 
-  function pickCategoryItem(pathKey, i, index) {
+  function equipmentPatch(nextGroups, nextPicks) {
+    const { signature, inventory } = equipmentFor(nextGroups, nextPicks);
+    return {
+      inventory,
+      wizard_data: {
+        ...char.wizard_data,
+        equipmentGroupChoice: nextGroups,
+        equipmentCategoryPicks: nextPicks,
+        appliedEquipmentSignature: signature,
+      },
+    };
+  }
+
+  function chooseOption(group, optionKey) {
+    onPreview?.(null);
+    patch(equipmentPatch({ ...groupChoice, [group.key]: optionKey }, categoryPicks));
+  }
+
+  function picksWith(pathKey, i, index) {
     const current = categoryPicks[pathKey] ?? [];
     const next = [...current];
     next[i] = index;
-    patch({
-      wizard_data: { ...char.wizard_data, equipmentCategoryPicks: { ...categoryPicks, [pathKey]: next } },
-    });
+    return { ...categoryPicks, [pathKey]: next };
+  }
+
+  function pickCategoryItem(pathKey, i, index) {
+    onPreview?.(null);
+    patch(equipmentPatch(groupChoice, picksWith(pathKey, i, index)));
+  }
+
+  function previewOption(group, option) {
+    onPreview?.({ label: partLabel(option.part, translate), fields: equipmentPatch({ ...groupChoice, [group.key]: option.key }, categoryPicks) });
+  }
+
+  function previewItem(slot, i, entry) {
+    onPreview?.({ label: translate(entry.index, entry.name), fields: equipmentPatch(groupChoice, picksWith(slot.pathKey, i, entry.index)) });
   }
 
   // Nombre en español de un objeto o categoría del compendio, con el nombre
@@ -161,19 +145,18 @@ export default function StepEquipo({ char, patch, classDetail, errors }) {
   if (loading) return <p className="text-sm text-bone/50">Cargando opciones de equipo…</p>;
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-5">
       <p className="text-sm text-bone/70">
-        Este es el equipo inicial que concede tu clase según el manual. Cómo lo llevas puesto
-        (mano principal, secundaria, armadura, escudo o mochila) podrás ajustarlo después desde
-        la ficha; aquí solo elige qué te llevas.
+        Prepara lo que llevarás en tu primera aventura. Tu clase concede este equipo inicial:
+        explora las opciones para ver cómo cambian tu defensa y tus ataques.
       </p>
 
       {fixed.length > 0 && (
-        <div>
-          <p className="mb-1.5 text-xs uppercase tracking-wider text-bone/50">Equipo fijo</p>
-          <ul className="space-y-0.5 text-sm text-bone/80">
+        <div className="rounded-xl border border-gold/15 bg-gold/5 p-4">
+          <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-gold/75">Ya está en tu mochila</p>
+          <ul className="flex flex-wrap gap-2 text-xs text-bone/80">
             {fixed.map((f) => (
-              <li key={f.index}>
+              <li key={f.index} className="rounded-md border border-gold/15 bg-night-950/40 px-2 py-1">
                 {itemsByIndex[f.index]?.name ?? f.name}
                 {f.qty > 1 ? ` ×${f.qty}` : ''}
               </li>
@@ -182,21 +165,22 @@ export default function StepEquipo({ char, patch, classDetail, errors }) {
         </div>
       )}
 
-      {groups.map((group) => (
-        <div key={group.key} className="rounded-md border border-bone/10 p-3">
+      {groups.map((group, groupIndex) => (
+        <fieldset key={group.key} className="min-w-0 rounded-xl border border-bone/10 p-3 sm:p-4">
           {/* La descripción del SRD («(a) chain mail or (b) leather armor…»)
               está en inglés y repite lo que ya dicen las opciones: se anuncia
               en español la elección y se listan debajo. */}
-          <p className="mb-2 text-sm text-bone/70">
-            {group.choose > 1 ? `Elige ${group.choose} opciones:` : 'Elige una opción:'}
-          </p>
+          <legend className="px-2 font-display text-sm text-gold">Elección {groupIndex + 1}</legend>
+          <p className="mb-3 text-xs text-bone/60">{group.choose > 1 ? `Elige ${group.choose} opciones para tu equipo.` : 'Elige un conjunto de equipo.'}</p>
           <div className="space-y-2">
             {group.options.map((option) => {
               const checked = groupChoice[group.key] === option.key;
               return (
                 <div
                   key={option.key}
-                  className={`rounded-sm border px-3 py-2 ${checked ? 'border-gold/50 bg-gold/10' : 'border-bone/10'}`}
+                  onMouseEnter={() => previewOption(group, option)}
+                  onMouseLeave={() => onPreview?.(null)}
+                  className={`min-w-0 rounded-lg border px-3 py-3 transition-colors motion-reduce:transition-none ${checked ? 'border-gold/50 bg-gold/10' : 'border-bone/10 bg-night-950/30 hover:border-gold/30'}`}
                 >
                   <label className="flex cursor-pointer items-center gap-2 text-sm">
                     <input
@@ -204,27 +188,37 @@ export default function StepEquipo({ char, patch, classDetail, errors }) {
                       name={group.key}
                       checked={checked}
                       onChange={() => chooseOption(group, option.key)}
-                      className="accent-gold"
+                      onFocus={() => previewOption(group, option)}
+                      onBlur={() => onPreview?.(null)}
+                      className="shrink-0 accent-gold"
                     />
-                    {partLabel(option.part, translate)}
+                    <span className="min-w-0 break-words">{partLabel(option.part, translate)}</span>
                   </label>
                   {checked &&
                     option.categorySlots.map((slot) => (
-                      <div key={slot.pathKey} className="ml-6 mt-2 flex flex-wrap gap-2">
+                      <div key={slot.pathKey} className="mt-3 min-w-0 space-y-3">
                         {Array.from({ length: slot.choose }).map((_, i) => (
-                          <select
-                            key={i}
-                            value={categoryPicks[slot.pathKey]?.[i] ?? ''}
-                            onChange={(e) => pickCategoryItem(slot.pathKey, i, e.target.value)}
-                            className="rounded-sm border border-bone/20 bg-night-950 px-2 py-1 text-xs text-bone/80"
-                          >
-                            <option value="">Elige {translate(slot.categoryIndex, slot.categoryName)}…</option>
-                            {(categoryMembers[slot.categoryIndex] ?? []).map((m) => (
-                              <option key={m.index} value={m.index}>
-                                {itemsByIndex[m.index]?.name ?? m.name}
-                              </option>
-                            ))}
-                          </select>
+                          <div key={i}>
+                            <p id={`${slot.pathKey}-${i}`} className="mb-2 text-[11px] text-bone/60">{translate(slot.categoryIndex, slot.categoryName)}{slot.choose > 1 ? ` · ${i + 1} de ${slot.choose}` : ''}</p>
+                            <div role="group" aria-labelledby={`${slot.pathKey}-${i}`} className="grid max-h-60 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2">
+                              {(categoryMembers[slot.categoryIndex] ?? []).map((m) => {
+                                const entry = itemsByIndex[m.index];
+                                const selected = categoryPicks[slot.pathKey]?.[i] === m.index;
+                                return (
+                                  <button key={m.index} type="button" aria-pressed={selected}
+                                    onClick={() => pickCategoryItem(slot.pathKey, i, m.index)}
+                                    onMouseEnter={() => previewItem(slot, i, m)} onMouseLeave={() => onPreview?.(null)}
+                                    onFocus={() => previewItem(slot, i, m)} onBlur={() => onPreview?.(null)}
+                                    className={`min-w-0 rounded-md border p-2 text-left text-xs transition-colors motion-reduce:transition-none ${selected ? 'border-gold bg-gold/15 text-gold' : 'border-bone/10 bg-night-950/60 text-bone/80 hover:border-gold/50'}`}>
+                                    <span className="block break-words">{selected ? '✓ ' : ''}{entry?.name ?? m.name}</span>
+                                    {entry?.meta?.damage && <span className="mt-0.5 block font-mono text-[10px] text-bone/45">Daño {entry.meta.damage.dice}</span>}
+                                    {entry?.meta?.armorClass && <span className="mt-0.5 block text-[10px] text-bone/45">CA {entry.meta.armorClass.base}</span>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {errors.equipo && !categoryPicks[slot.pathKey]?.[i] && <p role="alert" className="mt-2 text-xs text-blood">Elige este objeto para completar el conjunto de equipo de tu clase.</p>}
+                          </div>
                         ))}
                       </div>
                     ))}
@@ -232,10 +226,11 @@ export default function StepEquipo({ char, patch, classDetail, errors }) {
               );
             })}
           </div>
-        </div>
+          {errors.equipo && !groupChoice[group.key] && <p role="alert" className="mt-2 text-xs text-blood">Falta esta elección: tu clase te concede uno de estos conjuntos.</p>}
+        </fieldset>
       ))}
 
-      {errors.equipo && <p className="text-xs text-blood">{errors.equipo}</p>}
+      <p className="text-xs leading-relaxed text-bone/50">La <StatTooltip stat="ca">CA</StatTooltip> y los ataques se actualizan al elegir. En la ficha podrás ajustar qué empuñas y qué guardas en la mochila.</p>
 
       <HelpBlock title="¿Por qué elijo el equipo ahora?">
         Estas son las opciones que el manual concede a tu clase al nivel 1: nada de comprar con
@@ -268,3 +263,4 @@ export function validateEquipo(char, classDetail) {
   }
   return errors;
 }
+

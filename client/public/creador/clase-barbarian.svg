@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 400" role="img" aria-label="Ilustración original de Bárbaro">
+<defs><linearGradient id="bg" x2=".8" y2="1"><stop stop-color="#9a6245"/><stop offset="1" stop-color="#12292c"/></linearGradient><linearGradient id="cloth" x2="1" y2="1"><stop stop-color="#9a6245"/><stop offset="1" stop-color="#172e32"/></linearGradient><linearGradient id="skin" x2="1" y2=".7"><stop stop-color="#b88b65"/><stop offset="1" stop-color="#725c49"/></linearGradient><linearGradient id="metal" x2="1" y2=".8"><stop stop-color="#b8b7a0"/><stop offset=".4" stop-color="#617777"/><stop offset="1" stop-color="#263f46"/></linearGradient><radialGradient id="magic"><stop stop-color="#c3add2" stop-opacity=".8"/><stop offset="1" stop-color="#8879b8" stop-opacity="0"/></radialGradient><linearGradient id="shade" x2="0" y2="1"><stop offset=".5" stop-color="#0b1518" stop-opacity="0"/><stop offset="1" stop-color="#0b1518" stop-opacity=".85"/></linearGradient></defs>
+<path fill="url(#bg)" d="M0 0H360V400H0z"/>
+<circle cx="181" cy="153" r="126" fill="none" stroke="#d4bc85" stroke-opacity=".25"/><circle cx="181" cy="153" r="115" fill="none" stroke="#d4bc85" stroke-opacity=".16"/><path d="M181 13V38M181 267V295M 40 153H67M295 153H321" stroke="#d4bc85" stroke-opacity=".5"/>
+<path d="M0 203 35 191  50 157  70 178 94 144 132 196 172 159 218 207 271 164 309 185 335 136 360 158V400H0Z" fill="#152c2f" opacity=".6"/>
+<path d="M0 281 39 247 80 271 123 243 175 287 225 255 280 280 325 238 360 258V400H0Z" fill="#163033" opacity=".65"/>
+<g fill="#dcc599" opacity=".6"><circle cx=" 60" cy="94" r="1.7"/><circle cx="293" cy="82" r="1"/><circle cx="320" cy="212" r="1.5"/><circle cx="49" cy="230" r="1"/><path d="M272 45V55M267 50H277"/></g>
+<path d="M65 400  70 293Q78 256 137 233L152 207H210L225 233Q281 248 296 292L313 400Z" fill="url(#cloth)"/>
+<path d="M154 196 150 236 180 262 213 235 207 195Z" fill="url(#skin)"/>
+<path d="M123 145Q118 102 161  90 Q208  80 233 124L239 177 225 202 197 227 169 229 139 210 124 178Z" fill="url(#skin)"/>
+<path d="M128 153 159 146 166 153M192 153 207 145 228 153" fill="none" stroke="#493f35" stroke-width="5"/><path d="M141 160H157M202 160H217" stroke="#e3d8b0" stroke-width="3"/><path d="M179 159 174 184 186 186M165 200Q181 205 197 199" fill="none" stroke="#65503e" stroke-width="2.5"/>
+<path d="M125 194 95 163 110 154 98 122 118 115 113 86 138 92 150  66 176 79 208  66 224  95 247 89 244 125 268 142 247 170 236 203 222 148 153 139Z" fill="#30251f"/><path d="M135 217 114 241 97 225 83 251 63 247  70 278  50 293  80 310 117 279 149 286 178 257 207 287 237 277 280 312 307 293 284 275 299 254 276 249 259 229 238 237 224 216 181 247Z" fill="#948573" stroke="#bbaa87"/><g transform="rotate(-17 74 252)"><path d="M73 131V409" stroke="#8f7853" stroke-width="10"/><path d="M64 133Q29 141 25 197L66 181  80 182 124 202Q121 153 85 131Z" fill="url(#metal)" stroke="#cbb485" stroke-width="2"/></g>
+<path fill="url(#shade)" d="M0 0H360V400H0z"/>
+<path d="M17  60 V17H 70 M290 17H343V 60 M17 340V383H 70 M290 383H343V340" fill="none" stroke="#c9b47e" stroke-opacity=".4" stroke-width="1"/>
+</svg>

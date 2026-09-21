@@ -4,8 +4,9 @@ import { api } from '../../api.js';
 import { srdCampaignPath } from '../../lib/srdCampaign.js';
 import { parseProficiencyChoices, classAutoProficiencies } from '../../lib/wizard.js';
 import HelpBlock from './HelpBlock.jsx';
+import StatTooltip from '../StatTooltip.jsx';
 
-export default function StepCompetencias({ char, patch, classDetail, errors }) {
+export default function StepCompetencias({ char, patch, classDetail, errors, onPreview }) {
   const { skillChoice, otherChoices } = classDetail ? parseProficiencyChoices(classDetail) : {};
   const autoProf = classDetail ? classAutoProficiencies(classDetail) : [];
   const wd = char.wizard_data;
@@ -29,13 +30,27 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
   }, [char.campaign_id]);
   const profName = (entry) => profNames[entry.index] ?? entry.name;
 
-  function toggleSkill(key) {
+  // Parche que produciría marcar o desmarcar una habilidad; null si el cupo
+  // de la clase ya está completo. Sirve tanto para aplicar como para anticipar.
+  function skillFields(key) {
     const current = chosenSkills;
     let next;
     if (current.includes(key)) next = current.filter((k) => k !== key);
     else if (current.length < (skillChoice?.choose ?? 0)) next = [...current, key];
-    else return;
-    patch({ skill_proficiencies: [...new Set([...next, ...raceSkills])] });
+    else return null;
+    return { skill_proficiencies: [...new Set([...next, ...raceSkills])] };
+  }
+
+  function toggleSkill(key) {
+    const fields = skillFields(key);
+    if (!fields) return;
+    onPreview?.(null);
+    patch(fields);
+  }
+
+  function previewSkill(option) {
+    const fields = skillFields(option.key);
+    if (fields) onPreview?.({ label: option.name, fields });
   }
 
   function toggleOther(group, key) {
@@ -62,9 +77,10 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-bone/70">
-        Las competencias determinan en qué eres bueno de forma fiable: sumas tu bonificador de
-        competencia en las tiradas correspondientes.
+      <p className="text-sm leading-relaxed text-bone/70">
+        ¿En qué destaca tu héroe? En las <StatTooltip stat="competencia">competencias</StatTooltip> sumas tu bonificador
+        de competencia a la tirada. Tu clase y tu especie ya te conceden algunas; pasa por encima de una habilidad para ver
+        cuánto subiría.
       </p>
 
       <div>
@@ -104,45 +120,50 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
 
       {skillChoice && (
         <div>
-          <div className="mb-1.5 flex items-baseline justify-between">
-            <p className="text-xs uppercase tracking-wider text-bone/50">Habilidades a elegir</p>
-            <p className={`text-xs ${skillsLeft > 0 ? 'text-gold' : 'text-moss'}`}>
+          <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <p className="text-xs uppercase tracking-wider text-bone/50">Habilidades de tu clase</p>
+            <p className={`text-xs ${errors.skills ? 'text-red-300' : skillsLeft > 0 ? 'text-gold' : 'text-emerald-300'}`} aria-live="polite">
               {skillsLeft > 0
-                ? `Tu clase te permite elegir ${skillChoice.choose} habilidades. Te quedan ${skillsLeft} selecciones.`
-                : 'Selección completa.'}
+                ? `Elige ${skillChoice.choose}: te quedan ${skillsLeft}.`
+                : `Selección completa (${skillChoice.choose}).`}
             </p>
           </div>
-          <div className="grid gap-1.5 sm:grid-cols-2">
+          <div className="grid gap-1.5 sm:grid-cols-2" role="group" aria-label="Habilidades de tu clase" aria-describedby={errors.skills ? 'wizard-skills-error' : undefined}>
             {skillChoice.options.map((o) => {
               const automatic = raceSkills.includes(o.key);
               const checked = chosenSkills.includes(o.key);
               const disabled = automatic || (!checked && skillsLeft <= 0);
+              const skill = SKILLS.find((entry) => entry.index === o.key);
+              const abilityShort = ABILITIES.find((ability) => ability.key === skill?.ability)?.short;
               return (
                 <label
                   key={o.key}
-                  className={`flex items-center gap-2 rounded-sm border px-2 py-1.5 text-sm ${
-                    checked ? 'border-gold/50 bg-gold/10' : 'border-bone/10'
-                  } ${disabled ? 'opacity-40' : 'cursor-pointer hover:bg-bone/5'}`}
+                  onMouseEnter={() => !disabled && previewSkill(o)} onMouseLeave={() => onPreview?.(null)}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors motion-reduce:transition-none ${
+                    checked ? 'border-gold/60 bg-gold/10 text-gold' : 'border-bone/10 text-bone/85'
+                  } ${disabled ? 'opacity-40' : 'cursor-pointer hover:border-gold/50'}`}
                 >
-                  <input type="checkbox" checked={checked || automatic} disabled={disabled} onChange={() => toggleSkill(o.key)} className="accent-gold" />
-                  {o.name}{automatic ? ' (ya concedida por la raza)' : ''}
+                  <input type="checkbox" checked={checked || automatic} disabled={disabled} onChange={() => toggleSkill(o.key)}
+                    onFocus={() => !disabled && previewSkill(o)} onBlur={() => onPreview?.(null)} className="accent-gold" />
+                  <span className="min-w-0 flex-1">{o.name}{automatic ? <span className="text-bone/50"> · ya la concede tu especie</span> : ''}</span>
+                  {abilityShort && <span className="shrink-0 font-mono text-[10px] text-bone/45">{abilityShort}</span>}
                 </label>
               );
             })}
           </div>
+          {errors.skills && <p id="wizard-skills-error" role="alert" className="mt-2 text-xs text-red-300">{errors.skills}</p>}
         </div>
       )}
-      {errors.skills && <p className="text-xs text-blood">{errors.skills}</p>}
 
       {(otherChoices ?? []).map((group) => {
         const chosen = wd.otherProficiencyChoices?.[group.groupKey] ?? [];
         const left = group.choose - chosen.length;
         return (
           <div key={group.groupKey}>
-            <div className="mb-1.5 flex items-baseline justify-between">
+            <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <p className="text-xs uppercase tracking-wider text-bone/50">Otras competencias</p>
-              <p className={`text-xs ${left > 0 ? 'text-gold' : 'text-moss'}`}>
-                {left > 0 ? `Te quedan ${left} selecciones.` : 'Selección completa.'}
+              <p className={`text-xs ${errors.other && left > 0 ? 'text-red-300' : left > 0 ? 'text-gold' : 'text-emerald-300'}`} aria-live="polite">
+                {left > 0 ? `Elige ${group.choose}: te quedan ${left}.` : `Selección completa (${group.choose}).`}
               </p>
             </div>
             <p className="mb-1 text-xs text-bone/50">{group.desc}</p>
@@ -153,9 +174,9 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
                 return (
                   <label
                     key={o.key}
-                    className={`flex items-center gap-2 rounded-sm border px-2 py-1.5 text-sm ${
-                      checked ? 'border-gold/50 bg-gold/10' : 'border-bone/10'
-                    } ${disabled ? 'opacity-40' : 'cursor-pointer hover:bg-bone/5'}`}
+                    className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors motion-reduce:transition-none ${
+                      checked ? 'border-gold/60 bg-gold/10 text-gold' : 'border-bone/10 text-bone/85'
+                    } ${disabled ? 'opacity-40' : 'cursor-pointer hover:border-gold/50'}`}
                   >
                     <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleOther(group, o.key)} className="accent-gold" />
                     {profNames[o.key] ?? o.name}
@@ -163,10 +184,10 @@ export default function StepCompetencias({ char, patch, classDetail, errors }) {
                 );
               })}
             </div>
+            {errors.other && left > 0 && <p role="alert" className="mt-2 text-xs text-red-300">{errors.other}</p>}
           </div>
         );
       })}
-      {errors.other && <p className="text-xs text-blood">{errors.other}</p>}
 
       <HelpBlock title="¿Qué es el bonificador de competencia?">
         Un número que crece con tu nivel (empieza en +2) y se suma en salvaciones, habilidades y
@@ -184,12 +205,15 @@ export function validateCompetencias(char, classDetail) {
   const raceSkills = char.wizard_data.appliedRaceSkillProficiencies ?? [];
   const chosenCount = char.skill_proficiencies.filter((key) => !raceSkills.includes(key)).length;
   if (skillChoice && chosenCount < skillChoice.choose) {
-    errors.skills = `Te faltan ${skillChoice.choose - chosenCount} habilidades por elegir.`;
+    const left = skillChoice.choose - chosenCount;
+    errors.skills = left === 1
+      ? 'Te falta 1 habilidad por elegir: tu clase te concede competencia en ella y sumarás +2 a sus tiradas.'
+      : `Te faltan ${left} habilidades por elegir: tu clase te concede competencia en ellas y sumarás +2 a sus tiradas.`;
   }
   for (const group of otherChoices ?? []) {
     const chosen = char.wizard_data.otherProficiencyChoices?.[group.groupKey] ?? [];
     if (chosen.length < group.choose) {
-      errors.other = 'Completa las competencias pendientes antes de continuar.';
+      errors.other = `Elige ${group.choose - chosen.length} más: tu clase te concede también estas competencias.`;
       break;
     }
   }

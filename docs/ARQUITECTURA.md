@@ -322,3 +322,13 @@ completo y rebanada en **[MINIATURA-3D.md](MINIATURA-3D.md)** (rebanada vertical
 - **Decisión**: la Fase A (slots) ya está cerrada, así que no hay bloqueo; conviene no solapar
   las fases de ficha/tablero con las fases D y F de la rebanada 1. No se implementa por estar
   aquí escrito.
+
+### 4.16 Notas de la Fase 5b (creador de personaje)
+- **Habilidades a elegir que concede la especie** (la «Versatilidad» del semielfo son dos
+  habilidades a elegir): el asistente solo aplica las habilidades fijas de la especie. Las
+  opcionales (`starting_proficiency_options` en dnd5eapi) ni siquiera llegan al SQLite con
+  `sync-srd`, así que hoy nadie las concede. Es una regla del SRD que falta, no un cambio de
+  presentación: entra con una fase propia (sincronizar el campo + elección en el creador).
+- **Rasgos de clase con variantes** (estilos de combate del guerrero): el creador los enseña
+  agrupados bajo su rasgo padre, pero la elección sigue haciéndose desde la ficha como texto
+  libre, porque los rasgos narrativos no tienen motor de efectos.
