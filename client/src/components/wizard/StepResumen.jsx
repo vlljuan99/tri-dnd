@@ -5,6 +5,7 @@ import { validateClase } from './StepClase.jsx';
 import { validateRaza } from './StepRaza.jsx';
 import { validateCaracteristicas } from './StepCaracteristicas.jsx';
 import { validateCompetencias } from './StepCompetencias.jsx';
+import { validateEquipo } from './StepEquipo.jsx';
 import HelpBlock from './HelpBlock.jsx';
 import StatTooltip from '../StatTooltip.jsx';
 
@@ -12,7 +13,7 @@ export function collectWarnings(char, classDetail, raceDetail = null) {
   const warnings = [];
   const stepErrors = [
     validateRaza(char, raceDetail),
-    validateClase(char),
+    validateClase(char, classDetail),
     validateCaracteristicas(char),
     validateCompetencias(char, classDetail),
     validateIdentidad(char),
@@ -38,9 +39,10 @@ export default function StepResumen({ char, classDetail, raceDetail, classDispla
   // competencias); el resto (sin equipo, hechizos pendientes...) son informativas.
   const requiredErrors = [
     validateRaza(char, raceDetail),
-    validateClase(char),
+    validateClase(char, classDetail),
     validateCaracteristicas(char),
     validateCompetencias(char, classDetail),
+    validateEquipo(char, classDetail),
     validateIdentidad(char),
   ].flatMap((e) => Object.values(e));
   const canFinish = requiredErrors.length === 0;

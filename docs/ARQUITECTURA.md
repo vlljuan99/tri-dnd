@@ -332,3 +332,5 @@ completo y rebanada en **[MINIATURA-3D.md](MINIATURA-3D.md)** (rebanada vertical
 - **Rasgos de clase con variantes** (estilos de combate del guerrero): el creador los enseña
   agrupados bajo su rasgo padre, pero la elección sigue haciéndose desde la ficha como texto
   libre, porque los rasgos narrativos no tienen motor de efectos.
+- **Autoridad de PG al finalizar**: el asistente anterior calcula y envía los PG iniciales;
+  conservar esa ruta evita cambiar reglas en la 5b. Centralizar y validar ese cálculo en servidor queda para una fase propia.

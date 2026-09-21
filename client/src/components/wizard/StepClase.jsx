@@ -1,12 +1,12 @@
 import { ABILITIES, CLASS_SUMMARY, PRIMARY_ABILITY } from '../../lib/dnd.js';
 import { parseProficiencyChoices, classAutoProficiencies } from '../../lib/wizard.js';
 import StatTooltip from '../StatTooltip.jsx';
-import { CreatorCard, CreatorDetail, CreatorFeatures } from './CreatorSelection.jsx';
+import { CreatorCard, CreatorDetail, CreatorFeatures, CompendiumNames, useCompendiumNames } from './CreatorSelection.jsx';
 import HelpBlock from './HelpBlock.jsx';
 
 function primaryAbility(index, detail) {
-  // La principal editorial manda (el paladín es FUE aunque conjure con CAR);
-  // la de conjuros solo cubre las clases del DM, que no tienen entrada.
+  // Reutilizamos la orientación editorial compartida; la característica de
+  // conjuros cubre las clases del DM, que no tienen entrada en esa tabla.
   const key = PRIMARY_ABILITY[index] ?? detail?.spellcasting?.spellcasting_ability?.index;
   return ABILITIES.find((ability) => ability.key === key);
 }
@@ -34,6 +34,7 @@ export default function StepClase({ char, patch, classes, classDetails, errors, 
   const { skillChoice, otherChoices } = detail ? parseProficiencyChoices(detail) : {};
   const autoProf = detail ? classAutoProficiencies(detail) : [];
   const primary = detail ? primaryAbility(char.class_index, detail) : null;
+  const proficiencyNames = useCompendiumNames('proficiencies', char.campaign_id);
 
   // Cambiar de clase vacía las elecciones que dependían de la anterior
   // (habilidades, herramientas, equipo); las de especie se conservan.
@@ -67,7 +68,7 @@ export default function StepClase({ char, patch, classes, classDetails, errors, 
         <p className="text-sm text-bone/50">Cargando clases del compendio…</p>
       ) : (
         <div role="group" aria-label="Clases disponibles" aria-describedby={errors.class_index ? 'wizard-class-error' : undefined}
-          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          className="grid grid-cols-2 gap-3 xl:grid-cols-3">
           {classes.map((cls) => (
             <CreatorCard key={cls.index} category="classes" entry={cls} selected={char.class_index === cls.index}
               subtitle={classSubtitle(cls.index, classDetails[cls.index])} tags={classTags(cls.index, classDetails[cls.index])}
@@ -104,9 +105,9 @@ export default function StepClase({ char, patch, classes, classDetails, errors, 
               <dd className="text-right text-bone">{(detail.saving_throws ?? []).map((save) => ABILITIES.find((ability) => ability.key === save.index)?.name ?? save.name).join(', ') || '—'}</dd>
             </div>
             {autoProf.length > 0 && (
-              <div className="flex justify-between gap-3 border-b border-bone/10 pb-1">
-                <dt className="shrink-0 text-bone/60">Competencias automáticas</dt>
-                <dd className="text-right text-bone">{autoProf.map((proficiency) => proficiency.name).join(', ')}</dd>
+              <div className="flex flex-col justify-between gap-1 border-b border-bone/10 pb-2 sm:gap-3">
+                <dt className="text-bone/60"><StatTooltip stat="competencia">Competencias automáticas</StatTooltip></dt>
+                <dd className="text-bone"><CompendiumNames references={autoProf} catalog={proficiencyNames} /></dd>
               </div>
             )}
             {otherChoices?.length > 0 && (
@@ -129,8 +130,9 @@ export default function StepClase({ char, patch, classes, classDetails, errors, 
   );
 }
 
-export function validateClase(char) {
+export function validateClase(char, classDetail) {
   const errors = {};
   if (!char.class_index) errors.class_index = 'Elige una clase: fija tus puntos de golpe, tus salvaciones y las habilidades entre las que podrás elegir.';
+  else if (classDetail === null) errors.class_index = 'Esta clase no está disponible en la campaña actual. Elige una de las clases que aparecen aquí.';
   return errors;
 }

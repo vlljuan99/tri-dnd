@@ -69,6 +69,28 @@ export function CreatorCard({ category, entry, selected, subtitle, tags = [], on
 }
 
 const entryCache = new Map();
+const catalogCache = new Map();
+
+/** Los nombres también pertenecen al compendio; EN señala el respaldo original. */
+export function useCompendiumNames(category, campaignId) {
+  const [catalog, setCatalog] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    const path = srdCampaignPath(category, campaignId);
+    if (!catalogCache.has(path)) catalogCache.set(path, api(path).then(({ results }) => Object.fromEntries(results.map((entry) => [entry.index, entry]))).catch((error) => { catalogCache.delete(path); throw error; }));
+    catalogCache.get(path).then((entries) => { if (!cancelled) setCatalog(entries); }).catch(() => { if (!cancelled) setCatalog({}); });
+    return () => { cancelled = true; };
+  }, [category, campaignId]);
+  return catalog;
+}
+
+export function CompendiumNames({ references, catalog }) {
+  return <>{references.map((reference, index) => {
+    const entry = catalog[reference.index] ?? { ...reference, translated: false };
+    return <span key={reference.index}>{index > 0 && ' · '}<span>{entry.name}</span>{!entry.translated && <span className="ml-1 inline-block rounded border border-bone/20 px-1 align-middle text-[9px] text-bone/45">EN</span>}</span>;
+  })}</>;
+}
+
 function readEntry(category, index, campaignId) {
   const path = srdCampaignPath(category, campaignId, index);
   if (!entryCache.has(path)) entryCache.set(path, api(path).catch((error) => { entryCache.delete(path); throw error; }));

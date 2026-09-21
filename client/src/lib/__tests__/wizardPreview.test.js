@@ -108,3 +108,16 @@ test('autoEquip conserva el escudo frente al arma secundaria y respeta las armas
   assert.equal(twoHanded.find((item) => item.id === 'espadon').slot, 'mano-principal');
   assert.equal(twoHanded.find((item) => item.id === 'daga').slot, undefined);
 });
+
+test('el reparto parcial actualiza la vista previa desde la primera elección y no arrastra bonos anteriores', () => {
+  const partial = previewCharacter(character, { wizard_data: { abilityMethod: 'array', baseAbilities: null, poolAssignment: { dex: 15 } } });
+  const elf = deriveWizardPreview({ ...partial, race_index: 'elf' }, context);
+  assert.equal(elf.abilities.dex, 17);
+  assert.equal(elf.ac, 13);
+  assert.equal(elf.skills.stealth, 5);
+  assert.equal(elf.abilities.con, 10);
+  const human = deriveWizardPreview({ ...partial, race_index: 'human' }, context);
+  assert.equal(human.abilities.dex, 15);
+  assert.equal(human.ac, 12);
+  assert.equal(partial.wizard_data.baseAbilities, null);
+});

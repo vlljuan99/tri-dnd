@@ -21,7 +21,7 @@ export default function StepIdentidad({ char, patch, errors }) {
       <p className="text-sm text-bone/70">Ya sabes de qué es capaz. Ahora dale un nombre y una historia. Solo el nombre es obligatorio.</p>
       <label className={labelClass}>
         <span className={labelTextClass}>Nombre *</span>
-        <input value={char.name === PLACEHOLDER_NAME ? '' : char.name ?? ''} maxLength={100} onChange={(e) => patch({ name: e.target.value })}
+        <input value={char.name === PLACEHOLDER_NAME ? '' : char.name ?? ''} maxLength={60} onChange={(e) => patch({ name: e.target.value, wizard_data: { ...char.wizard_data, identityName: e.target.value } })}
           placeholder="¿Cómo se llamará tu héroe?" className={`${inputClass} font-display text-lg`}
           aria-invalid={Boolean(errors.name)} aria-describedby="wizard-name-help" />
         <span id="wizard-name-help" className={`text-xs ${errors.name ? 'text-red-300' : 'text-bone/50'}`}>
@@ -53,5 +53,6 @@ export default function StepIdentidad({ char, patch, errors }) {
   );
 }
 export function validateIdentidad(char) {
+  if (char.name?.length > 60) return { name: 'Usa como máximo 60 caracteres para el nombre.' };
   return hasChosenName(char) ? {} : { name: 'Escribe un nombre: es lo que verá tu grupo en la mesa y en las tiradas.' };
 }

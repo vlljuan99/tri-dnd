@@ -21,7 +21,7 @@ import '../components/wizard/wizard.css';
 const STEPS = [
   { id: 'campana', label: 'Campaña', title: 'Elige tu mundo', Component: StepCampana, validate: () => ({}) },
   { id: 'raza', label: 'Especie', title: 'Tus orígenes', Component: StepRaza, validate: (char, ctx) => validateRaza(char, ctx.raceDetail) },
-  { id: 'clase', label: 'Clase', title: 'Encuentra tu vocación', Component: StepClase, validate: (char) => validateClase(char) },
+  { id: 'clase', label: 'Clase', title: 'Encuentra tu vocación', Component: StepClase, validate: (char, ctx) => validateClase(char, ctx.classDetail) },
   {
     id: 'caracteristicas',
     label: 'Características',
@@ -68,6 +68,7 @@ export default function CharacterWizardPage() {
   const [randomBusy, setRandomBusy] = useState(false);
   const [randomError, setRandomError] = useState('');
   const [randomNotice, setRandomNotice] = useState('');
+  const [choicesLoading, setChoicesLoading] = useState(true);
 
   const pendingRef = useRef({});
   const timerRef = useRef(null);
@@ -75,6 +76,7 @@ export default function CharacterWizardPage() {
   const savingRef = useRef(null);
   const previewButtonRef = useRef(null);
   const closePreviewRef = useRef(null);
+  const previewDrawerRef = useRef(null);
 
   // Carga inicial: el personaje (con su progreso guardado) y sus campañas.
   // El compendio se carga después con el contexto de la campaña seleccionada.
@@ -90,7 +92,7 @@ export default function CharacterWizardPage() {
           return;
         }
         const restored = restoreWizardDraft(character);
-        setChar(restored);
+        setChar({ ...restored, name: restored.wizard_data.identityName ?? restored.name });
         setStep(restored.wizard_step);
         setMaxStepReached(restored.wizard_step);
         // La versión del recorrido se guarda con el siguiente cambio, sin migrar SQLite.
@@ -108,6 +110,7 @@ export default function CharacterWizardPage() {
     if (!char) return undefined;
     let cancelled = false;
     const campaignId = char.campaign_id;
+    setChoicesLoading(true);
 
     async function loadChoices(category, setEntries, setDetails) {
       const { results } = await api(srdCampaignPath(category, campaignId));
@@ -126,7 +129,7 @@ export default function CharacterWizardPage() {
     Promise.all([
       loadChoices('classes', setClasses, setClassDetails),
       loadChoices('races', setRaces, setRaceDetails),
-    ]).catch((e) => {
+    ]).then(() => { if (!cancelled) setChoicesLoading(false); }).catch((e) => {
       if (!cancelled) setError(e.message);
     });
 
@@ -137,8 +140,11 @@ export default function CharacterWizardPage() {
 
   const flush = useCallback(async () => {
     // Serializa los PUT: una respuesta antigua nunca pisa el siguiente guardado.
-    if (savingRef.current) await savingRef.current;
-    const body = pendingRef.current;
+    while (savingRef.current) await savingRef.current;
+    const body = { ...pendingRef.current };
+    // El nombre puede permanecer vacío mientras se edita. La API histórica
+    // exige uno en cada PUT que incluya el campo: se envía al ser válido.
+    if ('name' in body && (!body.name.trim() || body.name.length > 60)) delete body.name;
     pendingRef.current = {};
     if (Object.keys(body).length === 0) return true;
     setSaveState('saving');
@@ -167,6 +173,7 @@ export default function CharacterWizardPage() {
     (fields) => {
       setChar((c) => (c ? { ...c, ...fields } : c));
       setStepErrors({});
+      if ('campaign_id' in fields) setChoicesLoading(true);
       Object.assign(pendingRef.current, fields);
       setSaveState('pending');
       clearTimeout(timerRef.current);
@@ -184,8 +191,10 @@ export default function CharacterWizardPage() {
   useEffect(() => {
     function onBeforeUnload() {
       if (Object.keys(pendingRef.current).length > 0) {
+        const body = { ...pendingRef.current };
+        if ('name' in body && (!body.name.trim() || body.name.length > 60)) delete body.name;
         fetch(`/api/characters/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(pendingRef.current), credentials: 'same-origin', keepalive: true }).catch(() => {});
+          body: JSON.stringify(body), credentials: 'same-origin', keepalive: true }).catch(() => {});
       }
     }
     window.addEventListener('beforeunload', onBeforeUnload);
@@ -208,6 +217,14 @@ export default function CharacterWizardPage() {
     closePreviewRef.current?.focus();
     const onKey = (event) => {
       if (event.key === 'Escape') { setPreviewOpen(false); previewButtonRef.current?.focus(); }
+      if (event.key === 'Tab') {
+        const focusable = [...(previewDrawerRef.current?.querySelectorAll('button, summary, [tabindex="0"]') ?? [])]
+          .filter(element => element.getClientRects().length);
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -277,8 +294,8 @@ export default function CharacterWizardPage() {
     });
   }, [char?.race_index, char?.skill_proficiencies, char?.wizard_data, raceDetails, patch]);
 
-  const classDetail = char?.class_index ? classDetails[char.class_index] : null;
-  const raceDetail = char?.race_index ? raceDetails[char.race_index] : null;
+  const classDetail = char?.class_index ? classDetails[char.class_index] ?? null : null;
+  const raceDetail = char?.race_index ? raceDetails[char.race_index] ?? null : null;
   const raceName = char?.race_index ? races.find((r) => r.index === char.race_index)?.name : null;
   const classDisplayName = char?.class_index ? classes.find((c) => c.index === char.class_index)?.name : null;
 
@@ -293,6 +310,7 @@ export default function CharacterWizardPage() {
   }, [char, maxStepReached, step, classDetail, raceDetail]);
 
   function goNext() {
+    if (choicesLoading || randomBusy) return;
     const errs = STEPS[step].validate(char, { classDetail, raceDetail });
     setStepErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -313,7 +331,7 @@ export default function CharacterWizardPage() {
   }
 
   function jumpTo(i) {
-    if (i > maxStepReached) return;
+    if (i > maxStepReached || randomBusy || choicesLoading) return;
     setStep(i);
     setStepErrors({});
     patch({ wizard_step: i });
@@ -337,6 +355,7 @@ export default function CharacterWizardPage() {
     setFinishError('');
     setFinishing(true);
     try {
+      if (choicesLoading || randomBusy) throw new Error('Espera a que terminen de cargarse las opciones.');
       const invalidStep = STEPS.findIndex((s) => Object.keys(s.validate(char, { classDetail, raceDetail })).length > 0);
       if (invalidStep >= 0) { setStep(invalidStep); setStepErrors(STEPS[invalidStep].validate(char, { classDetail, raceDetail })); return; }
       if (!await flushNow()) throw new Error('No se pudieron guardar los cambios. Reintenta antes de finalizar.');
@@ -412,7 +431,7 @@ export default function CharacterWizardPage() {
           <h1 className="mt-1 font-display text-lg tracking-wide text-bone sm:text-2xl">Forja tu leyenda</h1></div>
         <div className="flex items-center gap-3">
           <button onClick={flushNow} className={`text-xs ${saveState === 'error' ? 'text-red-300' : 'text-bone/40'}`} aria-live="polite">{saveLabels[saveState]}</button>
-          <button onClick={saveAndExit} className="rounded border border-bone/20 px-3 py-2 text-xs text-bone/70 hover:border-gold">Guardar y salir</button>
+          <button onClick={saveAndExit} disabled={randomBusy || finishing} className="rounded border border-bone/20 px-3 py-2 text-xs text-bone/70 hover:border-gold disabled:opacity-40">Guardar y salir</button>
         </div>
       </header>
       <div className="mx-auto grid max-w-[1500px] items-start gap-5 px-4 py-5 pb-36 sm:px-8 lg:grid-cols-[175px_minmax(0,1fr)_290px] lg:gap-7 lg:pb-8 xl:grid-cols-[190px_minmax(0,1fr)_320px]">
@@ -424,22 +443,24 @@ export default function CharacterWizardPage() {
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-[10px] uppercase tracking-[.25em] text-gold/70">Capítulo {String(step + 1).padStart(2, '0')} · {label}</p>
               <h2 ref={stepHeadingRef} tabIndex={-1} className="mt-2 font-display text-2xl text-bone outline-none sm:text-3xl">{title ?? label}</h2></div>
-            <button onClick={randomize} disabled={randomBusy || !classes.length || !races.length}
+            <button onClick={randomize} disabled={randomBusy || finishing || choicesLoading || !classes.length || !races.length}
               className="rounded-md border border-gold/35 bg-gold/5 px-3 py-2 text-xs text-gold hover:bg-gold/15 disabled:opacity-40">⚄ {randomBusy ? 'El destino decide…' : 'Personaje aleatorio'}</button>
           </div>
           {randomError && <p role="alert" className="mb-4 text-sm text-red-300">{randomError}</p>}
           {randomNotice && <p role="status" className="mb-4 text-sm text-teal-200">{randomNotice}</p>}
           <motion.div key={STEPS[step].id} initial={reducedMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: reducedMotion ? 0 : 0.22 }} className="wizard-step min-w-0 rounded-lg border border-gold/15 bg-night-900/80 p-4 shadow-xl shadow-black/10 sm:p-5">
+            <fieldset disabled={randomBusy || finishing} className="min-w-0 border-0 p-0">
             <Component char={char} patch={patch} errors={stepErrors} classes={classes} classDetails={classDetails}
               classDetail={classDetail} classDisplayName={classDisplayName} races={races} raceDetails={raceDetails}
               raceDetail={raceDetail} raceName={raceName} campaigns={campaigns} onFinish={finish}
               finishing={finishing} finishError={finishError} onPreview={setPreview} />
+            </fieldset>
           </motion.div>
           <div className="mt-5 hidden items-center justify-between gap-3 lg:flex">
             <button onClick={goBack} disabled={step === 0} className="rounded border border-bone/20 px-5 py-2.5 text-sm text-bone/70 disabled:opacity-25">← Anterior</button>
             <span className="text-xs italic text-bone/35">Cada elección escribe tu historia.</span>
-            {step < STEPS.length - 1 && <button onClick={goNext} className="rounded bg-gold px-6 py-2.5 font-display text-sm text-night-950 hover:bg-gold/90">Continuar →</button>}
+            {step < STEPS.length - 1 && <button onClick={goNext} disabled={choicesLoading || randomBusy} className="rounded bg-gold px-6 py-2.5 font-display text-sm text-night-950 hover:bg-gold/90 disabled:opacity-40">{choicesLoading ? 'Cargando opciones…' : 'Continuar →'}</button>}
           </div>
         </main>
         <aside className="hidden min-w-0 rounded-lg border border-gold/20 bg-night-900/90 p-5 lg:sticky lg:top-5 lg:block lg:max-h-[calc(100vh-40px)] lg:overflow-y-auto">
@@ -455,12 +476,12 @@ export default function CharacterWizardPage() {
         </button>
         <div className="grid grid-cols-[auto_1fr] gap-3">
           <button onClick={goBack} disabled={step === 0} className="rounded border border-bone/25 px-4 py-2.5 text-sm disabled:opacity-30">← Atrás</button>
-          {step < STEPS.length - 1 ? <button onClick={goNext} className="rounded bg-gold px-4 py-2.5 font-display text-sm text-night-950">Continuar →</button>
+          {step < STEPS.length - 1 ? <button onClick={goNext} disabled={choicesLoading || randomBusy} className="rounded bg-gold px-4 py-2.5 font-display text-sm text-night-950 disabled:opacity-40">{choicesLoading ? 'Cargando…' : 'Continuar →'}</button>
             : <button onClick={saveAndExit} className="rounded border border-gold/40 px-4 py-2.5 text-sm text-gold">Guardar y salir</button>}
         </div>
       </div>
       {previewOpen && <div className="fixed inset-0 z-40 flex items-end bg-black/70 lg:hidden" onClick={() => { setPreviewOpen(false); previewButtonRef.current?.focus(); }}>
-        <section id="wizard-preview-drawer" role="dialog" aria-modal="true" aria-label="Vista previa del personaje" onClick={(e) => e.stopPropagation()}
+        <section ref={previewDrawerRef} id="wizard-preview-drawer" role="dialog" aria-modal="true" aria-label="Vista previa del personaje" onClick={(e) => e.stopPropagation()}
           className="max-h-[85dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl border border-gold/30 bg-night-900 p-5">
           <div className="mb-4 flex items-center justify-between"><p className="font-display text-gold">Tu personaje</p>
             <button ref={closePreviewRef} onClick={() => { setPreviewOpen(false); previewButtonRef.current?.focus(); }} aria-label="Cerrar vista previa" className="rounded border border-bone/20 px-3 py-2">✕</button></div>

@@ -20,9 +20,10 @@ export function deriveWizardPreview(character, context = {}) {
   const classDetail = context.classDetails?.[character.class_index] ?? context.classDetail;
   const raceDetail = context.raceDetails?.[character.race_index] ?? context.raceDetail;
   const data = character.wizard_data ?? {};
-  // Sin reparto todavía, las características guardadas son las de partida
-  // (sin bonos aplicados): anticipar una especie sobre ellas enseña sus bonos.
-  const abilities = applyRacialBonuses(data.baseAbilities ?? character.abilities ?? {}, raceDetail, data.raceAbilityChoice ?? []);
+  // Cada valor asignado se anticipa sin esperar a completar los seis. La
+  // base neutra de 10 evita arrastrar bonos de un reparto o especie anterior.
+  const base = data.baseAbilities ?? Object.fromEntries(ABILITIES.map(({ key }) => [key, data.poolAssignment?.[key] ?? 10]));
+  const abilities = applyRacialBonuses(base, raceDetail, data.raceAbilityChoice ?? []);
   const rules = {
     ...character,
     level: character.level ?? 1,

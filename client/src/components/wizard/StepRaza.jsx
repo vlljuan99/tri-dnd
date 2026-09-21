@@ -1,6 +1,6 @@
 import { ABILITIES, DAMAGE_TYPE_NAMES, SKILLS } from '../../lib/dnd.js';
 import StatTooltip from '../StatTooltip.jsx';
-import { CreatorCard, CreatorDetail, CreatorFeatures } from './CreatorSelection.jsx';
+import { CreatorCard, CreatorDetail, CreatorFeatures, CompendiumNames, useCompendiumNames } from './CreatorSelection.jsx';
 import HelpBlock from './HelpBlock.jsx';
 
 const SIZE_NAMES = { Tiny: 'Diminuto', Small: 'Pequeño', Medium: 'Mediano', Large: 'Grande', Huge: 'Enorme', Gargantuan: 'Gigantesco' };
@@ -31,6 +31,7 @@ export default function StepRaza({ char, patch, races, raceDetails, errors, onPr
   const entry = races.find((race) => race.index === char.race_index);
   const wizardData = char.wizard_data;
   const choice = wizardData.raceAbilityChoice ?? [];
+  const languageNames = useCompendiumNames('languages', char.campaign_id);
 
   function raceFields(index) {
     return {
@@ -74,7 +75,7 @@ export default function StepRaza({ char, patch, races, raceDetails, errors, onPr
         <p className="text-sm text-bone/50">Cargando especies del compendio…</p>
       ) : (
         <div role="group" aria-label="Especies disponibles" aria-describedby={errors.race_index ? 'wizard-race-error' : undefined}
-          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          className="grid grid-cols-2 gap-3 xl:grid-cols-3">
           {races.map((race) => (
             <CreatorCard key={race.index} category="races" entry={race} selected={char.race_index === race.index}
               subtitle={raceSubtitle(raceDetails[race.index])} tags={raceTags(raceDetails[race.index])}
@@ -98,7 +99,7 @@ export default function StepRaza({ char, patch, races, raceDetails, errors, onPr
                 <dd className="font-mono text-bone">{detail.ability_bonuses.map((bonus) => `${abilityShort(bonus.ability_score?.index)} +${bonus.bonus}`).join(', ')}</dd>
               </div>
             )}
-            {detail.languages?.length > 0 && <div className="flex justify-between gap-2 border-b border-bone/10 pb-1"><dt className="text-bone/60">Idiomas</dt><dd className="text-right text-bone">{detail.languages.map((language) => language.name).join(', ')}</dd></div>}
+            {detail.languages?.length > 0 && <div className="flex justify-between gap-2 border-b border-bone/10 pb-1"><dt className="text-bone/60">Idiomas</dt><dd className="min-w-0 text-right text-bone"><CompendiumNames references={detail.languages} catalog={languageNames} /></dd></div>}
             {detail.skill_proficiencies?.length > 0 && (
               <div className="flex justify-between gap-2 border-b border-bone/10 pb-1">
                 <dt className="text-bone/60">Habilidades</dt>
@@ -148,7 +149,10 @@ export default function StepRaza({ char, patch, races, raceDetails, errors, onPr
                 onChange={(event) => patch({ wizard_data: { ...wizardData, raceLanguageChoice: event.target.value || null } })}
                 className="rounded-md border border-bone/20 bg-night-950 px-3 py-2 text-sm text-bone focus:border-gold focus:outline-none">
                 <option value="">— Elige un idioma —</option>
-                {detail.language_options.from.options.map((option) => <option key={option.item.index} value={option.item.index}>{option.item.name}</option>)}
+                {detail.language_options.from.options.map((option) => {
+                  const entry = languageNames[option.item.index];
+                  return <option key={option.item.index} value={option.item.index}>{entry?.name ?? option.item.name}{entry?.translated ? '' : ' · EN'}</option>;
+                })}
               </select>
               <span className={`text-xs ${languageError ? 'text-red-300' : 'text-bone/45'}`}>{languageError ?? 'Tu especie sabe un idioma más de tu elección.'}</span>
             </label>
@@ -167,18 +171,22 @@ export default function StepRaza({ char, patch, races, raceDetails, errors, onPr
   );
 }
 
-export function validateRaza(char, raceDetail = null) {
+export function validateRaza(char, raceDetail) {
   const errors = {};
   if (!char.race_index) {
     errors.race_index = 'Elige una especie: decide tu velocidad, tus sentidos y los bonos que se suman a tus características.';
     return errors;
   }
+  if (raceDetail === null) {
+    errors.race_index = 'Esta especie no está disponible en la campaña actual. Elige una de las especies que aparecen aquí.';
+    return errors;
+  }
   const options = raceDetail?.ability_bonus_options;
   const chosen = char.wizard_data?.raceAbilityChoice ?? [];
-  if (options?.choose && chosen.length < options.choose) {
-    errors.raceAbilityChoice = `Te falta${options.choose - chosen.length > 1 ? 'n' : ''} ${options.choose - chosen.length} bono${options.choose - chosen.length > 1 ? 's' : ''} por elegir: tu especie los concede a la característica que prefieras.`;
+  if (options?.choose && (chosen.length !== options.choose || new Set(chosen).size !== chosen.length || chosen.some(key => !options.from?.options?.some(option => option.ability_score?.index === key)))) {
+    errors.raceAbilityChoice = `Elige ${options.choose} características distintas de las disponibles para recibir los bonos de tu especie.`;
   }
-  if (raceDetail?.language_options && !char.wizard_data?.raceLanguageChoice) {
+  if (raceDetail?.language_options && !raceDetail.language_options.from?.options?.some(option => option.item?.index === char.wizard_data?.raceLanguageChoice)) {
     errors.raceLanguageChoice = 'Elige el idioma adicional que concede tu especie.';
   }
   return errors;
