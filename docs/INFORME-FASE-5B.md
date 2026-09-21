@@ -1,0 +1,54 @@
+# Informe de la Fase 5b — Creación de personaje como videojuego
+
+Implementación terminada y verificación técnica superada el 21-09-2026. Solo se ha trabajado en la Fase 5b. La aceptación humana del criterio 5 queda pendiente de Juan con alguien del grupo: crear un guerrero en menos de cinco minutos sin abrir la ayuda.
+
+## Resultado
+
+El creador usa el recorrido campaña → especie → clase → características → competencias → equipo → identidad → resumen. Presenta tarjetas ilustradas, emblemas, detalles del compendio y una ficha que anticipa estadísticas y ataques. El nombre se exige al llegar a identidad; el retrato reutiliza el panel de subir/generar existente. La vista previa permanece a la derecha en escritorio y accesible desde una barra de estadísticas y un cajón en móvil.
+
+## Archivos de la fase
+
+| Archivos | Cambio |
+| --- | --- |
+| `client/src/pages/CharacterWizardPage.jsx` | Orden, recuperación de borradores, aleatorio con inventario materializado, autosalvado serializado, validación del contexto de campaña, transiciones y cajón accesible. |
+| `client/src/components/wizard/StepCampana.jsx` | Selección de campaña separada de identidad. |
+| `client/src/components/wizard/CreatorSelection.jsx`, `StepClase.jsx`, `StepRaza.jsx` | Galerías, emblemas, detalle, rasgos, nombres traducidos y respaldo EN. |
+| `client/src/components/wizard/StepCaracteristicas.jsx`, `StepCompetencias.jsx` | Recomendado, métodos, compra por puntos, ayudas junto al campo y anticipación. |
+| `client/src/components/wizard/StepEquipo.jsx` | Anticipación inmediata de conjuntos y armas; conserva la colocación de equipo existente. |
+| `client/src/components/wizard/StepIdentidad.jsx`, `StepResumen.jsx` | Nombre obligatorio al final, retrato, narrativa y revisión de elecciones pendientes. |
+| `client/src/components/wizard/WizardPreview.jsx`, `WizardProgress.jsx`, `wizard.css` | Ficha viva, deltas, progreso con iconos, estética y movimiento reducido. |
+| `client/src/lib/wizard.js`, `wizardPreview.js` | Recomendación, generación aleatoria, validación de repartos, recuperación del recorrido y adaptación a los espejos de reglas. |
+| `client/src/lib/__tests__/wizard.test.js`, `wizardPreview.test.js` | Pruebas de dominio y de estadísticas/deltas/equipo. |
+| `client/src/lib/__tests__/fixtures/wizard-srd-2014.json`, `wizard-legacy-anonymized.json` | Compendio real y datos locales anonimizados leídos sin modificar la base original. |
+| `client/public/creador/clase-*.svg`, `especie-*.svg`, `personalizado.svg`, `README.md` | 22 ilustraciones propias: 12 clases, 9 especies y respaldo para contenido del DM; autoría documentada. |
+| `ROADMAP.md`, `docs/ARQUITECTURA.md`, este informe | Estado, verificación, decisiones y alcance pendiente. |
+
+## Decisiones
+
+- **Arte SVG original y estático**: coherencia visual, descarga pequeña y funcionamiento sin generación en tiempo de uso. Los personajes ilustrados son orientación artística; no fijan el aspecto de la ficha.
+- **Sin migraciones**: `wizard_data.flowVersion = 2` distingue el recorrido nuevo. Se reasigna `wizard_step` al leer y se preservan todas las elecciones. Un fixture procede de un borrador real; otro conserva el `wizard_data` de una ficha terminada, reabierta como borrador únicamente en la prueba.
+- **Nombre pendiente dentro del borrador**: la API histórica rechaza enviar un nombre vacío. `wizard_data.identityName` conserva esa edición mientras se termina la identidad; el nombre válido se envía por la ruta existente. El límite de 60 caracteres coincide con el servidor.
+- **Recomendación orientativa**: usa `PRIMARY_ABILITY` y el array estándar, más habilidades típicas permitidas por la clase. Se puede modificar después. El aleatorio respeta las opciones del compendio e incluye equipo materializado antes de permitir saltar a identidad.
+- **Compra por puntos**: presupuesto máximo de 27 y valores enteros 8–15 antes de bonos; conservar puntos sin gastar es válido. Está rotulada como Manual del Jugador 2014, fuera del SRD 5.1.
+- **Formas reales del compendio**: se adaptaron los parsers a las opciones anidadas de herramientas/instrumentos del monje y a las categorías directas de equipo. No se añadieron concesiones ni reglas.
+- **Autoridad y límites existentes**: no se modificaron `server/src/routes/characters.js`, el modelo de ficha ni las fórmulas de combate. La finalización conserva el cálculo y envío de PG del asistente anterior; a diferencia de CA/nivel/competencias de equipo, ese flujo existente no los deriva íntegramente en el servidor. Se deja registrada esta discrepancia con el ideal de arquitectura, sin ampliar la fase.
+
+## Verificación
+
+- `npm test`: **455 pruebas aprobadas**, 186 del servidor y 269 del cliente, sin fallos.
+- Recomendado válido para **12 clases × 9 especies**; aleatorio válido en **100 ejecuciones** con el compendio real, además de extremos de tirada.
+- Compra por puntos: rechazos fuera del presupuesto, rango, enteros o seis valores completos.
+- Recuperación idempotente de borradores antiguos sin perder datos.
+- Vista previa: cambio de especie, clase, primera asignación parcial, características, competencias, armaduras y armas; deltas comprobados sin persistir la opción anticipada.
+- `npm run build --prefix client`: correcto. `git diff --check`: sin errores de espacios.
+- Chromium real con backend y SQLite aislados del desarrollo: recorrido de guerrero completo, subida de retrato, ficha final con **13 PG, CA 18 y seis entradas de inventario**. Sin errores de JavaScript.
+- **390 × 844**: ocho pasos y cajón con ancho de documento exactamente 390 px. **1440 × 1000**: galería, detalle, preview y deltas inspeccionados visualmente.
+- Aleatorio → identidad → finalizar sin visitar Equipo: inventario persistido. Nombre vacío conservado al salir y reabrir. Guardados retrasados artificialmente conservan el último nombre al finalizar. Clase del DM no disponible bloqueada antes de finalizar. Movimiento reducido comprobado.
+
+Evidencias locales en `artifacts/phase5b-*` (carpeta ignorada por Git): capturas, resultados JSON, registros de pruebas/build y los guiones de QA. La prueba usa una copia exclusiva del compendio; no copia usuarios ni partidas a su base temporal.
+
+## Fuera de alcance
+
+Multiclase, dotes, trasfondos mecánicos, nuevas subrazas/subclases, miniatura 3D y paso Apariencia. Tampoco se modifican las reglas de PG, CA, competencias o equipamiento, ni se implementa otra fase del programa. La deuda detectada sobre habilidades opcionales de especie, variantes narrativas y autoridad de PG queda en `docs/ARQUITECTURA.md` §4.16.
+
+**Pendiente de aceptación humana:** la prueba de cinco minutos con una persona principiante corresponde a Juan y su grupo, tal como exige el documento de la fase. Los recorridos automatizados no acreditan ese criterio.

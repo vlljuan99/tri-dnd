@@ -1,0 +1,87 @@
+{
+  "source": "Lectura SQLite en modo solo lectura, 21-09-2026. Primer caso: borrador real detenido en especie. Segundo: wizard_data íntegro conservado por una ficha real terminada, reabierta como borrador para comprobar el resumen. Nombre y campaña sustituidos; IDs, autor, retrato y texto personal omitidos.",
+  "characters": [
+    {
+      "name": "Aventurero de prueba 1",
+      "status": "draft",
+      "class_index": "paladin",
+      "race_index": null,
+      "wizard_step": 2,
+      "campaign_id": null,
+      "level": 1,
+      "abilities": {
+        "str": 10,
+        "dex": 10,
+        "con": 10,
+        "int": 10,
+        "wis": 10,
+        "cha": 10
+      },
+      "skill_proficiencies": [],
+      "save_proficiencies": [
+        "wis",
+        "cha"
+      ],
+      "wizard_data": {
+        "otherProficiencyChoices": {}
+      }
+    },
+    {
+      "name": "Aventurero de prueba 2",
+      "status": "draft",
+      "class_index": "fighter",
+      "race_index": "human",
+      "wizard_step": 6,
+      "campaign_id": 1,
+      "level": 4,
+      "abilities": {
+        "str": 18,
+        "dex": 13,
+        "con": 16,
+        "int": 11,
+        "wis": 13,
+        "cha": 9
+      },
+      "skill_proficiencies": [
+        "athletics",
+        "perception"
+      ],
+      "save_proficiencies": [
+        "str",
+        "con"
+      ],
+      "wizard_data": {
+        "otherProficiencyChoices": {},
+        "raceAbilityChoice": [],
+        "raceLanguageChoice": null,
+        "abilityMethod": "manual",
+        "poolAssignment": {},
+        "rolledPool": null,
+        "baseAbilities": {
+          "str": 16,
+          "dex": 12,
+          "con": 14,
+          "int": 10,
+          "wis": 12,
+          "cha": 8
+        },
+        "appliedEquipmentSignature": "[{\"index\":\"chain-mail\",\"name\":\"Chain Mail\",\"qty\":1},{\"index\":\"shield\",\"name\":\"Shield\",\"qty\":1},{\"index\":\"longsword\",\"name\":\"Longsword\",\"qty\":1},{\"index\":\"handaxe\",\"name\":\"Handaxe\",\"qty\":2},{\"index\":\"dungeoneers-pack\",\"name\":\"Dungeoneer's Pack\",\"qty\":1}]",
+        "equipmentGroupChoice": {
+          "equip-0": "equip-0-0",
+          "equip-1": "equip-1-0",
+          "equip-2": "equip-2-1",
+          "equip-3": "equip-3-0"
+        },
+        "equipmentCategoryPicks": {
+          "equip-1-0-cat-0-0": [
+            "longsword"
+          ]
+        },
+        "abilityImprovements": {
+          "str": 1,
+          "con": 1
+        }
+      }
+    }
+  ]
+}

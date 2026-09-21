@@ -5,17 +5,18 @@ import { validateClase } from './StepClase.jsx';
 import { validateRaza } from './StepRaza.jsx';
 import { validateCaracteristicas } from './StepCaracteristicas.jsx';
 import { validateCompetencias } from './StepCompetencias.jsx';
+import { validateEquipo } from './StepEquipo.jsx';
 import HelpBlock from './HelpBlock.jsx';
 import StatTooltip from '../StatTooltip.jsx';
 
-export function collectWarnings(char, classDetail) {
+export function collectWarnings(char, classDetail, raceDetail = null) {
   const warnings = [];
   const stepErrors = [
-    validateIdentidad(char),
-    validateClase(char),
-    validateRaza(char),
+    validateRaza(char, raceDetail),
+    validateClase(char, classDetail),
     validateCaracteristicas(char),
     validateCompetencias(char, classDetail),
+    validateIdentidad(char),
   ];
   for (const errs of stepErrors) {
     for (const msg of Object.values(errs)) warnings.push(msg);
@@ -31,17 +32,18 @@ export function collectWarnings(char, classDetail) {
   return warnings;
 }
 
-export default function StepResumen({ char, classDetail, classDisplayName, raceName, campaigns, onFinish, finishing, finishError }) {
-  const warnings = collectWarnings(char, classDetail);
+export default function StepResumen({ char, classDetail, raceDetail, classDisplayName, raceName, campaigns, onFinish, finishing, finishError }) {
+  const warnings = collectWarnings(char, classDetail, raceDetail);
   // Solo bloquean el paso final las advertencias que vienen de datos
   // obligatorios incompletos (identidad, clase, raza, características,
   // competencias); el resto (sin equipo, hechizos pendientes...) son informativas.
   const requiredErrors = [
-    validateIdentidad(char),
-    validateClase(char),
-    validateRaza(char),
+    validateRaza(char, raceDetail),
+    validateClase(char, classDetail),
     validateCaracteristicas(char),
     validateCompetencias(char, classDetail),
+    validateEquipo(char, classDetail),
+    validateIdentidad(char),
   ].flatMap((e) => Object.values(e));
   const canFinish = requiredErrors.length === 0;
 
