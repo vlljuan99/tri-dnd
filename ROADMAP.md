@@ -8,11 +8,15 @@ Este documento es el **estado e historial** del proyecto. La visión de producto
 
 **Rebanada vertical 1 completada y desplegada.** El recorrido jugable de extremo a extremo ya funciona en la beta: crear campaña con nivel inicial y reloj opcional → crear personaje → equipo inicial del manual → CA, competencias y ataques correctos → mapa, cofre, equipar lo saqueado → combate → descanso → milestone del DM → subida de nivel → todo persistido.
 
-**El siguiente objetivo es la [Rebanada vertical 2 — «Mi miniatura 3D»](docs/MINIATURA-3D.md)** (diseñada, sin implementar; resumen más abajo). Antes de abrirla conviene decidir tres cosas que la rebanada 1 dejó a la vista, todas anotadas en la tabla de deuda de [docs/VERTICAL-SLICE.md](docs/VERTICAL-SLICE.md):
+**El siguiente objetivo es el [Programa «Pulir el gameplay»](docs/PROGRAMA-GAMEPLAY.md)** (decidido con el usuario el 21-sep-2026, sin empezar): diez fases de implementación, una por sesión, que cierran el bucle de juego y hacen que la mesa se sienta como un videojuego antes de abrir superficie nueva. En orden: consumo de espacios de conjuro → recursos de clase → pulido de mesa (tumba, cartel en escaramuzas, cámara que sigue al que actúa, sonidos enganchados) → registro de juego con todo el desglose → **HITO: jugar con el grupo** → HUD como videojuego → portada y transiciones → idioma por usuario (inglés seleccionable, compendio) → interfaz bilingüe → E2E solitario → miniatura 3D G1 (solo tras decidir los assets). Las traducciones del compendio y la investigación de assets las hace Astra en paralelo; las fases aparcadas (12, 12.5, 13, 22, 27, 10) quedan fuera a propósito: aportan realismo, pero primero se pule el gameplay.
 
-1. **Consumo de recursos**: nada gasta todavía espacios de conjuro ni recursos de clase, así que el descanso los «recupera» sin que nadie los haya usado. Es el hueco más visible del bucle de juego.
-2. **Traducción del compendio por lotes**: quedan categorías enteras del SRD sin `name_es` (rasgos, dotes, objetos mágicos, trasfondos), que se enseñan en inglés con etiqueta «EN».
-3. **Simulacro de rollback y restauración** en un entorno aislado, lo único que le falta a la fase de estabilización.
+Deuda que ese programa paga, anotada en la tabla de [docs/VERTICAL-SLICE.md](docs/VERTICAL-SLICE.md):
+
+1. **Consumo de recursos**: nada gasta todavía espacios de conjuro ni recursos de clase, así que el descanso los «recupera» sin que nadie los haya usado. Es el hueco más visible del bucle de juego (fases 1 y 2).
+2. **Traducción del compendio por lotes**: ~890 entradas sin `name_es` (407 rasgos de clase, 362 objetos mágicos, 38 rasgos raciales, 33 secciones de reglas, 16 idiomas, 12 subclases…), que se enseñan en inglés con etiqueta «EN» (Astra, en paralelo a la fase 7).
+3. **Simulacro de rollback y restauración** en un entorno aislado, lo único que le falta a la fase de estabilización (fuera de las fases de código).
+
+La [Rebanada vertical 2 — «Mi miniatura 3D»](docs/MINIATURA-3D.md) sigue diseñada y sin implementar; su G1 es la última fase del programa y G2–G6 se planifican después.
 
 ### Rebanada vertical 1 — «Del equipo inicial al primer nivel ganado» (cerrada)
 
@@ -214,13 +218,13 @@ Se solapa a propósito con la Fase 13 (dirección visual, música ambiental con 
   - Al dejar de ser instantáneo aparece un caso que antes no existía: el DM puede pausar la IA o terminar el combate **mientras el enemigo camina**. Resuelto con un contador por campaña (`enemyAiEpochs`): la secuencia en vuelo aborta y no aplica lo que quedaba
   - Pendiente de enganche: nadie consume `combat:acting` todavía. Son tres líneas en `store/socket.js` + `TacticalCamera.jsx` para que la cámara siga al enemigo que actúa, que es lo que convierte el turno en escena
 
-- [ ] **Seis arreglos de la mesa táctica** (en curso en otra sesión, ver los prompts acordados)
-  - [ ] Rango de movimiento como **contorno luminoso** en vez de relleno verde: con 1-2 casillas restantes el relleno casi no se veía, y con el movimiento completo teñía la ilustración del suelo
-  - [ ] **Brillo mínimo garantizado**: `sceneLighting` bajaba el ambiente a 0,6 con antorchas y lo multiplicaba por 0,34 de noche → ~0,20 en una cripta nocturna, casi negro. Las antorchas deben **sumar** luz, no restar ambiente. No afecta al ocultamiento por visión, que es filtrado de datos y sigue igual
-  - [ ] **Movimiento restante como pips en la caja del personaje**, y los avisos del servidor (`Sin movimiento suficiente…`) flotando sobre ella en vez de en el panel de la esquina opuesta, donde el jugador no los leía
-  - [ ] **Aviso de combate en escaramuzas**: el cartel existe y funciona, pero `spawnEnemies…` solo devuelve `startedCombat: true` si la mesa estaba en modo libre. En una escaramuza autogestionada ya está en turnos, así que se descubría al primer enemigo y nadie veía nada. Añadir además el aviso hermano de "¡Tu turno!"
+- [ ] **Seis arreglos de la mesa táctica** — cuatro cerrados con la reforma del HUD; quedan dos (estado verificado contra `master` en sep-2026)
+  - [x] Rango de movimiento como **contorno luminoso** en vez de relleno verde (`components/MovementOutline.jsx`): con 1-2 casillas restantes el relleno casi no se veía, y con el movimiento completo teñía la ilustración del suelo
+  - [x] **Brillo mínimo garantizado** (`domain/weather.js`: ambiente con suelo en 0,56 y las antorchas **suman** +0,05 en vez de restar): antes `sceneLighting` bajaba el ambiente a 0,6 con antorchas y lo multiplicaba por 0,34 de noche → ~0,20 en una cripta nocturna, casi negro. No afecta al ocultamiento por visión, que es filtrado de datos y sigue igual
+  - [x] **Movimiento restante como pips en la caja del personaje**, y los avisos del servidor (`Sin movimiento suficiente…`) flotando sobre ella (`notice` en `PlayerHud.jsx`) en vez de en el panel de la esquina opuesta, donde el jugador no los leía
+  - [ ] **Aviso de combate en escaramuzas**: el cartel existe y funciona, pero solo salta desde `combat:start` y desde el revelado en modo libre. En una escaramuza autogestionada los enemigos se generan con `startCombat: false` (`services/skirmishes.js`) y las iniciativas quedan preparadas, así que al arrancar el combate nadie ve el cartel. El aviso hermano «¡Tu turno!» ya existe (`CombatAlert.jsx`); falta solo el disparo en este caso
   - [x] **La salvación de muerte termina el turno** automáticamente (en servidor, reutilizando la secuencia de `combat:end-turn`), salvo con un 20 natural: ahí el personaje recupera la consciencia y debe poder actuar
-  - [ ] **Tumba sobre el muerto definitivo**: hoy un PJ inconsciente que aún puede salvarse y uno muerto de verdad se ven idénticos en el tablero (`isTokenDowned` solo mira `hp <= 0`; el estado real vive en `combatants.death_state`)
+  - [ ] **Tumba sobre el muerto definitivo**: hoy un PJ inconsciente que aún puede salvarse y uno muerto de verdad se ven idénticos en el tablero (`domain/tokens.js#isTokenDowned` solo mira `hp <= 0`; el estado real vive en `combatants.death_state`)
 
 - [x] **Acabado del tablero: piedra, sombras y peanas** (`components/BoardMaterials.jsx`, `SceneLighting.jsx`) — el tablero sin ilustración eran cubos de color plano sobre un fondo marrón, y cada ficha un disco con una barra de vida flotando a su lado
   - **Una sola luz proyecta sombras** y el resto aporta ambiente, así que el coste no crece con cada antorcha: mapa de sombras de 1024 px en móvil y 2048 en escritorio, encuadrado sobre el tablero real, con tono ACES filmic. Las salas sin revelar no proyectan sombra (delataría al jugador geometría que no debe ver)
