@@ -1,6 +1,6 @@
 # Informe de la Fase 5b — Creación de personaje como videojuego
 
-Implementación terminada y verificación técnica superada el 21-09-2026. Solo se ha trabajado en la Fase 5b. La aceptación humana del criterio 5 queda pendiente de Juan con alguien del grupo: crear un guerrero en menos de cinco minutos sin abrir la ayuda.
+Implementación terminada y verificación técnica superada el 21-09-2026; arte de clase y retrato progresivo añadidos y verificados el 22-09-2026. Solo se ha trabajado en la Fase 5b. La aceptación humana del criterio 5 queda pendiente de Juan con alguien del grupo: crear un guerrero en menos de cinco minutos sin abrir la ayuda.
 
 ## Resultado
 
@@ -17,15 +17,18 @@ El creador usa el recorrido campaña → especie → clase → características 
 | `client/src/components/wizard/StepEquipo.jsx` | Anticipación inmediata de conjuntos y armas; conserva la colocación de equipo existente. |
 | `client/src/components/wizard/StepIdentidad.jsx`, `StepResumen.jsx` | Nombre obligatorio al final, retrato, narrativa y revisión de elecciones pendientes. |
 | `client/src/components/wizard/WizardPreview.jsx`, `WizardProgress.jsx`, `wizard.css` | Ficha viva, deltas, progreso con iconos, estética y movimiento reducido. |
+| `client/src/pages/CharacterSheetPage.jsx`, `components/SheetTutorial.jsx`, `lib/sheetTutorial.js` | Continuidad de color al terminar y apertura del tutorial después de que ficha y compendio estén listos. |
 | `client/src/lib/wizard.js`, `wizardPreview.js` | Recomendación, generación aleatoria, validación de repartos, recuperación del recorrido y adaptación a los espejos de reglas. |
 | `client/src/lib/__tests__/wizard.test.js`, `wizardPreview.test.js` | Pruebas de dominio y de estadísticas/deltas/equipo. |
 | `client/src/lib/__tests__/fixtures/wizard-srd-2014.json`, `wizard-legacy-anonymized.json` | Compendio real y datos locales anonimizados leídos sin modificar la base original. |
-| `client/public/creador/clase-*.svg`, `especie-*.svg`, `personalizado.svg`, `README.md` | 22 ilustraciones propias: 12 clases, 9 especies y respaldo para contenido del DM; autoría documentada. |
+| `client/public/creador/clase-*-gen.webp`, `clase-*.svg`, `especie-*.svg`, `personalizado.svg`, `README.md` | 12 retratos de clase generados y optimizados, 22 ilustraciones vectoriales de respaldo/especie; dirección y autoría documentadas. |
 | `ROADMAP.md`, `docs/ARQUITECTURA.md`, este informe | Estado, verificación, decisiones y alcance pendiente. |
 
 ## Decisiones
 
-- **Arte SVG original y estático**: coherencia visual, descarga pequeña y funcionamiento sin generación en tiempo de uso. Los personajes ilustrados son orientación artística; no fijan el aspecto de la ficha.
+- **Arte generado, curado y estático**: cada clase tiene un retrato creado con generación de imágenes bajo una dirección común y optimizado a WebP. Los SVG originales quedan como respaldo; no hay generación ni descarga en tiempo de uso. Los personajes ilustrados son orientación artística y no fijan el aspecto de la ficha.
+- **Retrato que se construye**: la ficha lateral revela el arte de clase según avanza el recorrido y muestra hitos de origen a identidad. Es una capa cosmética que no se persiste ni participa en reglas; el retrato subido o generado por el usuario prevalece al llegar a identidad.
+- **Llegada estable a la ficha**: creador, carga y ficha terminada comparten la misma paleta. La petición `?tutorial=1` se conserva hasta que la ficha correcta y el compendio han terminado de cargar y la interfaz ha pintado dos frames; también se consume si el catálogo falla, sin bloquear la ayuda manual.
 - **Sin migraciones**: `wizard_data.flowVersion = 2` distingue el recorrido nuevo. Se reasigna `wizard_step` al leer y se preservan todas las elecciones. Un fixture procede de un borrador real; otro conserva el `wizard_data` de una ficha terminada, reabierta como borrador únicamente en la prueba.
 - **Nombre pendiente dentro del borrador**: la API histórica rechaza enviar un nombre vacío. `wizard_data.identityName` conserva esa edición mientras se termina la identidad; el nombre válido se envía por la ruta existente. El límite de 60 caracteres coincide con el servidor.
 - **Recomendación orientativa**: usa `PRIMARY_ABILITY` y el array estándar, más habilidades típicas permitidas por la clase. Se puede modificar después. El aleatorio respeta las opciones del compendio e incluye equipo materializado antes de permitir saltar a identidad.
@@ -35,14 +38,15 @@ El creador usa el recorrido campaña → especie → clase → características 
 
 ## Verificación
 
-- `npm test`: **455 pruebas aprobadas**, 186 del servidor y 269 del cliente, sin fallos.
+- `npm test`: **458 pruebas aprobadas**, 186 del servidor y 272 del cliente, sin fallos.
 - Recomendado válido para **12 clases × 9 especies**; aleatorio válido en **100 ejecuciones** con el compendio real, además de extremos de tirada.
 - Compra por puntos: rechazos fuera del presupuesto, rango, enteros o seis valores completos.
 - Recuperación idempotente de borradores antiguos sin perder datos.
-- Vista previa: cambio de especie, clase, primera asignación parcial, características, competencias, armaduras y armas; deltas comprobados sin persistir la opción anticipada.
+- Vista previa: cambio de especie, clase, primera asignación parcial, características, competencias, armaduras y armas; deltas comprobados sin persistir la opción anticipada. El retrato progresa de clase a identidad y el avatar propio lo completa.
 - `npm run build --prefix client`: correcto. `git diff --check`: sin errores de espacios.
 - Chromium real con backend y SQLite aislados del desarrollo: recorrido de guerrero completo, subida de retrato, ficha final con **13 PG, CA 18 y seis entradas de inventario**. Sin errores de JavaScript.
-- **390 × 844**: ocho pasos y cajón con ancho de documento exactamente 390 px. **1440 × 1000**: galería, detalle, preview y deltas inspeccionados visualmente.
+- **390 × 844**: ocho pasos y cajón con ancho de documento exactamente 390 px. **1440 × 1000**: galería, detalle, preview y deltas inspeccionados visualmente. Los 12 retratos WebP responden, decodifican a 640 × 800 y no producen errores de JavaScript.
+- Transición a ficha: misma paleta durante carga y contenido; con el compendio demorado, el tutorial retiene la URL y no aparece hasta que los controles están listos. El fallo del catálogo tampoco lo bloquea.
 - Aleatorio → identidad → finalizar sin visitar Equipo: inventario persistido. Nombre vacío conservado al salir y reabrir. Guardados retrasados artificialmente conservan el último nombre al finalizar. Clase del DM no disponible bloqueada antes de finalizar. Movimiento reducido comprobado.
 
 Evidencias locales en `artifacts/phase5b-*` (carpeta ignorada por Git): capturas, resultados JSON, registros de pruebas/build y los guiones de QA. La prueba usa una copia exclusiva del compendio; no copia usuarios ni partidas a su base temporal.

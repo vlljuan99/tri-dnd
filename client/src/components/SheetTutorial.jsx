@@ -4,8 +4,7 @@
  * cada acceso: el llamador decide cuándo mostrarla y marca que ya se vio.
  */
 import { useEffect, useState } from 'react';
-
-export const TUTORIAL_SEEN_KEY = 'tridnd_sheet_tutorial_seen';
+export { TUTORIAL_SEEN_KEY } from '../lib/sheetTutorial.js';
 
 const TIPS = [
   { title: 'Puntos de golpe', body: 'Usa los botones − / + junto a "Puntos de golpe" para reflejar daño o curación, o escribe el valor directamente.' },

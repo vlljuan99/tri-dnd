@@ -31,7 +31,16 @@ const RACE_EMBLEMS = {
 
 export function creatorArt(category, index) {
   const known = category === 'classes' ? CLASS_EMBLEMS : RACE_EMBLEMS;
-  return index in known ? `/creador/${category === 'classes' ? 'clase' : 'especie'}-${index}.svg` : '/creador/personalizado.svg';
+  if (!Object.hasOwn(known, index)) return '/creador/personalizado.svg';
+  return category === 'classes'
+    ? `/creador/clase-${index}-gen.webp`
+    : `/creador/especie-${index}.svg`;
+}
+
+export function creatorArtFallback(category, index) {
+  if (category === 'classes' && Object.hasOwn(CLASS_EMBLEMS, index)) return `/creador/clase-${index}.svg`;
+  if (category === 'races' && Object.hasOwn(RACE_EMBLEMS, index)) return `/creador/especie-${index}.svg`;
+  return '/creador/personalizado.svg';
 }
 
 export function CreatorEmblem({ category, index, className = '' }) {
@@ -54,7 +63,12 @@ export function CreatorCard({ category, entry, selected, subtitle, tags = [], on
       onMouseEnter={showPreview} onMouseLeave={() => onPreview?.(null)} onFocus={showPreview} onBlur={() => onPreview?.(null)} onTouchStart={showPreview}
       className={`group relative flex min-w-0 flex-col overflow-hidden rounded-lg border text-left shadow-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold motion-reduce:transition-none ${selected ? 'border-gold bg-[#29332f] ring-1 ring-gold/30' : 'border-[#596d65]/40 bg-[#142427] hover:border-gold/70'}`}>
       <div className="relative h-36 w-full overflow-hidden sm:h-40">
-        <img src={creatorArt(category, entry.index)} alt="" loading="lazy" className="h-full w-full object-cover object-[center_32%] opacity-90 transition-transform duration-500 group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none" />
+        <img src={creatorArt(category, entry.index)} alt="" loading="lazy"
+          onError={(event) => {
+            const fallback = creatorArtFallback(category, entry.index);
+            if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;
+          }}
+          className="h-full w-full object-cover object-[center_28%] opacity-90 transition-transform duration-500 group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none" />
         <span className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#142427] to-transparent" />
         <span className="absolute left-3 top-3 flex size-8 items-center justify-center rounded-full border border-gold/50 bg-[#102124]/85 text-[#dec58f] shadow-lg"><CreatorEmblem category={category} index={entry.index} className="size-5" /></span>
         {selected && <span className="absolute right-2 top-3 rounded-full border border-gold/70 bg-[#182a29]/95 px-2 py-1 text-[10px] text-[#efdab0]">Elegida <span aria-hidden="true">✓</span></span>}

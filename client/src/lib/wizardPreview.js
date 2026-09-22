@@ -16,6 +16,16 @@ export function previewCharacter(character, fields = {}) {
   };
 }
 
+const PORTRAIT_PROGRESS = [0, 12, 38, 55, 70, 86, 94, 100];
+
+/** Progreso cosmético del retrato: nunca participa en reglas ni se persiste. */
+export function wizardPortraitProgress({ stage = 0, classIndex = null, avatarPath = null } = {}) {
+  if (avatarPath) return 100;
+  if (!classIndex) return 0;
+  const safeStage = Math.max(0, Math.min(PORTRAIT_PROGRESS.length - 1, Math.trunc(Number(stage) || 0)));
+  return PORTRAIT_PROGRESS[safeStage];
+}
+
 export function deriveWizardPreview(character, context = {}) {
   const classDetail = context.classDetails?.[character.class_index] ?? context.classDetail;
   const raceDetail = context.raceDetails?.[character.race_index] ?? context.raceDetail;

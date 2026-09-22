@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveWizardPreview, previewCharacter, wizardPreviewDeltas, buildWizardEquipment, autoEquipWizardItems } from '../wizardPreview.js';
+import { deriveWizardPreview, previewCharacter, wizardPortraitProgress, wizardPreviewDeltas, buildWizardEquipment, autoEquipWizardItems } from '../wizardPreview.js';
 import { parseStartingEquipment } from '../wizard.js';
 
 const abilities = { str: 14, dex: 12, con: 13, int: 8, wis: 10, cha: 15 };
@@ -120,4 +120,14 @@ test('el reparto parcial actualiza la vista previa desde la primera elección y 
   assert.equal(human.abilities.dex, 15);
   assert.equal(human.ac, 12);
   assert.equal(partial.wizard_data.baseAbilities, null);
+});
+
+test('el retrato cosmético se construye por etapas y el avatar final lo completa', () => {
+  assert.equal(wizardPortraitProgress({ stage: 1 }), 0, 'sin clase no se anticipa un aspecto');
+  assert.equal(wizardPortraitProgress({ stage: 2, classIndex: 'fighter' }), 38);
+  assert.equal(wizardPortraitProgress({ stage: 5, classIndex: 'fighter' }), 86);
+  assert.equal(wizardPortraitProgress({ stage: 5.9, classIndex: 'fighter' }), 86);
+  assert.equal(wizardPortraitProgress({ stage: 6, classIndex: 'fighter' }), 94, 'identidad no se completa hasta llegar al resumen');
+  assert.equal(wizardPortraitProgress({ stage: 99, classIndex: 'fighter' }), 100);
+  assert.equal(wizardPortraitProgress({ stage: 0, avatarPath: '/uploads/avatar.webp' }), 100);
 });

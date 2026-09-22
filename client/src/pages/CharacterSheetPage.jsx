@@ -27,7 +27,8 @@ import RollCard from '../components/RollCard.jsx';
 import WeaponRow from '../components/WeaponRow.jsx';
 import StatTooltip from '../components/StatTooltip.jsx';
 import { saveStat, skillStat } from '../lib/statGlossary.js';
-import SheetTutorial, { TUTORIAL_SEEN_KEY } from '../components/SheetTutorial.jsx';
+import SheetTutorial from '../components/SheetTutorial.jsx';
+import { canStartSheetTutorial, TUTORIAL_SEEN_KEY } from '../lib/sheetTutorial.js';
 import CharacterAvatarPanel from '../components/CharacterAvatarPanel.jsx';
 import CustomSections from '../components/CustomSections.jsx';
 import LevelUpDialog from '../components/LevelUpDialog.jsx';
@@ -40,6 +41,7 @@ import {
   racialAbilityBonuses,
 } from '../lib/wizard.js';
 import { availableSlotsFor, computeArmorClass, equipItem, inventoryItemFromEntry, SLOT_LABELS } from '../lib/equipment.js';
+import '../components/wizard/wizard.css';
 
 const inputClass =
   'rounded-sm border border-bone/20 bg-night-950 px-2 py-1.5 text-bone focus:border-gold focus:outline-none disabled:opacity-60';
@@ -126,6 +128,7 @@ export default function CharacterSheetPage() {
   const [races, setRaces] = useState([]);
   const [classDetails, setClassDetails] = useState({});
   const [raceDetails, setRaceDetails] = useState({});
+  const [compendiumSettled, setCompendiumSettled] = useState(false);
   const [campaigns, setCampaigns] = useState([]);
   const [picker, setPicker] = useState(null); // 'weapon' | 'gear' | 'spell'
   const [customItem, setCustomItem] = useState('');
@@ -153,6 +156,7 @@ export default function CharacterSheetPage() {
   useEffect(() => {
     if (!char) return undefined;
     let cancelled = false;
+    setCompendiumSettled(false);
     const campaignId = char.campaign_id;
 
     async function loadCategory(category) {
@@ -173,6 +177,7 @@ export default function CharacterSheetPage() {
         setRaces(raceResponse.entries);
         setClassDetails(classResponse.details);
         setRaceDetails(raceResponse.details);
+        setCompendiumSettled(true);
       })
       .catch(() => {
         if (cancelled) return;
@@ -180,6 +185,7 @@ export default function CharacterSheetPage() {
         setRaces([]);
         setClassDetails({});
         setRaceDetails({});
+        setCompendiumSettled(true);
       });
     return () => {
       cancelled = true;
@@ -205,17 +211,35 @@ export default function CharacterSheetPage() {
     });
   }, [editable, char?.race_index, char?.skill_proficiencies, char?.wizard_data, raceDetail]);
 
-  // Tras finalizar el asistente llegamos con ?tutorial=1: mostramos la guía
-  // contextual solo si el usuario no la ha visto antes en este navegador.
+  // Tras finalizar el asistente llegamos con ?tutorial=1. Esperamos a que la
+  // ficha y sus catálogos estén montados y a dos frames de pintura antes de
+  // abrir la guía; así nunca aparece sobre «Cargando ficha…» ni mientras los
+  // controles cambian de sitio. La URL se consume solo cuando ya puede abrir.
   useEffect(() => {
-    if (searchParams.get('tutorial') === '1') {
-      if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) setTutorialOpen(true);
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.delete('tutorial');
-      setSearchParams(nextParams, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const requested = searchParams.get('tutorial') === '1';
+    if (!canStartSheetTutorial({
+      requested,
+      // useCharacter conserva momentáneamente la ficha anterior si cambia el
+      // parámetro de ruta; no abras la guía hasta tener la ficha solicitada.
+      characterReady: String(char?.id) === String(id),
+      compendiumSettled,
+    })) return undefined;
+
+    let secondFrame = null;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (!localStorage.getItem(TUTORIAL_SEEN_KEY)) setTutorialOpen(true);
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('tutorial');
+        setSearchParams(nextParams, { replace: true });
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [char?.id, compendiumSettled, id, searchParams, setSearchParams]);
 
   function closeTutorial() {
     localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
@@ -273,7 +297,7 @@ export default function CharacterSheetPage() {
 
   if (error) {
     return (
-      <div className="min-h-full bg-night-950 p-6 text-bone">
+      <div className="character-sheet min-h-full bg-night-950 p-6 text-bone">
         <p className="text-blood">{error}</p>
         <Link to={returnTarget?.to ?? '/personajes'} className="text-gold underline">
           {returnTarget?.label ?? 'Volver a personajes'}
@@ -282,7 +306,7 @@ export default function CharacterSheetPage() {
     );
   }
   if (!char) {
-    return <div className="min-h-full bg-night-950 p-6 text-bone/60">Cargando ficha…</div>;
+    return <div className="character-sheet min-h-full bg-night-950 p-6 text-bone/60">Cargando ficha…</div>;
   }
 
   const automaticRaceSkills = raceAutomaticSkills(raceDetail);
@@ -475,7 +499,7 @@ export default function CharacterSheetPage() {
   const saveLabels = { saved: 'Guardado ✓', pending: 'Cambios sin guardar…', saving: 'Guardando…', error: 'Error al guardar' };
 
   return (
-    <div className="min-h-full bg-night-950">
+    <div className="character-sheet min-h-full bg-night-950">
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 text-bone">
       {/* Cabecera */}
       <div className="flex items-center justify-between">

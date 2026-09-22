@@ -1,5 +1,7 @@
-/* Paleta y atmósfera exclusivas del creador; no cambian la ficha ni la mesa. */
-.character-creator {
+/* El creador y la ficha comparten atmósfera para que terminar el recorrido
+   no provoque un cambio de color brusco. La mesa conserva su tema propio. */
+.character-creator,
+.character-sheet {
   --color-night-950: #101719;
   --color-night-900: #182123;
   --color-gold: #d1b17a;
@@ -11,6 +13,7 @@
   outline: 2px solid #d1b17a; outline-offset: 3px;
 }
 .character-creator .wizard-step { overflow-wrap: anywhere; }
+.character-creator .wizard-forming-portrait img { color: transparent; }
 .character-creator input:not([type=checkbox]):not([type=radio]), .character-creator select, .character-creator textarea { max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   .character-creator *, .character-creator *::before, .character-creator *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

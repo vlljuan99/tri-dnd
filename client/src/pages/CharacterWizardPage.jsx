@@ -420,7 +420,15 @@ export default function CharacterWizardPage() {
   const saveLabels = { saved: 'Guardado', pending: 'Cambios pendientes…', saving: 'Guardando…', error: 'Error al guardar · reintentar' };
   const { Component, title, label } = STEPS[step];
   const steps = STEPS.map((s, i) => ({ id: s.id, label: s.label, status: stepStatuses[i] }));
-  const previewProps = { char, classDisplayName, raceName, classDetail, raceDetail, classDetails, raceDetails, preview };
+  const anticipatedCharacter = preview?.fields ? previewCharacter(char, preview.fields) : char;
+  const previewClassName = anticipatedCharacter.class_index
+    ? classes.find((entry) => entry.index === anticipatedCharacter.class_index)?.name ?? anticipatedCharacter.class_index
+    : null;
+  const previewRaceName = anticipatedCharacter.race_index
+    ? races.find((entry) => entry.index === anticipatedCharacter.race_index)?.name ?? anticipatedCharacter.race_index
+    : null;
+  const previewProps = { char, classDisplayName: previewClassName, raceName: previewRaceName,
+    classDetail, raceDetail, classDetails, raceDetails, preview, buildStage: maxStepReached };
   const stats = deriveWizardPreview(char, { classDetail, raceDetail, classDetails, raceDetails });
   const changes = preview?.fields ? wizardPreviewDeltas(stats, deriveWizardPreview(previewCharacter(char, preview.fields), { classDetail, raceDetail, classDetails, raceDetails })) : [];
 
