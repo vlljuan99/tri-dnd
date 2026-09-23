@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { quaternionForValue } from './diceShapes.js';
+import { VUELO_MS, retardoDe } from './timing.js';
 
 // El vuelo del dado: cae, bota, rueda y frena hasta quedarse en la cara que ya
 // salió. Todo es determinista a partir de una semilla, así que la trayectoria se
@@ -12,15 +13,9 @@ import { quaternionForValue } from './diceShapes.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-// Tiempos, en milisegundos. Un dado que rueda menos de medio segundo no pesa;
-// uno que rueda dos segundos aburre a la cuarta tirada de la sesión.
-export const VUELO_MS = 1150;
-// Cada dado sale un poco después que el anterior: el repiqueteo se lee en
-// secuencia en vez de como un golpe único.
-export const RETARDO_ENTRE_DADOS_MS = 90;
-// Con muchos dados el retardo acumulado se comprime para que una tirada de 8d6
-// no dure el triple que una de 2d6.
-export const RETARDO_MAXIMO_MS = 520;
+// Los tiempos viven en `timing.js` (sin three) para que la cola de revelado
+// pueda planificar sin cargar el motor 3D.
+export { VUELO_MS, RETARDO_ENTRE_DADOS_MS, RETARDO_MAXIMO_MS, retardoDe, duracionTotal } from './timing.js';
 
 const ALTURA_SALIDA = 7;
 const BOTES = 2.4;
@@ -39,25 +34,16 @@ function seededRandom(seed) {
 
 const easeOutCubic = (t) => 1 - (1 - t) ** 3;
 
-export function retardoDe(index, count) {
-  if (count <= 1) return 0;
-  const total = Math.min(RETARDO_ENTRE_DADOS_MS * (count - 1), RETARDO_MAXIMO_MS);
-  return (total * index) / (count - 1);
-}
-
-/** Duración total de una tanda: el último dado en salir más su vuelo. */
-export function duracionTotal(count) {
-  return retardoDe(Math.max(0, count - 1), count) + VUELO_MS;
-}
-
 /**
  * Prepara el vuelo de un dado.
  *
  * - `die` y `value`: qué dado es y qué número tiene que quedar arriba.
  * - `index` / `count`: su sitio en la tanda, para el retardo y el reposo.
  * - `seed`: semilla de la tirada (el `rollId` del store sirve).
+ * - `vueloMs`: cuánto dura el vuelo; el ritmo de cada jugador lo estira o lo
+ *   acorta sin cambiar la trayectoria ni la cara final.
  */
-export function createTumble({ die, value, index = 0, count = 1, seed = 1, radius = 1.15 }) {
+export function createTumble({ die, value, index = 0, count = 1, seed = 1, radius = 1.15, vueloMs = VUELO_MS }) {
   const random = seededRandom(seed * 7919 + index * 104_729);
   const delay = retardoDe(index, count);
   const target = quaternionForValue(die, value, { spin: random() * Math.PI * 2 });
@@ -87,7 +73,7 @@ export function createTumble({ die, value, index = 0, count = 1, seed = 1, radiu
     die,
     value,
     delay,
-    duration: delay + VUELO_MS,
+    duration: delay + vueloMs,
     rest,
     start,
     target,
@@ -101,11 +87,11 @@ export function createTumble({ die, value, index = 0, count = 1, seed = 1, radiu
       if (local <= 0) {
         return { position: start.clone(), quaternion: startQuaternion.clone(), settled: false, visible: false };
       }
-      if (local >= VUELO_MS) {
+      if (local >= vueloMs) {
         return { position: rest.clone(), quaternion: target.clone(), settled: true, visible: true };
       }
 
-      const t = local / VUELO_MS;
+      const t = local / vueloMs;
       const eased = easeOutCubic(t);
 
       // Horizontal: llega a su sitio antes de dejar de rodar, como un dado que

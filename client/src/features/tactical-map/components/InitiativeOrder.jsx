@@ -11,6 +11,7 @@ import {
   ConcentrationChip,
   BossActionControls,
 } from './CombatantStatus.jsx';
+import { tirarYEnviar } from '../../../store/reveal.js';
 
 // Barritas de vida y color por proporción (mismo criterio que el resto de la mesa)
 function hpColor(ratio) {
@@ -31,7 +32,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
   async function rollDeathSave(c) {
     const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: c.name });
     const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
-    const resp = await room.deathSave(c.id, roll, natural);
+    const resp = await tirarYEnviar(roll, (tirada) => room.deathSave(c.id, tirada, natural), { autor: c.name });
     if (resp?.error) toastError(resp.error);
   }
 

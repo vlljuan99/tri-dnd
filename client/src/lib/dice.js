@@ -1,6 +1,7 @@
 // Motor de dados de TriDnD.
 // Un resultado de tirada tiene esta forma (se comparte tal cual por Socket.io):
 // {
+//   uid: 'l9x…',   // identificador de la tirada (ver rollUid)
 //   kind: 'dice' | 'attack' | 'damage' | 'check',
 //   label: 'Espada larga — ataque',
 //   formula: '1d20+5',
@@ -10,6 +11,15 @@
 // }
 
 export const DICE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'];
+
+/**
+ * Identificador de una tirada hecha en este navegador. Viaja con ella y el
+ * servidor la devuelve tal cual: así la cola de revelado sabe que el eco que
+ * llega por la mesa es la misma tirada que ya está rodando aquí.
+ */
+export function rollUid() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function rollDie(sides) {
   return 1 + Math.floor(Math.random() * sides);
@@ -59,6 +69,7 @@ export function rollPool(pool, { modifier = 0, advantage = 'none', kind = 'dice'
   const naturals = groups.find((g) => g.sides === 20)?.results.map((r) => r.kept) ?? [];
 
   return {
+    uid: rollUid(),
     kind,
     label,
     actorName,
@@ -112,6 +123,7 @@ export function rollDamage(notation, { modifier = 0, crit = false, label = 'Dañ
   if (crit) formula += ' (crítico)';
 
   return {
+    uid: rollUid(),
     kind: 'damage',
     label,
     actorName,

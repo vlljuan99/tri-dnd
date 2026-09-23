@@ -4,6 +4,8 @@ import { api } from '../../../api.js';
 import { formatModifier } from '../../../lib/dnd.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
+import { tirarYEnviar } from '../../../store/reveal.js';
+import { textoDelMargen } from '../../dice-tray/lib/reveal.js';
 import { D20Chips } from './AttackPanel.jsx';
 import { parseDamageDice, extractDamageFromDesc, DAMAGE_TYPE_ES } from '../../../components/MonsterStatBlock.jsx';
 import { resolveAttackEffects } from '../domain/combatRules.js';
@@ -111,6 +113,8 @@ export default function MonsterAttackPanel({
   const [multiattackState, setMultiattackState] = useState(attackerCombatant?.multiattackState ?? {});
   // { type: 'attack', weaponId, hit, crit, ac, roll } | { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
   const [feedback, setFeedback] = useState(null);
+  // El panel se aparta mientras rueda la tirada (Fase 4b)
+  const [rolling, setRolling] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -234,18 +238,25 @@ export default function MonsterAttackPanel({
       label: `${row.name} — ataque contra ${target.name}`,
       actorName: attacker.name,
     });
-    const resp = await attackMarker({
-      tokenId: attacker.serverId,
-      target: targetRef,
-      actionName: row.actionName,
-      manualMelee: meleeFor(row),
-      manualNormalRange: Number(manualNormalRange) || 60,
-      manualLongRange: Number(manualLongRange) || 120,
-      manualAdvantage,
-      multiattackPlanId: effectivePlanId || null,
-      multiattackCounts,
+    setRolling(true);
+    const resp = await tirarYEnviar(
       roll,
-    });
+      (tirada) =>
+        attackMarker({
+          tokenId: attacker.serverId,
+          target: targetRef,
+          actionName: row.actionName,
+          manualMelee: meleeFor(row),
+          manualNormalRange: Number(manualNormalRange) || 60,
+          manualLongRange: Number(manualLongRange) || 120,
+          manualAdvantage,
+          multiattackPlanId: effectivePlanId || null,
+          multiattackCounts,
+          roll: tirada,
+        }),
+      { autor: attacker.name }
+    );
+    setRolling(false);
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -264,7 +275,7 @@ export default function MonsterAttackPanel({
       hit: resp.hit,
       crit: resp.crit,
       ac: resp.ac,
-      roll,
+      roll: resp.outcome ? { ...roll, outcome: resp.outcome } : roll,
       effects: resp.effects ?? effects,
     });
   }
@@ -308,13 +319,20 @@ export default function MonsterAttackPanel({
         crit: feedback.crit,
       });
     }
-    const resp = await dealDamageMarker({
-      tokenId: attacker.serverId,
-      target: targetRef,
-      actionName: row.actionName,
-      components,
+    setRolling(true);
+    const resp = await tirarYEnviar(
       roll,
-    });
+      (tirada) =>
+        dealDamageMarker({
+          tokenId: attacker.serverId,
+          target: targetRef,
+          actionName: row.actionName,
+          components,
+          roll: tirada,
+        }),
+      { autor: attacker.name }
+    );
+    setRolling(false);
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -335,7 +353,12 @@ export default function MonsterAttackPanel({
   }
 
   return (
-    <div className="absolute bottom-20 left-1/2 z-20 w-[24rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-sm border border-blood/40 bg-night-900/95 p-3 text-bone shadow-2xl backdrop-blur">
+    <div
+      className={`absolute bottom-20 left-1/2 z-20 w-[24rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-sm border border-blood/40 bg-night-900/95 p-3 text-bone shadow-2xl backdrop-blur transition-all duration-300 motion-reduce:transition-none ${
+        rolling ? 'pointer-events-none translate-y-6 opacity-0' : 'opacity-100'
+      }`}
+      aria-hidden={rolling || undefined}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="min-w-0 truncate font-display text-sm tracking-wide text-gold">
           {attacker.name} <span className="text-blood">⚔</span> {target.name}
@@ -572,6 +595,11 @@ export default function MonsterAttackPanel({
                       </span>
                       <span className="text-bone/50">contra CA {fb.ac}</span>
                     </div>
+                    {textoDelMargen(fb.roll) && (
+                      <p className="mt-1 text-[0.7rem] text-bone/55">
+                        {fb.hit ? 'Impacta' : 'Falla'} {textoDelMargen(fb.roll)}
+                      </p>
+                    )}
                     <motion.p
                       initial={{ scale: 0.6, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}

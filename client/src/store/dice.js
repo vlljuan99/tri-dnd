@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DICE_TYPES, rollPool } from '../lib/dice.js';
 import { useRoom } from './socket.js';
+import { useReveal } from './reveal.js';
 
 const emptyPool = () => Object.fromEntries(DICE_TYPES.map((d) => [d, 0]));
 
@@ -12,6 +13,9 @@ export const useDice = create((set, get) => ({
   hidden: false, // tirada oculta (solo tiene efecto si eres DM de la sala)
   lastRoll: null,
   rollId: 0, // cambia con cada tirada para reiniciar la animación
+  // Entrada de la última tirada en la cola de revelado: el panel no enseña el
+  // resultado hasta que esa tirada se ha revelado en la bandeja.
+  lastRevealId: null,
   history: [],
 
   toggleOpen() {
@@ -42,10 +46,14 @@ export const useDice = create((set, get) => ({
    * la guarda en el historial y la comparte en la sala si hay una activa.
    */
   submitRoll(roll, { hidden = false } = {}) {
+    // Rueda aquí ya (no la valida nadie) y el eco que devuelva la mesa se
+    // reconoce por su uid: no vuelve a rodar.
+    const { id } = useReveal.getState().tirar(roll, { oculta: hidden });
     const shared = useRoom.getState().sendRoll(roll, { hidden });
     set((s) => ({
       lastRoll: { ...roll, shared },
       rollId: s.rollId + 1,
+      lastRevealId: id,
       history: [{ ...roll, shared, at: Date.now() }, ...s.history.slice(0, 29)],
     }));
     return shared;

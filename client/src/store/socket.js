@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import { toastInfo } from './toast.js';
 import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
+import { useReveal } from './reveal.js';
 
 // Conexión única de Socket.io por pestaña. Se une a la sala de una campaña
 // (mesa de juego o ficha vinculada) y mantiene chat, presencia y estado en vivo.
@@ -12,6 +13,16 @@ let socket = null;
 // actualización reprograma su propia limpieza.
 const AIM_TTL_MS = 45000;
 const aimTimers = new Map();
+
+// Fase 4b: lo que llega detrás de una tirada espera a que su dado caiga. Cada
+// evento se ata a la última tirada aún sin revelar (ver store/reveal.js) y se
+// suelta con su veredicto; sin tiradas pendientes, se aplica al instante. Si
+// entretanto se cambia de sala, lo retenido de la anterior se descarta.
+function afterDice(campaignId, fn) {
+  useReveal.getState().retener(() => {
+    if (useRoom.getState().campaignId === campaignId) fn();
+  });
+}
 
 function clearAimTimers() {
   for (const timer of aimTimers.values()) clearTimeout(timer);
@@ -81,7 +92,12 @@ export const useRoom = create((set, get) => ({
     });
     socket.on('disconnect', () => set({ connected: false, online: [] }));
     socket.on('chat:new', (message) => {
-      set((s) => ({ messages: [...s.messages.slice(-199), message] }));
+      // Una tirada entra en la cola de revelado (rueda en esta pantalla una
+      // sola vez) y su línea del registro espera al dado como todo lo demás.
+      useReveal.getState().recibir(message);
+      afterDice(get().campaignId, () => {
+        set((s) => ({ messages: [...s.messages.slice(-199), message] }));
+      });
     });
     socket.on('room:members', (online) => set({ online }));
     socket.on('campaign:removed', ({ campaignId }) => {
@@ -98,17 +114,21 @@ export const useRoom = create((set, get) => ({
       });
     });
     socket.on('table:live', ({ isLive }) => set({ isLive }));
-    socket.on('combat:state', (combat) => set({ combat }));
+    // El estado de combate (vida, turno, recursos) también espera: si no, la
+    // barra de vida bajaba antes de que cayera el dado del daño.
+    socket.on('combat:state', (combat) => afterDice(get().campaignId, () => set({ combat })));
     socket.on('combat:condition-expired', ({ name, condition }) => {
-      toastInfo(`${name}: termina ${conditionLabel(condition)}.`);
+      afterDice(get().campaignId, () => toastInfo(`${name}: termina ${conditionLabel(condition)}.`));
     });
     socket.on('combat:visual', (visual) => {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const entry = { id, createdAt: Date.now(), ...visual };
-      set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
-      setTimeout(() => {
-        set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
-      }, 1800);
+      afterDice(get().campaignId, () => {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const entry = { id, createdAt: Date.now(), ...visual };
+        set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
+        setTimeout(() => {
+          set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
+        }, 1800);
+      });
     });
     // Alguien de la mesa está apuntando un conjuro: se guarda una sola mira
     // por lanzador y se sustituye con cada movimiento de la plantilla.
@@ -143,7 +163,9 @@ export const useRoom = create((set, get) => ({
       set((state) => ({ grantedLevel, grantedLevelVersion: state.grantedLevelVersion + 1 }))
     );
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
-    socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
+    socket.on('mapa:actualizado', () =>
+      afterDice(get().campaignId, () => set((s) => ({ mapVersion: s.mapVersion + 1 })))
+    );
     socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));
     socket.on('mapa:ping', (ping) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

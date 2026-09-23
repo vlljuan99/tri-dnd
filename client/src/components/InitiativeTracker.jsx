@@ -16,6 +16,7 @@ import {
   ConcentrationChip,
   BossActionControls,
 } from '../features/tactical-map/components/CombatantStatus.jsx';
+import { tirarYEnviar } from '../store/reveal.js';
 
 function hpRatioColor(ratio) {
   if (ratio > 0.5) return 'bg-moss';
@@ -100,7 +101,9 @@ export default function InitiativeTracker({ campaignId, isDm, userId }) {
   async function rollDeathSave(combatant) {
     const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: combatant.name });
     const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
-    const resp = await room.deathSave(combatant.id, roll, natural);
+    const resp = await tirarYEnviar(roll, (tirada) => room.deathSave(combatant.id, tirada, natural), {
+      autor: combatant.name,
+    });
     if (resp?.error) toastError(resp.error);
   }
 

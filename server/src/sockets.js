@@ -1063,6 +1063,44 @@ function validateAttackMode(roll, effects) {
   return { ok: true };
 }
 
+// Veredicto que viaja con cada tirada resuelta (Fase 4b). La mesa revela la
+// tirada por pasos —total, contra qué, veredicto— y cada pantalla necesita
+// saber el «contra qué» sin esperar a la línea de sistema. Solo lleva lo que
+// ya se narra en el chat tras resolver: el objetivo, la CA o CD y el resultado.
+// El `outcome` lo escribe SIEMPRE el servidor: el que mande un cliente se tira.
+function rollWithOutcome(roll, outcome = null) {
+  // eslint-disable-next-line no-unused-vars
+  const { outcome: _clientOutcome, ...clean } = roll ?? {};
+  return outcome ? { ...clean, outcome } : clean;
+}
+
+function attackOutcome({ hit, crit, fumble, targetName, ac, effects = null }) {
+  // Por qué se tiraron dos d20: las condiciones que lo causan ya son públicas
+  // en la mesa (derribado, esquivando…), así que viajan con la tirada.
+  const motivos =
+    effects?.advantage === 'adv'
+      ? effects.advantageReasons ?? []
+      : effects?.advantage === 'dis'
+        ? effects.disadvantageReasons ?? []
+        : [];
+  return {
+    tipo: 'ataque',
+    objetivo: targetName ?? null,
+    contra: Number.isFinite(Number(ac)) ? { etiqueta: 'CA', valor: Number(ac) } : null,
+    resultado: crit ? 'critico' : hit ? 'impacta' : fumble ? 'pifia' : 'falla',
+    ...(motivos.length ? { motivos } : {}),
+  };
+}
+
+function saveOutcome({ saved, dc, targetName }) {
+  return {
+    tipo: 'salvacion',
+    objetivo: targetName ?? null,
+    contra: Number.isFinite(Number(dc)) ? { etiqueta: 'CD', valor: Number(dc) } : null,
+    resultado: saved ? 'supera' : 'no-supera',
+  };
+}
+
 export function setupSockets(io) {
   // Una sola jugada pendiente por campaña aunque haya varios sockets unidos.
   // El temporizador corto deja que la interfaz pinte el turno y permite al DM
@@ -1269,7 +1307,7 @@ export function setupSockets(io) {
     socket.on('roll:send', ({ campaignId, roll, hidden }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
-      const body = JSON.stringify(roll ?? {});
+      const body = JSON.stringify(rollWithOutcome(roll ?? {}));
       if (body.length > 8000) return cb?.({ error: 'Tirada demasiado grande' });
 
       // Solo el DM puede ocultar tiradas
@@ -1957,7 +1995,10 @@ export function setupSockets(io) {
         const critical = hit && (naturalCrit || effects.autoCrit);
         publishEnemyRoll(
           campaignId,
-          critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll
+          rollWithOutcome(
+            critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+            attackOutcome({ hit, crit: critical, fumble: attackRoll.fumble, targetName: resolved.name, ac: resolved.ac, effects })
+          )
         );
         emitAttackVisual(campaignId, resolved, {
           hit,
@@ -2345,7 +2386,12 @@ export function setupSockets(io) {
       });
       const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
 
-      const rollNote = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollNote = insertMessage({
+        campaignId,
+        userId: user.id,
+        type: 'roll',
+        body: JSON.stringify(rollWithOutcome(roll, saveOutcome({ saved: outcome.held, dc: targetDc, targetName: row.name }))),
+      });
       io.to(roomName(campaignId)).emit('chat:new', rollNote);
 
       const spell = row.concentration_spell;
@@ -2422,7 +2468,27 @@ export function setupSockets(io) {
       }
 
       if (roll) {
-        const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+        // Veredicto de la salvación de muerte: CD 10, sin objetivo que revelar;
+        // el 20 y el 1 naturales tienen su propio sello.
+        const deathOutcome = {
+          tipo: 'muerte',
+          objetivo: row.name,
+          contra: { etiqueta: 'CD', valor: 10 },
+          resultado:
+            result.outcome === 'revive'
+              ? 'critico'
+              : die === 1
+                ? 'pifia'
+                : ['exito', 'estable'].includes(result.outcome)
+                  ? 'supera'
+                  : 'no-supera',
+        };
+        const rollMessage = insertMessage({
+          campaignId,
+          userId: user.id,
+          type: 'roll',
+          body: JSON.stringify(rollWithOutcome(roll, deathOutcome)),
+        });
         io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       }
 
@@ -2657,10 +2723,10 @@ export function setupSockets(io) {
       const naturalCrit = attackRoll.crit;
       const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= resolved.ac);
       const critical = hit && (naturalCrit || effects.autoCrit);
-      emitAttackVisual(campaignId, resolved, { hit, crit: critical });
-      const sharedAttack = critical && !naturalCrit
-        ? { ...attackRoll, crit: true, forcedCrit: true }
-        : attackRoll;
+      const sharedAttack = rollWithOutcome(
+        critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+        attackOutcome({ hit, crit: critical, fumble: attackRoll.fumble, targetName: resolved.name, ac: resolved.ac, effects })
+      );
       const attackMessage = insertMessage({
         campaignId,
         userId: user.id,
@@ -2668,6 +2734,7 @@ export function setupSockets(io) {
         body: JSON.stringify(sharedAttack),
       });
       io.to(roomName(campaignId)).emit('chat:new', attackMessage);
+      emitAttackVisual(campaignId, resolved, { hit, crit: critical });
 
       let damage = null;
       if (hit && option.damage.length) {
@@ -2920,9 +2987,17 @@ export function setupSockets(io) {
         const naturalCrit = attackRoll.crit;
         const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= targetForAttack.ac);
         spellAttackCritical = hit && (naturalCrit || attackEffects.autoCrit);
-        const shared = spellAttackCritical && !naturalCrit
-          ? { ...attackRoll, crit: true, forcedCrit: true }
-          : attackRoll;
+        const shared = rollWithOutcome(
+          spellAttackCritical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+          attackOutcome({
+            hit,
+            crit: spellAttackCritical,
+            fumble: attackRoll.fumble,
+            targetName: targetForAttack.name,
+            ac: targetForAttack.ac,
+            effects: attackEffects,
+          })
+        );
         const message = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(shared) });
         io.to(roomName(campaignId)).emit('chat:new', message);
         outcomes.push({ target: targetForAttack, hit, saved: null, critical: spellAttackCritical });
@@ -2958,7 +3033,11 @@ export function setupSockets(io) {
             label: `Salvación de ${saveAbility.toUpperCase()} contra ${data.name}`,
             actorName: resolved.name,
           });
-          const sharedSave = { ...saveRoll, kind: 'save', crit: false, fumble: false };
+          const saved = !automaticFailure && saveRoll.total >= profile.saveDc;
+          const sharedSave = rollWithOutcome(
+            { ...saveRoll, kind: 'save', crit: false, fumble: false },
+            saveOutcome({ saved, dc: profile.saveDc, targetName: resolved.name })
+          );
           const saveMessage = insertMessage({
             campaignId,
             userId: user.id,
@@ -2969,7 +3048,7 @@ export function setupSockets(io) {
           outcomes.push({
             target: { ...resolved, combatant: targetCombatant },
             hit: true,
-            saved: !automaticFailure && saveRoll.total >= profile.saveDc,
+            saved,
             critical: false,
           });
         }
@@ -3088,16 +3167,19 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      const outcome = attackOutcome({ hit, crit, fumble: roll.fumble, targetName: resolved.name, ac: resolved.ac, effects });
+
+      // La tirada sale ANTES que su efecto: la mesa retiene el destello y el
+      // «−N» hasta que el dado cae, y para eso tiene que saber de qué tirada son.
+      const sharedRoll = rollWithOutcome(crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll, outcome);
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       emitAttackVisual(campaignId, resolved, {
         hit,
         crit,
         attacker: { character: checked.character },
         weapon: weaponData,
       });
-
-      const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
-      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const weapon = ` con ${weaponData.name.slice(0, 40)}`;
       const note = insertMessage({
@@ -3112,7 +3194,7 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       // La CA viaja solo tras resolver el ataque: es el feedback de por qué
       // impacta o falla (en la mesa real también se acaba deduciendo)
-      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total), effects });
+      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total), effects, outcome });
     });
 
     // Aplica el daño al objetivo: enemigos por el tracker (y si caen,
@@ -3140,7 +3222,7 @@ export function setupSockets(io) {
         silvered: weaponData.silvered,
         adamantine: weaponData.adamantine,
       }));
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const { body, detail } = applyCombatDamage(campaignId, resolved, incoming, {
@@ -3249,16 +3331,17 @@ export function setupSockets(io) {
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      const outcome = attackOutcome({ hit, crit, fumble: roll.fumble, targetName: resolved.name, ac: resolved.ac, effects });
+
+      const sharedRoll = rollWithOutcome(crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll, outcome);
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       emitAttackVisual(campaignId, resolved, {
         hit,
         crit,
         attacker: { token: attackerToken },
         weapon: actionData,
       });
-
-      const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
-      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const attackerName = attackerToken?.name ?? 'El enemigo';
       const weapon = ` con ${attackName.slice(0, 40)}`;
@@ -3287,6 +3370,7 @@ export function setupSockets(io) {
         ac: resolved.ac,
         total: Number(roll.total),
         effects,
+        outcome,
         multiattackState,
         multiattackCompleted,
         multiattackResolved,
@@ -3319,7 +3403,7 @@ export function setupSockets(io) {
         silvered: false,
         adamantine: false,
       }));
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const { body, detail } = applyCombatDamage(campaignId, resolved, incoming, {
@@ -3352,7 +3436,7 @@ export function setupSockets(io) {
       if (resolved.error) return cb?.({ error: resolved.error });
 
       const roll = buildFallDamageRoll({ feet, targetName: resolved.name });
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const incoming = sanitizeDamageComponents(

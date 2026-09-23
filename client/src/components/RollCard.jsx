@@ -1,7 +1,9 @@
 import { formatModifier } from '../lib/dnd.js';
 import CombatantTooltip from './CombatantTooltip.jsx';
+import { textoContra, textoDelMargen, veredictoDe } from '../features/dice-tray/lib/reveal.js';
 
 const ADVANTAGE_LABEL = { adv: 'ventaja', dis: 'desventaja' };
+const VEREDICTO_COLOR = { exito: 'text-gold', fallo: 'text-bone/55', critico: 'text-gold', pifia: 'text-blood' };
 
 /**
  * Pinta el resultado de una tirada (overlay, historial y chat de la mesa).
@@ -92,6 +94,18 @@ export default function RollCard({ roll, authorName, compact = false }) {
             <span className="font-mono text-xs text-bone/60">{formatModifier(roll.modifier)}</span>
           )}
         </div>
+      )}
+
+      {/* Veredicto que puso el servidor al resolver (Fase 4b): contra qué y
+          cómo salió, con el margen cuando lo hay. */}
+      {!compact && veredictoDe(roll.outcome) && (
+        <p className="mt-1 text-xs text-bone/60">
+          {textoContra(roll.outcome) && <span>{textoContra(roll.outcome)} · </span>}
+          <span className={`font-display uppercase tracking-widest ${VEREDICTO_COLOR[veredictoDe(roll.outcome).tono] ?? ''}`}>
+            {veredictoDe(roll.outcome).texto}
+          </span>
+          {textoDelMargen(roll) && <span> {textoDelMargen(roll)}</span>}
+        </p>
       )}
     </div>
   );

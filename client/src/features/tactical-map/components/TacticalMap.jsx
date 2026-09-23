@@ -38,6 +38,7 @@ import InitiativeStrip from './InitiativeStrip.jsx';
 import OpportunityPrompt from './OpportunityPrompt.jsx';
 import SpellPanel from './SpellPanel.jsx';
 import TableControls from './TableControls.jsx';
+import { tirarYEnviar, trasElDado, useReveal } from '../../../store/reveal.js';
 
 const HAZARD_PRESETS = {
   fuego: {
@@ -234,6 +235,14 @@ export default function TacticalMap({
   }
 
   useEffect(() => () => clearTimeout(hudNoticeTimerRef.current), []);
+
+  // En el tablero los dados caen en la franja baja, encima del HUD, para no
+  // tapar el objetivo (Fase 4b). Al salir de la mesa vuelven al centro.
+  const setRevealStage = useReveal((s) => s.setEscenario);
+  useEffect(() => {
+    setRevealStage('mesa');
+    return () => setRevealStage('centro');
+  }, [setRevealStage]);
   useEffect(() => {
     if (saveError) showHudNotice(saveError);
   }, [saveError]);
@@ -251,7 +260,21 @@ export default function TacticalMap({
   const latestCombatVisual = combatVisuals.at(-1);
   useEffect(() => {
     if (!latestCombatVisual?.strong) return;
-    setCameraCommand({ type: 'shake', strong: true, nonce: latestCombatVisual.id });
+    // Un crítico sobre un objetivo que VES empuja la cámara hacia él; si no lo
+    // ves, basta la sacudida (moverla delataría dónde está).
+    const criticalHit = latestCombatVisual.type === 'hit' && latestCombatVisual.critical;
+    const targetVisible = map.tokens.some(
+      (token) =>
+        token.visible &&
+        (latestCombatVisual.characterId
+          ? token.characterId === latestCombatVisual.characterId
+          : token.serverId === latestCombatVisual.mapTokenId)
+    );
+    setCameraCommand({
+      type: criticalHit && targetVisible ? 'punch' : 'shake',
+      strong: true,
+      nonce: latestCombatVisual.id,
+    });
   }, [latestCombatVisual?.id]);
 
   // --- Barra de estado (HUD) ------------------------------------------
@@ -589,12 +612,15 @@ export default function TacticalMap({
       return;
     }
     const names = response?.found?.map((trap) => trap.name) ?? [];
-    setPerceptionState({
-      busy: false,
-      message: names.length
-        ? `Descubres: ${names.join(', ')}.`
-        : 'No descubres ninguna trampa.',
-    });
+    // El hallazgo se cuenta cuando cae el dado de Percepción, no antes
+    trasElDado(() =>
+      setPerceptionState({
+        busy: false,
+        message: names.length
+          ? `Descubres: ${names.join(', ')}.`
+          : 'No descubres ninguna trampa.',
+      })
+    );
   }
 
   // Escape: primero cancela la vista previa, después deselecciona
@@ -1432,7 +1458,9 @@ export default function TacticalMap({
               onDeathSave={async () => {
                 const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: hudDisplay?.name });
                 const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
-                const resp = await deathSave(hudCombatant.id, roll, natural);
+                const resp = await tirarYEnviar(roll, (tirada) => deathSave(hudCombatant.id, tirada, natural), {
+                  autor: hudDisplay?.name,
+                });
                 if (resp?.error) showHudNotice(resp.error);
               }}
               // Ficha/Inventario son conceptos de personaje: no existen para un

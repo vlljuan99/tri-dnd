@@ -2,6 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SFX_GROUPS, eventsOfGroup } from '../lib/sfx/catalog.js';
 import { fetchSounds, resetSound, uploadSound } from '../lib/sfx/api.js';
 import { getSettings, preview, setOverrides, setSettings } from '../lib/sfx/index.js';
+import { useReveal } from '../store/reveal.js';
+import { ETIQUETAS_RITMO, RITMOS } from '../features/dice-tray/lib/reveal.js';
+
+// Qué supone cada ritmo, para elegir sin tener que probarlo en mitad de una
+// partida (Fase 4b).
+const DESCRIPCION_RITMO = {
+  cinematico: 'Los dados caen despacio y el veredicto se queda en pantalla.',
+  normal: 'El equilibrio: se ve caer cada dado sin frenar la partida.',
+  rapido: 'Para quien quiere ir al grano: vuelo corto y resultado casi inmediato.',
+};
 
 // Configuración de sonido. Tiene dos mitades muy distintas:
 //
@@ -77,6 +87,8 @@ function Fila({ evento, estado, puedeEditar, onSubir, onRestaurar, ocupado }) {
 }
 
 export default function SoundSettingsPage() {
+  const ritmo = useReveal((s) => s.ritmo);
+  const setRitmo = useReveal((s) => s.setRitmo);
   const [sonidos, setSonidos] = useState(null);
   const [puedeEditar, setPuedeEditar] = useState(false);
   const [error, setError] = useState('');
@@ -136,7 +148,7 @@ export default function SoundSettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-      <h2 className="font-display text-2xl tracking-wide text-ink">Sonido</h2>
+      <h2 className="font-display text-2xl tracking-wide text-ink">Sonido y ritmo</h2>
       <p className="mt-1 text-sm text-ink/70">
         Los efectos nacen sintetizados, sin ficheros. Cualquiera de ellos se puede sustituir por una
         grabación propia: un dado de verdad sobre madera no hay síntesis que lo imite.
@@ -171,6 +183,32 @@ export default function SoundSettingsPage() {
             />
             Silenciar
           </label>
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-sm border border-ink/15 bg-parchment-100/60 p-4">
+        <h3 className="font-display text-sm uppercase tracking-widest text-ink/70">Ritmo de los dados</h3>
+        <p className="mt-0.5 text-xs text-ink/55">
+          Cuánto tardan en caer los dados y en revelarse el resultado en tu pantalla. Es tuyo: cada
+          cual en la mesa elige el suyo. Si pides menos animación al sistema, el resultado sale
+          directo.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Ritmo de los dados">
+          {RITMOS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={ritmo === value}
+              onClick={() => setRitmo(value)}
+              className={`rounded-sm border px-3 py-2 text-left transition-colors ${
+                ritmo === value ? 'border-ember bg-ember/10 text-ink' : 'border-ink/15 text-ink/70 hover:border-ink/35'
+              }`}
+            >
+              <span className="block font-display text-sm tracking-wide">{ETIQUETAS_RITMO[value]}</span>
+              <span className="mt-0.5 block text-xs text-ink/55">{DESCRIPCION_RITMO[value]}</span>
+            </button>
+          ))}
         </div>
       </section>
 

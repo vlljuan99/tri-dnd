@@ -9,7 +9,8 @@ import {
 } from '../../../lib/dnd.js';
 import { castSpellRoll } from '../../../lib/spellcasting.js';
 import { wearingUnproficientArmor } from '../../../lib/proficiency.js';
-import { useRoom } from '../../../store/socket.js';
+import { useDice } from '../../../store/dice.js';
+import { hayTiradaPropia, useReveal } from '../../../store/reveal.js';
 import WeaponRow from '../../../components/WeaponRow.jsx';
 import StatTooltip from '../../../components/StatTooltip.jsx';
 
@@ -20,7 +21,12 @@ import StatTooltip from '../../../components/StatTooltip.jsx';
  * existiendo la ficha completa en /personajes/:id.
  */
 export default function CharacterQuickView({ characterId, onClose }) {
-  const submitRoll = useRoom((s) => s.sendRoll);
+  // Las tiradas de la ficha rápida ruedan en la bandeja como las del tirador
+  // (Fase 4b); antes se compartían sin dados.
+  const submitRoll = useDice((s) => s.submitRoll);
+  // Mientras rueda una tirada tuya, la ficha se aparta a un lado (en móvil se
+  // recoge abajo) sin cerrarse: el tablero y los dados quedan a la vista.
+  const apartada = useReveal(hayTiradaPropia);
   const [char, setChar] = useState(null);
   const [error, setError] = useState('');
 
@@ -56,11 +62,17 @@ export default function CharacterQuickView({ characterId, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-night-950/70 p-4"
+      className={`fixed inset-0 z-40 flex items-center justify-center p-4 transition-colors duration-300 motion-reduce:transition-none ${
+        apartada ? 'pointer-events-none bg-transparent' : 'bg-night-950/70'
+      }`}
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-md border border-gold/30 bg-night-900 p-4 text-bone shadow-2xl"
+        className={`max-h-[85vh] w-full max-w-md overflow-y-auto rounded-md border border-gold/30 bg-night-900 p-4 text-bone shadow-2xl transition-all duration-300 motion-reduce:transition-none ${
+          apartada
+            ? 'max-md:translate-y-[78%] max-md:opacity-60 md:-translate-x-[calc(50vw-50%-1rem)] md:scale-90 md:opacity-50'
+            : ''
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {error && <p className="text-sm text-blood">{error}</p>}

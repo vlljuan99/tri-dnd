@@ -88,12 +88,16 @@ function FloatingCombatText({ visual, size }) {
     ? `−${visual.value}`
     : visual.type === 'heal'
       ? `+${visual.value}`
-      : visual.text ?? (visual.type === 'miss' ? 'Fallo' : '');
+      : visual.type === 'hit'
+        ? '¡Crítico!'
+        : visual.text ?? (visual.type === 'miss' ? 'Fallo' : '');
   const color = visual.type === 'heal'
     ? '#8ee39b'
     : visual.type === 'damage'
       ? visual.critical ? '#ffd078' : '#ff7b68'
-      : '#e8d7ad';
+      : visual.type === 'hit'
+        ? '#ffd078'
+        : '#e8d7ad';
   const texture = useMemo(() => textTexture(label, color), [color, label]);
   useEffect(() => () => texture.dispose(), [texture]);
   useFrame(() => {
@@ -315,7 +319,11 @@ export default function MapToken({
       )}
       <TokenLabel token={token} selected={selected} active={active} />
       {visuals
-        .filter((visual) => ['damage', 'heal', 'miss', 'legendary', 'lair'].includes(visual.type))
+        .filter(
+          (visual) =>
+            ['damage', 'heal', 'miss', 'legendary', 'lair'].includes(visual.type) ||
+            (visual.type === 'hit' && visual.critical)
+        )
         .map((visual) => <FloatingCombatText key={visual.id} visual={visual} size={token.size} />)}
     </group>
   );

@@ -21,10 +21,15 @@ export const BEATS = {
   caminataMax: 1600,
   // Respiro al llegar al destino, antes de que levante el arma.
   trasMovimiento: 260,
-  // Multiataque: tres golpes son tres golpes, no una ráfaga simultánea.
-  entreAtaques: 720,
+  // Multiataque: tres golpes son tres golpes, no una ráfaga simultánea. Desde
+  // la Fase 4b cada tirada rueda en todas las pantallas y se revela por pasos
+  // (ataque ≈ 2,9 s y daño ≈ 2,5 s a ritmo normal, ver
+  // client/src/features/dice-tray/lib/reveal.js): el hueco deja caer el dado
+  // del ataque y buena parte del daño antes del siguiente golpe. Lo que se
+  // acumule lo absorbe la cola del cliente acelerando.
+  entreAtaques: 3600,
   // Que el último impacto se vea antes de cerrar el turno.
-  trasAtaque: 560,
+  trasAtaque: 2600,
   antesDeCerrar: 380,
 };
 

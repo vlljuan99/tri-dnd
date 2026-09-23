@@ -8,6 +8,10 @@ import { TILT_INITIAL, MIN_ZOOM, MAX_ZOOM, fitBoardZoom, orbitBy as orbitView, r
 // 'rotate' gira el tablero en pasos de 45°; la geometría de abajo generaliza
 // el caso cenital (tilt 0 y azimut 0 reproducen la vista y el `up` originales).
 
+// Empujón de cámara de un crítico: cuánto dura y cuánto acerca en su pico.
+const PUNCH_MS = 520;
+const PUNCH_ZOOM = 0.07;
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -30,6 +34,7 @@ export default function TacticalCamera({ map, command, onViewChange }) {
   const focusRef = useRef(null);
   const autoFitRef = useRef(true);
   const shakeUntilRef = useRef(0);
+  const punchRef = useRef(null);
   // Orientación de la vista: inclinada por defecto (se ve el relieve); el DM
   // gradúa la inclinación por escalones o rota el tablero en pasos de 45°
   const viewRef = useRef({ tilt: TILT_INITIAL, azimuth: 0 });
@@ -131,6 +136,14 @@ export default function TacticalCamera({ map, command, onViewChange }) {
     if (command.type === 'shake') {
       shakeUntilRef.current = performance.now() + (command.strong ? 420 : 240);
     }
+    // Empujón de un crítico (Fase 4b): la cámara se acerca un pelo y vuelve,
+    // con la sacudida fuerte encima. No se desplaza: si el objetivo no está a
+    // la vista, quien manda el comando no lo pide.
+    if (command.type === 'punch' && cameraRef.current) {
+      if (punchRef.current) cameraRef.current.zoom = punchRef.current.zoom;
+      punchRef.current = { start: performance.now(), zoom: cameraRef.current.zoom };
+      shakeUntilRef.current = performance.now() + 420;
+    }
     // Rotar el tablero 45° por pulsación (dir +1 = horario en pantalla)
     if (command.type === 'rotate') {
       viewRef.current = rotateBy(viewRef.current, command.dir);
@@ -158,6 +171,13 @@ export default function TacticalCamera({ map, command, onViewChange }) {
         targetRef.current = { ...focusRef.current };
         focusRef.current = null;
       }
+    }
+    const punch = punchRef.current;
+    if (punch && cameraRef.current) {
+      const t = (performance.now() - punch.start) / PUNCH_MS;
+      cameraRef.current.zoom = t >= 1 ? punch.zoom : punch.zoom * (1 + PUNCH_ZOOM * Math.sin(Math.PI * t));
+      if (t >= 1) punchRef.current = null;
+      changed = true;
     }
     const shaking = shakeUntilRef.current > performance.now();
     if (changed || shaking) applyCamera();

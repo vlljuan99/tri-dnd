@@ -3,6 +3,7 @@ import { api } from '../../../api.js';
 import { SKILLS, skillBonus, formatModifier } from '../../../lib/dnd.js';
 import { rollAttack } from '../../../lib/dice.js';
 import { isLootInteraction } from '../domain/interactions.js';
+import { tirarYEnviar } from '../../../store/reveal.js';
 
 const DOOR_LABELS = { puerta: 'Puerta', escalera: 'Escalera', portal: 'Portal' };
 
@@ -70,20 +71,47 @@ export default function InteractPanel({ type, target, campaignId, characterId, c
   const disabledReason =
     combat?.active && !myTurnActive ? 'Solo puedes interactuar en tu turno' : 'Gasta tu acción del turno';
 
+  // La petición en sí: devuelve la respuesta o { error } (no lanza), para que
+  // una tirada rechazada se retire de la bandeja en vez de quedarse rodando.
+  async function request(roll) {
+    try {
+      return type === 'door'
+        ? await api(`/campaigns/${campaignId}/puertas/${target.id}/abrir`, {
+            method: 'POST',
+            body: { open: true, characterId, roll },
+          })
+        : await api(`/campaigns/${campaignId}/marcadores/${target.serverId}/interactuar`, {
+            method: 'POST',
+            body: { characterId, roll },
+          });
+    } catch (e) {
+      return { error: e.message || 'No se pudo completar la acción.' };
+    }
+  }
+
   async function send(roll) {
     setBusy(true);
     setError('');
     try {
-      const resp =
-        type === 'door'
-          ? await api(`/campaigns/${campaignId}/puertas/${target.id}/abrir`, {
-              method: 'POST',
-              body: { open: true, characterId, roll },
-            })
-          : await api(`/campaigns/${campaignId}/marcadores/${target.serverId}/interactuar`, {
-              method: 'POST',
-              body: { characterId, roll },
-            });
+      // Con prueba de habilidad, el dado rueda y la CD se revela cuando cae
+      // (Fase 4b); sin ella, la acción se resuelve sin dados.
+      const resp = roll
+        ? await tirarYEnviar(roll, request, {
+            autor: char?.name,
+            parcheDeRespuesta: (answer) =>
+              Number.isFinite(Number(answer?.dc))
+                ? {
+                    outcome: {
+                      tipo: 'prueba',
+                      objetivo: null,
+                      contra: { etiqueta: 'CD', valor: Number(answer.dc) },
+                      resultado: answer.success !== false ? 'supera' : 'no-supera',
+                    },
+                  }
+                : null,
+          })
+        : await request();
+      if (resp?.error) throw new Error(resp.error);
       setResult({
         success: resp.success !== false,
         dc: resp.dc,
