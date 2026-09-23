@@ -1,9 +1,10 @@
 import { ABILITIES, SKILLS, abilityModifier, formatModifier, PRIMARY_ABILITY, DAMAGE_TYPE_NAMES } from '../../lib/dnd.js';
 import { deriveWizardPreview, previewCharacter, wizardPortraitProgress, wizardPreviewDeltas } from '../../lib/wizardPreview.js';
+import { creatorArt, creatorArtFallback, UNFORGED_PREVIEW_ART } from '../../lib/creatorArt.js';
 import { saveStat, skillStat } from '../../lib/statGlossary.js';
 import { hasChosenName } from '../../lib/wizard.js';
 import StatTooltip from '../StatTooltip.jsx';
-import { creatorArt, creatorArtFallback, CreatorEmblem } from './CreatorSelection.jsx';
+import { CreatorEmblem } from './CreatorSelection.jsx';
 
 function Change({ from, to }) {
   if (from === to) return null;
@@ -21,16 +22,23 @@ const BUILD_MILESTONES = [
 
 function FormingPortrait({ char, character, raceName, classDisplayName, buildStage }) {
   const classIndex = character.class_index;
+  const raceIndex = character.race_index;
   const avatar = char.avatar_path;
-  const progress = wizardPortraitProgress({ stage: buildStage, classIndex, avatarPath: avatar });
-  const classArt = classIndex ? creatorArt('classes', classIndex) : null;
-  const image = avatar || classArt;
+  const progress = wizardPortraitProgress({ stage: buildStage, classIndex, raceIndex, avatarPath: avatar });
+  const artCategory = classIndex ? 'classes' : raceIndex ? 'races' : null;
+  const artIndex = classIndex || raceIndex;
+  const choiceArt = artCategory ? creatorArt(artCategory, artIndex) : UNFORGED_PREVIEW_ART;
+  const image = avatar || choiceArt;
   const alt = avatar
     ? `Retrato de ${hasChosenName(char) ? char.name : 'tu personaje'}`
-    : classIndex ? `Arquetipo visual de ${classDisplayName || classIndex}` : '';
+    : classIndex
+      ? `Arquetipo visual de ${classDisplayName || classIndex}`
+      : raceIndex
+        ? `Origen visual de ${raceName || raceIndex}`
+        : 'Figura de un héroe todavía por forjar';
 
   function artFallback(event) {
-    const fallbacks = [classArt, classIndex ? creatorArtFallback('classes', classIndex) : null].filter(Boolean);
+    const fallbacks = [choiceArt, artCategory ? creatorArtFallback(artCategory, artIndex) : null].filter(Boolean);
     let cursor = Number(event.currentTarget.dataset.fallbackCursor ?? 0);
     while (cursor < fallbacks.length) {
       const fallback = fallbacks[cursor];
@@ -55,14 +63,16 @@ function FormingPortrait({ char, character, raceName, classDisplayName, buildSta
               <path d="M12 79 21 54l11 10 11-10 9 25" stroke="currentColor" strokeWidth="1" fill="none" />
             </svg>
             <img key={`fondo-${image}`} src={image} alt="" aria-hidden="true" onError={artFallback}
+              width="640" height="800" decoding="async"
               className="absolute inset-0 h-full w-full scale-[1.02] object-cover object-top opacity-20 grayscale blur-[2px]" />
             <div className="absolute inset-0 overflow-hidden transition-[clip-path] duration-700 ease-out motion-reduce:transition-none"
-              style={{ clipPath: `inset(0 ${100 - progress}% 0 0)` }}>
-              <img key={`retrato-${image}`} src={image} alt={alt} onError={artFallback} className="h-full w-full object-cover object-top" />
+              style={{ clipPath: `inset(0 ${(100 - progress) / 2}% 0 ${(100 - progress) / 2}%)` }}>
+              <img key={`retrato-${image}`} src={image} alt={alt} onError={artFallback} width="640" height="800"
+                decoding="async" fetchPriority="high" className="h-full w-full object-cover object-top" />
             </div>
             {progress < 100 && progress > 0 && (
               <span aria-hidden="true" className="absolute inset-y-0 w-px bg-gold/80 shadow-[0_0_18px_5px_rgba(209,177,122,.3)] transition-[left] duration-700 motion-reduce:transition-none"
-                style={{ left: `${progress}%` }} />
+                style={{ left: `${50 + progress / 2}%` }} />
             )}
           </>
         ) : (
@@ -77,12 +87,12 @@ function FormingPortrait({ char, character, raceName, classDisplayName, buildSta
 
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0b1214] via-[#0b1214]/85 to-transparent px-4 pb-4 pt-14">
           <div className="flex items-end gap-3">
-            {classIndex && <span className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/45 bg-night-950/80 text-gold"><CreatorEmblem category="classes" index={classIndex} className="size-5" /></span>}
+            {artCategory && <span className="grid size-9 shrink-0 place-items-center rounded-full border border-gold/45 bg-night-950/80 text-gold"><CreatorEmblem category={artCategory} index={artIndex} className="size-5" /></span>}
             <div className="min-w-0 flex-1">
               <p className="truncate font-display text-lg leading-tight text-gold">{hasChosenName(char) ? char.name : 'Un héroe por descubrir'}</p>
               <p className="mt-1 truncate text-[11px] text-bone/65">{raceName || 'Origen por decidir'} · {classDisplayName || 'Clase por decidir'}</p>
             </div>
-            {classIndex && <span className="shrink-0 text-right font-mono text-[10px] text-gold/70">
+            {(classIndex || raceIndex) && <span className="shrink-0 text-right font-mono text-[10px] text-gold/70">
               <span className="block text-bone/45">Nv. {character.level}</span>{progress}%
             </span>}
           </div>

@@ -124,6 +124,8 @@ test('el reparto parcial actualiza la vista previa desde la primera elección y 
 
 test('el retrato cosmético se construye por etapas y el avatar final lo completa', () => {
   assert.equal(wizardPortraitProgress({ stage: 1 }), 0, 'sin clase no se anticipa un aspecto');
+  assert.equal(wizardPortraitProgress({ stage: 1, raceIndex: 'elf' }), 28, 'la especie empieza a perfilar el origen');
+  assert.equal(wizardPortraitProgress({ stage: 6, raceIndex: 'elf' }), 38, 'la especie sola no cierra el arquetipo');
   assert.equal(wizardPortraitProgress({ stage: 2, classIndex: 'fighter' }), 38);
   assert.equal(wizardPortraitProgress({ stage: 5, classIndex: 'fighter' }), 86);
   assert.equal(wizardPortraitProgress({ stage: 5.9, classIndex: 'fighter' }), 86);

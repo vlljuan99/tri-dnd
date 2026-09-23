@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ALIGNMENTS } from '../../lib/dnd.js';
 import { uploadCharacterAvatar, generateCharacterAvatar, removeCharacterAvatar } from '../../lib/characterAvatar.js';
+import { creatorArt, creatorArtFallback, UNFORGED_PREVIEW_ART } from '../../lib/creatorArt.js';
 import CharacterAvatarPanel from '../CharacterAvatarPanel.jsx';
 import { inputClass, labelClass, labelTextClass } from './styles.js';
 import { hasChosenName, PLACEHOLDER_NAME } from '../../lib/wizard.js';
@@ -16,6 +17,10 @@ export default function StepIdentidad({ char, patch, errors }) {
     catch (error) { setAvatarError(error.message || 'No se pudo actualizar el retrato.'); }
     finally { setBusy(false); }
   }
+  const portraitCategory = char.class_index ? 'classes' : char.race_index ? 'races' : null;
+  const portraitIndex = char.class_index || char.race_index;
+  const placeholderUrl = portraitCategory ? creatorArt(portraitCategory, portraitIndex) : UNFORGED_PREVIEW_ART;
+  const placeholderFallbackUrl = portraitCategory ? creatorArtFallback(portraitCategory, portraitIndex) : null;
   return (
     <div className="space-y-5">
       <p className="text-sm text-bone/70">Ya sabes de qué es capaz. Ahora dale un nombre y una historia. Solo el nombre es obligatorio.</p>
@@ -30,7 +35,8 @@ export default function StepIdentidad({ char, patch, errors }) {
       </label>
       <section className="rounded-md border border-gold/20 bg-black/15 p-4" aria-label="Retrato del personaje">
         <p className="mb-3 font-display text-sm text-gold">Tu retrato</p>
-        <CharacterAvatarPanel avatarUrl={char.avatar_path} editable busy={busy} error={avatarError}
+        <CharacterAvatarPanel avatarUrl={char.avatar_path} placeholderUrl={placeholderUrl} placeholderFallbackUrl={placeholderFallbackUrl}
+          editable busy={busy} error={avatarError}
           onUpload={(file) => avatarAction(() => uploadCharacterAvatar(char.id, file))}
           onGenerate={(options) => avatarAction(() => generateCharacterAvatar(char.id, options))}
           onRemove={() => avatarAction(() => removeCharacterAvatar(char.id))} />

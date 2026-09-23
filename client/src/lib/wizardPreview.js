@@ -19,10 +19,12 @@ export function previewCharacter(character, fields = {}) {
 const PORTRAIT_PROGRESS = [0, 12, 38, 55, 70, 86, 94, 100];
 
 /** Progreso cosmético del retrato: nunca participa en reglas ni se persiste. */
-export function wizardPortraitProgress({ stage = 0, classIndex = null, avatarPath = null } = {}) {
+export function wizardPortraitProgress({ stage = 0, classIndex = null, raceIndex = null, avatarPath = null } = {}) {
   if (avatarPath) return 100;
-  if (!classIndex) return 0;
   const safeStage = Math.max(0, Math.min(PORTRAIT_PROGRESS.length - 1, Math.trunc(Number(stage) || 0)));
+  // La especie perfila el origen, pero la clase sigue siendo la que termina de
+  // definir la pose jugable. El tope evita presentar un aspecto como cerrado.
+  if (!classIndex) return raceIndex ? Math.max(28, Math.min(PORTRAIT_PROGRESS[safeStage], 38)) : 0;
   return PORTRAIT_PROGRESS[safeStage];
 }
 

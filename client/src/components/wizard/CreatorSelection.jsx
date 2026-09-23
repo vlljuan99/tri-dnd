@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
+import { creatorArt, creatorArtFallback } from '../../lib/creatorArt.js';
 import { srdCampaignPath } from '../../lib/srdCampaign.js';
+
+export { creatorArt, creatorArtFallback } from '../../lib/creatorArt.js';
 
 const CLASS_EMBLEMS = {
   barbarian: 'M12 3v18M12 5C7 2 3 6 3 11l7-2M12 5c5-3 9 1 9 6l-7-2',
@@ -29,20 +32,6 @@ const RACE_EMBLEMS = {
   tiefling: 'M7 8C3 7 3 3 5 2c-1 4 4 3 5 6m7 0c4-1 4-5 2-6 1 4-4 3-5 6M6 9h12v7l-6 6-6-6V9ZM9 13h1m4 0h1M10 18h4',
 };
 
-export function creatorArt(category, index) {
-  const known = category === 'classes' ? CLASS_EMBLEMS : RACE_EMBLEMS;
-  if (!Object.hasOwn(known, index)) return '/creador/personalizado.svg';
-  return category === 'classes'
-    ? `/creador/clase-${index}-gen.webp`
-    : `/creador/especie-${index}.svg`;
-}
-
-export function creatorArtFallback(category, index) {
-  if (category === 'classes' && Object.hasOwn(CLASS_EMBLEMS, index)) return `/creador/clase-${index}.svg`;
-  if (category === 'races' && Object.hasOwn(RACE_EMBLEMS, index)) return `/creador/especie-${index}.svg`;
-  return '/creador/personalizado.svg';
-}
-
 export function CreatorEmblem({ category, index, className = '' }) {
   const path = (category === 'classes' ? CLASS_EMBLEMS : RACE_EMBLEMS)[index]
     ?? 'm12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7Z';
@@ -63,7 +52,7 @@ export function CreatorCard({ category, entry, selected, subtitle, tags = [], on
       onMouseEnter={showPreview} onMouseLeave={() => onPreview?.(null)} onFocus={showPreview} onBlur={() => onPreview?.(null)} onTouchStart={showPreview}
       className={`group relative flex min-w-0 flex-col overflow-hidden rounded-lg border text-left shadow-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-gold motion-reduce:transition-none ${selected ? 'border-gold bg-[#29332f] ring-1 ring-gold/30' : 'border-[#596d65]/40 bg-[#142427] hover:border-gold/70'}`}>
       <div className="relative h-36 w-full overflow-hidden sm:h-40">
-        <img src={creatorArt(category, entry.index)} alt="" loading="lazy"
+        <img src={creatorArt(category, entry.index)} alt="" loading="lazy" decoding="async" width="640" height="800"
           onError={(event) => {
             const fallback = creatorArtFallback(category, entry.index);
             if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;

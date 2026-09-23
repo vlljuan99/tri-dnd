@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 
-export default function CharacterAvatarPanel({ avatarUrl, editable, busy, error, onUpload, onGenerate, onRemove }) {
+export default function CharacterAvatarPanel({
+  avatarUrl, placeholderUrl, placeholderFallbackUrl, editable, busy, error, onUpload, onGenerate, onRemove,
+}) {
   const fileInputRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
@@ -21,9 +23,22 @@ export default function CharacterAvatarPanel({ avatarUrl, editable, busy, error,
 
   return (
     <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
-      <div className="h-24 w-24 shrink-0 overflow-hidden rounded-full border border-gold/30 bg-night-950">
+      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full border border-gold/30 bg-night-950">
         {avatarUrl ? (
-          <img src={avatarUrl} alt="Icono del personaje" className="h-full w-full object-cover" />
+          <img src={avatarUrl} alt="Icono del personaje" decoding="async" className="h-full w-full object-cover" />
+        ) : placeholderUrl ? (
+          <>
+            <img src={placeholderUrl} alt="" aria-hidden="true" width="640" height="800" decoding="async"
+              onError={(event) => {
+                if (placeholderFallbackUrl && !event.currentTarget.src.endsWith(placeholderFallbackUrl)) {
+                  event.currentTarget.src = placeholderFallbackUrl;
+                } else {
+                  event.currentTarget.hidden = true;
+                }
+              }}
+              className="h-full w-full object-cover object-top opacity-55 grayscale" />
+            <span className="absolute inset-x-0 bottom-0 bg-night-950/85 py-1 text-center text-[9px] uppercase tracking-wide text-bone/70">Sin retrato</span>
+          </>
         ) : (
           <div className="flex h-full w-full items-center justify-center text-center text-xs text-bone/40">
             Sin icono
