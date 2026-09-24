@@ -553,6 +553,10 @@ componente de subtítulos y otro de cartel en `features/tactical-map/components/
    frase llega a todos.
 4. Prueba de servidor: la etiqueta de salud cambia en los umbrales y el jugador nunca
    recibe `hpCurrent`/`hpMax` de un enemigo (la prueba de privacidad actual sigue).
+   *Nota de implementación (24-sep-2026): el repositorio ya enviaba al jugador los PG de
+   los enemigos a la vista en el mapa, para su barra de vida (decisión de producto en
+   `services/mapLibrary.js`). Por la regla 1, manda el repositorio: la barra se queda y
+   el criterio se cumple sobre el estado de combate, que es donde no viajan.*
 
 ---
 

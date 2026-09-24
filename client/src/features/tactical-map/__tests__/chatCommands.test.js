@@ -22,3 +22,12 @@ test('construye una tirada compartible', () => {
   assert.equal(result.roll.label, 'Percepci\u00f3n');
   assert.ok(result.roll.total >= 5 && result.roll.total <= 24);
 });
+
+test('/n convierte el mensaje en narración del DM (Fase 4d)', async () => {
+  const { narrationCommand } = await import('../../../lib/chatCommands.js');
+  assert.deepEqual(narrationCommand('/n El viento aúlla en el desfiladero.'), { text: 'El viento aúlla en el desfiladero.' });
+  assert.deepEqual(narrationCommand('  /N  Silencio.  '), { text: 'Silencio.' });
+  assert.ok(narrationCommand('/n').error, 'sin texto no hay nada que narrar');
+  assert.equal(narrationCommand('hola /n'), null);
+  assert.equal(narrationCommand('/nada'), null, 'solo el comando exacto');
+});

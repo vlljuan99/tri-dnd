@@ -10,6 +10,7 @@ import {
   bindCombatBroadcaster,
   bindChatPoster,
   bindRollPoster,
+  bindBossIntroChecker,
   postSystemMessage,
   notifyCampaignMap,
   notifyCombatStarted,
@@ -80,6 +81,7 @@ import { buildMultiattackPlans, parseMultiattackState } from './services/monster
 import { sanitizeChatReferences, standaloneChatReference } from './services/chatReferences.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './services/serverDice.js';
 import { attackOutcome, checkOutcome, rollWithOutcome, saveOutcome } from './services/rollOutcome.js';
+import { healthLabel } from './services/healthLabels.js';
 import { pendingRolls, TIPOS_TIRADA } from './services/pendingRolls.js';
 import {
   ABILITY_KEYS,
@@ -132,16 +134,19 @@ function serializeMessage(row) {
     body: row.type === 'roll' ? JSON.parse(row.body) : row.body,
     references,
     hidden: Boolean(row.hidden),
+    // Fase 4d: 'narracion' (el DM narra) o 'golpe-final' («¿cómo quieres
+    // hacerlo?»). Se pintan como subtítulo sobre el tablero.
+    style: row.style ?? null,
     createdAt: row.created_at,
   };
 }
 
-function insertMessage({ campaignId, userId, type, body, hidden = false, references = [] }) {
+function insertMessage({ campaignId, userId, type, body, hidden = false, references = [], style = null }) {
   const info = db
     .prepare(
-      'INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden, srd_references) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden, srd_references, style) VALUES (?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(campaignId, userId, type, body, hidden ? 1 : 0, JSON.stringify(references));
+    .run(campaignId, userId, type, body, hidden ? 1 : 0, JSON.stringify(references), style);
   const row = db
     .prepare(
       `SELECT m.*, u.display_name AS author_name FROM chat_messages m
@@ -208,6 +213,9 @@ function combatantView(row, { isDm, round }) {
           name: db.prepare('SELECT name FROM combatants WHERE id = ?').get(row.help_from_id)?.name ?? null,
         }
       : null,
+    // Estado de salud con palabras (Fase 4d): de un enemigo el jugador recibe
+    // solo la etiqueta, nunca los PG del tracker.
+    healthLabel: row.kind === 'pj' ? null : healthLabel(row.hp_current, row.hp_max),
     // Ritual de iniciativa (Fase 4c): su jugador todavía no ha tirado
     initiativePending: Boolean(
       row.character_id && pendingRolls.buscar(row.campaign_id, { characterId: row.character_id, tipo: 'iniciativa' })
@@ -255,6 +263,10 @@ function combatantView(row, { isDm, round }) {
       initiativeRoll:
         row.initiative_d20 != null ? { d20: row.initiative_d20, modifier: row.initiative_mod } : null,
       monsterIndex: row.monster_index,
+      // Fase 4d: el nombre real de un enemigo con nombre oculto, solo al DM
+      trueName: row.map_token_id
+        ? db.prepare('SELECT true_name FROM map_tokens WHERE id = ?').get(row.map_token_id)?.true_name ?? null
+        : null,
       speed: Number.isInteger(overrides.speed) ? overrides.speed : monsterSpeedFeet(row.monster_index),
       // Variante por instancia (miniboss): el bloque de estadísticas del DM
       // aplica estos deltas a los ataques y muestra los rasgos añadidos.
@@ -1102,6 +1114,8 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
       type: 'damage',
       ...combatVisualTarget(resolved),
       value: damage,
+      // Fase 4d: tras el «−8», cómo ha quedado (solo la palabra, nunca los PG)
+      healthLabel: resolved.kind === 'marcador' ? healthLabel(detail.remainingHp, detail.maxHp) : null,
       critical: Boolean(critical),
       strong: Boolean(critical || (detail.maxHp && damage >= Math.max(10, detail.maxHp / 3))),
     });
@@ -1210,7 +1224,19 @@ export function setupSockets(io) {
 
   // Emite el estado de combate a cada socket de la sala con la vista que le
   // corresponde según su rol (el DM ve HP/CA exactos de los enemigos)
+  function presentBossesLater(campaignId) {
+    setImmediate(() => {
+      try {
+        presentBosses(campaignId);
+      } catch (error) {
+        console.error('[jefes] no se pudo comprobar la presentación:', error);
+      }
+    });
+  }
+
   function broadcastCombat(campaignId) {
+    // Un jefe que acaba de entrar en el tracker a la vista se presenta (Fase 4d)
+    presentBossesLater(campaignId);
     const room = io.sockets.adapter.rooms.get(roomName(campaignId));
     for (const sid of room ?? []) {
       const s = io.sockets.sockets.get(sid);
@@ -1457,6 +1483,50 @@ export function setupSockets(io) {
   // Los PJ con dueño tiran su iniciativa en el ritual; los demás, el servidor.
   const deferPjInitiative = (combatant) => combatant.kind === 'pj' && Boolean(combatant.character_id);
 
+  // --- El DM como narrador (Fase 4d) ------------------------------------
+
+  // «¿Cómo quieres hacerlo?»: quien derriba a un enemigo puede describir el
+  // golpe final en una frase. La petición caduca al minuto y solo la puede
+  // contestar quien la recibió.
+  const finisherRequests = new Map();
+  const FINISHER_TTL_MS = 60_000;
+
+  function requestFinisher(campaignId, userId, enemyName) {
+    const key = `${campaignId}:${userId}`;
+    finisherRequests.set(key, { enemyName, expires: Date.now() + FINISHER_TTL_MS });
+    emitToUsers(campaignId, [userId], 'golpe-final:pedir', { campaignId: Number(campaignId), enemyName });
+  }
+
+  // Presentación de jefe: la primera vez que un marcador marcado por el DM
+  // queda a la vista de la mesa (sala revelada y marcador sin ocultar), un
+  // cartel para todos. Solo una vez por marcador.
+  function presentBosses(campaignId) {
+    const mapId = getActiveMapId(campaignId);
+    if (!mapId) return;
+    const bosses = db
+      .prepare(
+        `SELECT t.id, t.name, t.boss_title, ch.avatar_path AS boss_avatar, mi.avatar_path AS monster_avatar
+         FROM map_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id
+         LEFT JOIN characters ch ON ch.id = t.character_id
+         LEFT JOIN campaigns cp ON cp.id = ?
+         LEFT JOIN monster_images mi ON mi.user_id = cp.dm_user_id AND mi.monster_idx = t.monster_index
+         WHERE f.map_id = ? AND t.boss_intro = 1 AND t.boss_intro_shown = 0 AND t.hidden = 0 AND r.revealed = 1`
+      )
+      .all(campaignId, mapId);
+    for (const boss of bosses) {
+      db.prepare('UPDATE map_tokens SET boss_intro_shown = 1 WHERE id = ?').run(boss.id);
+      io.to(roomName(campaignId)).emit('jefe:presentacion', {
+        id: boss.id,
+        name: boss.name,
+        title: boss.boss_title ?? null,
+        imageUrl: boss.boss_avatar ?? boss.monster_avatar ?? null,
+      });
+    }
+  }
+  bindBossIntroChecker(presentBosses);
+
   io.on('connection', (socket) => {
     const user = socket.data.user;
 
@@ -1495,11 +1565,14 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('room:members', onlineMembers(campaignId));
     });
 
-    socket.on('chat:send', ({ campaignId, text, references }, cb) => {
+    socket.on('chat:send', ({ campaignId, text, references, style = null }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
       const clean = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
       if (!clean) return cb?.({ error: 'Mensaje vacío' });
+      // Narración en pantalla (Fase 4d): solo el DM narra
+      if (style != null && style !== 'narracion') return cb?.({ error: 'Estilo de mensaje no válido' });
+      if (style === 'narracion' && membership.role !== 'dm') return cb?.({ error: 'Solo el DM puede narrar' });
 
       const checked = sanitizeChatReferences(clean, references, (category, index) =>
         db
@@ -1514,8 +1587,62 @@ export function setupSockets(io) {
         type: 'chat',
         body: clean,
         references: checked.references,
+        style,
       });
       io.to(roomName(campaignId)).emit('chat:new', message);
+      cb?.({ ok: true });
+    });
+
+    // «¿Cómo quieres hacerlo?» (Fase 4d): la frase del golpe final, solo de
+    // quien acaba de derribar a un enemigo y mientras no caduque la petición.
+    socket.on('golpe-final:narrar', ({ campaignId, text }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const key = `${campaignId}:${user.id}`;
+      const request = finisherRequests.get(key);
+      if (!request || request.expires < Date.now()) {
+        finisherRequests.delete(key);
+        return cb?.({ error: 'Ese golpe final ya no espera descripción' });
+      }
+      const clean = typeof text === 'string' ? text.trim().slice(0, 240) : '';
+      finisherRequests.delete(key);
+      if (!clean) return cb?.({ ok: true, skipped: true });
+      const message = insertMessage({ campaignId, userId: user.id, type: 'chat', body: clean, style: 'golpe-final' });
+      io.to(roomName(campaignId)).emit('chat:new', message);
+      cb?.({ ok: true });
+    });
+
+    // Nombre oculto (Fase 4d): el DM revela quién era de verdad. Desde aquí
+    // el nombre real es el de todos y la criatura entra en el bestiario.
+    socket.on('combat:revelar-nombre', ({ campaignId, tokenId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede revelar un nombre' });
+      const mapId = getActiveMapId(campaignId);
+      const token = db
+        .prepare(
+          `SELECT t.* FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id JOIN map_floors f ON f.id = r.floor_id
+           JOIN maps m ON m.id = f.map_id WHERE t.id = ? AND m.campaign_id = ?`
+        )
+        .get(tokenId, campaignId);
+      if (!token) return cb?.({ error: 'Marcador no encontrado' });
+      if (!token.true_name) return cb?.({ error: 'Ese marcador ya muestra su nombre real' });
+      const shownAs = token.name;
+      db.transaction(() => {
+        db.prepare('UPDATE map_tokens SET name = true_name, true_name = NULL WHERE id = ?').run(token.id);
+        db.prepare('UPDATE combatants SET name = ? WHERE campaign_id = ? AND map_token_id = ?').run(
+          token.true_name,
+          campaignId,
+          token.id
+        );
+      })();
+      if (token.monster_index) {
+        discoverCreatures(campaignId, [{ ...token, name: token.true_name }]);
+        notifyBestiary(campaignId);
+      }
+      postSystemMessage(campaignId, `${shownAs} se revela: es ${token.true_name}.`);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+      broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
 
@@ -3348,6 +3475,7 @@ export function setupSockets(io) {
       }
 
       const publicOutcomes = [];
+      let finisherAsked = false;
       for (const outcome of outcomes) {
         let detail = null;
         const avoidsDamage = outcome.saved && data.dc?.dc_success !== 'half';
@@ -3363,6 +3491,10 @@ export function setupSockets(io) {
           );
           const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: applied.body });
           io.to(roomName(campaignId)).emit('chat:new', note);
+          if (applied.detail.defeated && outcome.target.kind === 'marcador' && !finisherAsked) {
+            finisherAsked = true;
+            requestFinisher(campaignId, user.id, outcome.target.name);
+          }
           detail = damageDetailForViewer(applied.detail, {
             enemy: outcome.target.kind === 'marcador',
             isDm: membership.role === 'dm',
@@ -3519,6 +3651,8 @@ export function setupSockets(io) {
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
       io.to(roomName(campaignId)).emit('chat:new', note);
+      // Fase 4d: quien derriba a un enemigo describe el golpe final
+      if (detail.defeated && resolved.kind === 'marcador') requestFinisher(campaignId, user.id, resolved.name);
       const visibleDetail = damageDetailForViewer(detail, {
         enemy: resolved.kind === 'marcador',
         isDm: membership.role === 'dm',

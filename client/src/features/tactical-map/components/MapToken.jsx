@@ -84,6 +84,8 @@ function textTexture(text, color) {
 function FloatingCombatText({ visual, size }) {
   const spriteRef = useRef(null);
   const materialRef = useRef(null);
+  const labelRef = useRef(null);
+  const labelMaterialRef = useRef(null);
   const label = visual.type === 'damage'
     ? `−${visual.value}`
     : visual.type === 'heal'
@@ -100,16 +102,29 @@ function FloatingCombatText({ visual, size }) {
         : '#e8d7ad';
   const texture = useMemo(() => textTexture(label, color), [color, label]);
   useEffect(() => () => texture.dispose(), [texture]);
+  // Fase 4d: tras el «−8», cómo ha quedado el enemigo (solo la palabra)
+  const healthText = visual.type === 'damage' ? visual.healthLabel ?? null : null;
+  const healthTexture = useMemo(() => (healthText ? textTexture(healthText, '#e8d7ad') : null), [healthText]);
+  useEffect(() => () => healthTexture?.dispose(), [healthTexture]);
   useFrame(() => {
     const age = Math.max(0, (Date.now() - visual.createdAt) / 1000);
     if (spriteRef.current) spriteRef.current.position.y = size * (1.05 + age * 0.95);
     if (materialRef.current) materialRef.current.opacity = Math.max(0, 1 - age / 1.55);
+    if (labelRef.current) labelRef.current.position.y = size * (0.62 + age * 0.95);
+    if (labelMaterialRef.current) labelMaterialRef.current.opacity = Math.max(0, Math.min(1, age * 3) - age / 1.8);
   });
   if (!label) return null;
   return (
-    <sprite ref={spriteRef} position={[0, size * 1.05, 0]} scale={[size * 1.8, size * 0.6, 1]} raycast={() => null}>
-      <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
-    </sprite>
+    <>
+      <sprite ref={spriteRef} position={[0, size * 1.05, 0]} scale={[size * 1.8, size * 0.6, 1]} raycast={() => null}>
+        <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
+      </sprite>
+      {healthTexture && (
+        <sprite ref={labelRef} position={[0, size * 0.62, 0]} scale={[size * 1.5, size * 0.5, 1]} raycast={() => null}>
+          <spriteMaterial ref={labelMaterialRef} map={healthTexture} transparent opacity={0} depthTest={false} depthWrite={false} toneMapped={false} />
+        </sprite>
+      )}
+    </>
   );
 }
 

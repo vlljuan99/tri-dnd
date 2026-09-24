@@ -72,8 +72,8 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     assert.equal(health.commit, 'sha-prueba');
     assert.equal(health.version, 'prueba');
     assert.equal(health.database.ok, true);
-    // Sube con cada migración nueva (la v74 añade las tiradas del jugador).
-    assert.equal(health.database.migration, 74);
+    // Sube con cada migración nueva (la v75 añade el DM como narrador).
+    assert.equal(health.database.migration, 75);
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',

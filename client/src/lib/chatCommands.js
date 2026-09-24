@@ -37,3 +37,16 @@ export function rollChatCommand(text) {
   if (!parsed || parsed.error) return parsed;
   return { roll: rollPool(parsed.pool, { modifier: parsed.modifier, label: parsed.label }) };
 }
+
+
+/**
+ * Narración del DM (Fase 4d): «/n El viento aúlla en el desfiladero.» se
+ * envía como narración y la mesa la ve como subtítulo. null si no es /n.
+ */
+export function narrationCommand(text) {
+  const match = /^\/n(?:\s+([\s\S]*))?$/i.exec(String(text ?? '').trim());
+  if (!match) return null;
+  const body = (match[1] ?? '').trim();
+  if (!body) return { error: 'Escribe qué narras: /n El viento aúlla en el desfiladero.' };
+  return { text: body };
+}

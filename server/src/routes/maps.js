@@ -901,9 +901,21 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
   const {
     name, x, y, hidden, kind, dc, skill, perceptionDc, visionRadius, successConsequence,
     failureConsequence, consequenceScope, overrides, loot, applyFluidEffects = false,
+    // Fase 4d: nombre que ve la mesa mientras no se revele el real, y la
+    // presentación de jefe (cartel la primera vez que la mesa lo ve)
+    visibleName, bossIntro, bossTitle,
   } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El marcador necesita un nombre' });
+  }
+  if (visibleName !== undefined && visibleName !== null && !(typeof visibleName === 'string' && visibleName.length <= 60)) {
+    return res.status(400).json({ error: 'Nombre visible no válido' });
+  }
+  if (bossIntro !== undefined && typeof bossIntro !== 'boolean') {
+    return res.status(400).json({ error: 'Presentación de jefe no válida' });
+  }
+  if (bossTitle !== undefined && bossTitle !== null && !(typeof bossTitle === 'string' && bossTitle.length <= 80)) {
+    return res.status(400).json({ error: 'Título de jefe no válido' });
   }
   if (kind !== undefined && !TOKEN_KINDS.includes(kind)) {
     return res.status(400).json({ error: 'Tipo de marcador no válido' });
@@ -1027,6 +1039,36 @@ mapsRouter.patch('/:mapId/fichas/:tokenId', (req, res) => {
     lootJson !== undefined ? lootJson : token.loot,
     token.id
   );
+  // Nombre oculto (Fase 4d). Con él puesto, `name` guarda lo que ve la mesa y
+  // `true_name` el nombre real (solo para el DM). El campo «Nombre» del
+  // editor es siempre el real; «Nombre visible» vacío lo desactiva.
+  if (visibleName !== undefined || (name !== undefined && token.true_name)) {
+    const realName = name !== undefined ? name.trim().slice(0, 60) : token.true_name ?? token.name;
+    const shown =
+      visibleName !== undefined
+        ? (typeof visibleName === 'string' ? visibleName.trim().slice(0, 60) : '') || null
+        : token.true_name
+          ? token.name
+          : null;
+    const disguised = shown && shown !== realName;
+    db.prepare('UPDATE map_tokens SET name = ?, true_name = ? WHERE id = ?').run(
+      disguised ? shown : realName,
+      disguised ? realName : null,
+      token.id
+    );
+    db.prepare('UPDATE combatants SET name = ? WHERE map_token_id = ?').run(disguised ? shown : realName, token.id);
+  }
+  if (bossIntro !== undefined || bossTitle !== undefined) {
+    const enabling = bossIntro === true && !token.boss_intro;
+    db.prepare(
+      'UPDATE map_tokens SET boss_intro = ?, boss_title = ?, boss_intro_shown = CASE WHEN ? THEN 0 ELSE boss_intro_shown END WHERE id = ?'
+    ).run(
+      bossIntro !== undefined ? Number(bossIntro) : token.boss_intro,
+      bossTitle !== undefined ? (bossTitle ? bossTitle.trim().slice(0, 80) : null) : token.boss_title,
+      enabling ? 1 : 0,
+      token.id
+    );
+  }
   if (overridesJson !== undefined) {
     const linked = db
       .prepare('SELECT id FROM combatants WHERE campaign_id = ? AND map_token_id = ?')

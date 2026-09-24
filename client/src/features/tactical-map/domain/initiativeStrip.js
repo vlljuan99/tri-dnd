@@ -76,6 +76,8 @@ export function buildInitiativeStrip({ combatants = [], tokens = [], turnId = nu
       initiativePending: Boolean(combatant.initiativePending),
       // Fase 4c: quién le está ayudando (acción Ayudar)
       helpFrom: combatant.helpFrom?.name ?? null,
+      // Fase 4d: cómo está un enemigo, con palabras (lo calcula el servidor)
+      healthLabel: combatant.healthLabel ?? null,
     };
   });
 }

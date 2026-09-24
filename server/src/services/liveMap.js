@@ -74,8 +74,25 @@ export function notifyCombatStarted(campaignId) {
   postSystemMessage(campaignId, 'El combate ha comenzado.');
 }
 
+// Presentación de jefe (Fase 4d): cada vez que el mapa cambia (sala revelada,
+// marcador que deja de estar oculto) sockets.js comprueba si hay un jefe que
+// acaba de quedar a la vista.
+let bossIntroChecker = null;
+export function bindBossIntroChecker(fn) {
+  bossIntroChecker = fn;
+}
+
 export function notifyCampaignMap(campaignId) {
   ioRef?.to(`campaign:${campaignId}`).emit('mapa:actualizado');
+  if (bossIntroChecker) {
+    setImmediate(() => {
+      try {
+        bossIntroChecker(campaignId);
+      } catch (error) {
+        console.error('[jefes] no se pudo comprobar la presentación:', error);
+      }
+    });
+  }
 }
 
 // El DM ha concedido un nivel (Fase D): el aviso es público —el grupo entero

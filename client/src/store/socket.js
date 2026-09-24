@@ -74,6 +74,11 @@ export const useRoom = create((set, get) => ({
   pendingResults: [],
   // Una trampa acaba de saltar: la mesa se oscurece y suena el «¡clic!»
   trapAlert: null,
+  // Fase 4d: el subtítulo en pantalla (narración del DM o golpe final), la
+  // petición de «¿cómo quieres hacerlo?» y la presentación de un jefe
+  subtitle: null,
+  finisherRequest: null,
+  bossIntro: null,
 
   ensureSocket() {
     if (socket) return socket;
@@ -105,7 +110,20 @@ export const useRoom = create((set, get) => ({
       // sola vez) y su línea del registro espera al dado como todo lo demás.
       useReveal.getState().recibir(message);
       afterDice(get().campaignId, () => {
-        set((s) => ({ messages: [...s.messages.slice(-199), message] }));
+        set((s) => ({
+          messages: [...s.messages.slice(-199), message],
+          // La narración y el golpe final también se leen sobre el tablero
+          ...(message.style === 'narracion' || message.style === 'golpe-final'
+            ? {
+                subtitle: {
+                  id: message.id,
+                  text: message.body,
+                  author: message.author?.name ?? null,
+                  style: message.style,
+                },
+              }
+            : {}),
+        }));
       });
     });
     socket.on('room:members', (online) => set({ online }));
@@ -192,6 +210,15 @@ export const useRoom = create((set, get) => ({
         }, 9000);
       }
     });
+    // «¿Cómo quieres hacerlo?» y presentación de jefe (Fase 4d): después del
+    // dado que los provoca, nunca antes
+    socket.on('golpe-final:pedir', (request) => {
+      if (Number(request?.campaignId) !== Number(get().campaignId)) return;
+      afterDice(get().campaignId, () => set({ finisherRequest: { ...request, at: Date.now() } }));
+    });
+    socket.on('jefe:presentacion', (boss) => {
+      afterDice(get().campaignId, () => set({ bossIntro: { ...boss, key: Date.now() } }));
+    });
     socket.on('trampa:activada', (trap) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       set({ trapAlert: { id, ...trap } });
@@ -236,6 +263,7 @@ export const useRoom = create((set, get) => ({
     set({
       campaignId, messages: [], online: [], joinError: null, removedCampaignId: null,
       worldTravel: null, spellAims: [], spellFx: [], pendingRolls: [], pendingResults: [], trapAlert: null,
+      subtitle: null, finisherRequest: null, bossIntro: null,
     });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
@@ -272,13 +300,42 @@ export const useRoom = create((set, get) => ({
       pendingRolls: [],
       pendingResults: [],
       trapAlert: null,
+      subtitle: null,
+      finisherRequest: null,
+      bossIntro: null,
     });
   },
 
-  sendChat(text, references = []) {
+  /** `style: 'narracion'` (solo DM, Fase 4d) sale como subtítulo en la mesa. */
+  sendChat(text, references = [], { style = null } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
-    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references }, resolve));
+    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references, style }, resolve));
+  },
+
+  // --- El DM como narrador (Fase 4d) ---------------------------------
+
+  /** La frase del golpe final; vacía, se descarta sin publicar nada. */
+  sendFinisher(text) {
+    const { campaignId } = get();
+    set({ finisherRequest: null });
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('golpe-final:narrar', { campaignId, text }, resolve));
+  },
+
+  /** El DM revela el nombre real de un enemigo con nombre oculto. */
+  revealName(tokenId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:revelar-nombre', { campaignId, tokenId }, resolve));
+  },
+
+  clearSubtitle(id) {
+    set((s) => (s.subtitle?.id === id ? { subtitle: null } : {}));
+  },
+
+  clearBossIntro() {
+    set({ bossIntro: null });
   },
 
   /** Comparte una entrada SRD en una mesa en vivo sin cambiar la sala actual. */

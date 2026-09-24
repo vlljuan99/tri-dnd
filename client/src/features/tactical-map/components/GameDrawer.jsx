@@ -4,7 +4,7 @@ import InitiativeTracker from '../../../components/InitiativeTracker.jsx';
 import CombatantTooltip from '../../../components/CombatantTooltip.jsx';
 import CompendiumDetail, { COMPENDIUM_LABELS } from '../../../components/CompendiumDetail.jsx';
 import { useRoom } from '../../../store/socket.js';
-import { rollChatCommand } from '../../../lib/chatCommands.js';
+import { narrationCommand, rollChatCommand } from '../../../lib/chatCommands.js';
 import { api } from '../../../api.js';
 import {
   findActiveMention,
@@ -75,6 +75,24 @@ function Message({ message, selfId, onOpenReference }) {
       />
     );
   }
+  // Fase 4d: la narración del DM y el golpe final se leen como narración
+  if (message.style === 'narracion') {
+    return (
+      <p className="tactical-journal-narration border-l-2 border-gold/40 py-1 pl-3 font-serif text-sm italic leading-relaxed text-bone/85">
+        {message.body}
+      </p>
+    );
+  }
+  if (message.style === 'golpe-final') {
+    return (
+      <p className="py-1 text-sm leading-relaxed">
+        <span className="mr-2 font-display text-[0.65rem] uppercase tracking-widest text-blood/80">
+          Golpe final · {message.author?.name ?? '—'}
+        </span>
+        <span className="font-serif italic text-bone/90">«{message.body}»</span>
+      </p>
+    );
+  }
   const mine = message.author?.id === selfId;
   return (
     <p className="tactical-journal-message text-sm leading-relaxed">
@@ -111,6 +129,8 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [detail, setDetail] = useState(null);
   const [commandError, setCommandError] = useState('');
+  // Fase 4d: el DM escribe como narración (subtítulo sobre el tablero)
+  const [narrate, setNarrate] = useState(false);
   const logRef = useRef(null);
   const inputRef = useRef(null);
   const mention = findActiveMention(text, cursor, references);
@@ -154,9 +174,18 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
       setCommandError(command.error);
       return;
     }
+    // Narración del DM (Fase 4d): «/n …» o el interruptor «Narrar»
+    const narration = narrationCommand(prepared.text);
+    if (narration?.error) {
+      setCommandError(narration.error);
+      return;
+    }
+    const narrating = isDm && (Boolean(narration) || narrate);
     if (command?.roll) room.sendRoll(command.roll);
     else {
-      const response = await room.sendChat(prepared.text, prepared.references);
+      const response = await room.sendChat(narration?.text ?? prepared.text, narration ? [] : prepared.references, {
+        style: narrating ? 'narracion' : null,
+      });
       if (response?.error) {
         setCommandError(response.error);
         return;
@@ -293,6 +322,19 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               </ul>
             )}
             </div>
+            {isDm && (
+              <button
+                type="button"
+                aria-pressed={narrate}
+                onClick={() => setNarrate((value) => !value)}
+                title="Lo que escribas sale como narración sobre el tablero (también con /n)"
+                className={`rounded-sm border px-2 font-display text-xs tracking-wide ${
+                  narrate ? 'border-gold bg-gold/15 text-gold' : 'border-bone/20 text-bone/55 hover:text-bone'
+                }`}
+              >
+                Narrar
+              </button>
+            )}
             <button
               type="submit"
               className="tactical-journal-send rounded-sm bg-gold px-3 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"

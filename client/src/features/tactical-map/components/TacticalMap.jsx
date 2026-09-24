@@ -42,6 +42,9 @@ import { tirarYEnviar, trasElDado, useReveal } from '../../../store/reveal.js';
 import RequestRollDialog from './RequestRollDialog.jsx';
 import DeathSaveOverlay from './DeathSaveOverlay.jsx';
 import TrapAlert from './TrapAlert.jsx';
+import Subtitles from './Subtitles.jsx';
+import FinisherPrompt from './FinisherPrompt.jsx';
+import BossIntro from './BossIntro.jsx';
 
 const HAZARD_PRESETS = {
   fuego: {
@@ -1038,6 +1041,10 @@ export default function TacticalMap({
       <CombatAlert />
       {/* Fase 4c: la trampa salta en todas las pantallas */}
       <TrapAlert alert={trapAlert} />
+      {/* Fase 4d: el DM como narrador */}
+      <Subtitles />
+      <FinisherPrompt />
+      <BossIntro />
       {/* Fase 4c: tu turno a las puertas de la muerte, con toda la tensión */}
       {hudCombatant?.dying &&
         !hudCombatant.deathSaveRolled &&

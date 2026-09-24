@@ -1458,6 +1458,29 @@ export const migrations = [
   ALTER TABLE users ADD COLUMN auto_rolls INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE combatants ADD COLUMN help_from_id INTEGER;
   `,
+
+  // v75 — Fase 4d del programa de gameplay: el DM como narrador.
+  //
+  // Nombre oculto hasta conocerlo: mientras `map_tokens.true_name` no es NULL,
+  // el marcador se llama como lo ve la mesa («Criatura escamosa») y su nombre
+  // real vive aquí, que solo se sirve al DM. Guardarlo al revés (el visible
+  // aparte) obligaría a sustituirlo en cada narración del servidor; así, todo
+  // lo que ya narra con `name` usa el visible sin tocarlo, y no hay fuga.
+  //
+  // Presentación de jefe: `boss_intro` (la activa el DM por marcador),
+  // `boss_title` (subtítulo opcional) y `boss_intro_shown` (se presenta una
+  // sola vez, la primera que la mesa lo ve).
+  //
+  // `chat_messages.style`: narración del DM y «¿cómo quieres hacerlo?» son
+  // mensajes con otra presentación (subtítulo sobre el tablero), no otro tipo:
+  // el CHECK de `type` no admite valores nuevos sin reconstruir la tabla.
+  `
+  ALTER TABLE map_tokens ADD COLUMN true_name TEXT;
+  ALTER TABLE map_tokens ADD COLUMN boss_intro INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE map_tokens ADD COLUMN boss_title TEXT;
+  ALTER TABLE map_tokens ADD COLUMN boss_intro_shown INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_messages ADD COLUMN style TEXT;
+  `,
 ];
 
 export function runMigrations() {

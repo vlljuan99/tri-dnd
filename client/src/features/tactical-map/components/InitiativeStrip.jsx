@@ -37,6 +37,7 @@ function portraitRing({ active, mine, kind, state }) {
 function entryTitle(entry) {
   const parts = [`${entry.name} · Ini ${entry.initiativePending ? 'tirando…' : entry.initiative ?? '—'}`];
   if (entry.helpFrom) parts.push(`Le ayuda ${entry.helpFrom}`);
+  if (entry.healthLabel && entry.kind !== 'pj') parts.push(entry.healthLabel);
   if (entry.hp) parts.push(`${entry.hp.current}/${entry.hp.max} PG${entry.hp.temp > 0 ? ` +${entry.hp.temp} temp.` : ''}`);
   if (entry.state === 'dead') parts.push('Muerto');
   if (entry.state === 'dying') parts.push('Agonizando');
@@ -140,6 +141,11 @@ function InitiativeCard({ entry, selected, onSelect }) {
         </span>
       ) : (
         <span className="h-1 w-full" />
+      )}
+
+      {/* Fase 4d: el estado de un enemigo con palabras, sin números */}
+      {entry.healthLabel && entry.kind !== 'pj' && entry.state !== 'dead' && (
+        <span className="w-full truncate text-center text-[0.5rem] leading-none text-blood/75">{entry.healthLabel}</span>
       )}
 
       <span

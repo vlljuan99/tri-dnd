@@ -90,7 +90,12 @@ function BossActionEditor({ title, actions, legendary = false, onChange, onSave 
 
 // Panel lateral del marcador seleccionado (enemigo, aliado, objeto o trampa)
 export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, onSaveTemplate }) {
-  const [name, setName] = useState(token.name);
+  // Con nombre oculto (Fase 4d), `name` es lo que ve la mesa y `trueName` el
+  // real: el campo «Nombre» del editor es siempre el real.
+  const realName = token.trueName ?? token.name;
+  const [name, setName] = useState(realName);
+  const [visibleName, setVisibleName] = useState(token.trueName ? token.name : '');
+  const [bossTitle, setBossTitle] = useState(token.bossTitle ?? '');
   // Variante por instancia (miniboss) y botín: estado local editable
   const [overrides, setOverrides] = useState(token.overrides ?? {});
   const [loot, setLoot] = useState(token.loot ?? []);
@@ -101,7 +106,9 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
   const [lootText, setLootText] = useState('');
 
   useEffect(() => {
-    setName(token.name);
+    setName(token.trueName ?? token.name);
+    setVisibleName(token.trueName ? token.name : '');
+    setBossTitle(token.bossTitle ?? '');
     setOverrides(token.overrides ?? {});
     setLoot(token.loot ?? []);
     setSuccessConsequence(token.successConsequence ?? '');
@@ -171,7 +178,7 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
           <input id="token-name" className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
           <button
             type="button"
-            disabled={busy || !name.trim() || name.trim() === token.name}
+            disabled={busy || !name.trim() || name.trim() === realName}
             onClick={() => onPatch(token.id, { name: name.trim() })}
             className="shrink-0 rounded-sm border border-gold/30 px-2 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
           >
@@ -200,6 +207,69 @@ export default function TokenPanel({ token, roomName, busy, onPatch, onDelete, o
           ))}
         </div>
       </div>
+
+      {/* El DM como narrador (Fase 4d): nombre oculto y presentación de jefe */}
+      {isEnemy && (
+        <div className="rounded-sm border border-gold/15 bg-night-950/40 p-2">
+          <label className={labelClass} htmlFor="token-visible-name">Nombre que ve la mesa (opcional)</label>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            Mientras no lo reveles, los jugadores solo ven este nombre (y la criatura no entra en su
+            bestiario). Vacío = el nombre real. Se revela desde la iniciativa de la mesa.
+          </p>
+          <div className="mt-1 flex gap-2">
+            <input
+              id="token-visible-name"
+              className={inputClass}
+              value={visibleName}
+              maxLength={60}
+              placeholder="Criatura escamosa"
+              onChange={(e) => setVisibleName(e.target.value)}
+            />
+            <button
+              type="button"
+              disabled={busy || visibleName.trim() === (token.trueName ? token.name : '')}
+              onClick={() => onPatch(token.id, { visibleName: visibleName.trim() || null })}
+              className="shrink-0 rounded-sm border border-gold/30 px-2 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+            >
+              Guardar
+            </button>
+          </div>
+
+          <label className="mt-3 flex items-center gap-2 text-xs text-bone/80">
+            <input
+              type="checkbox"
+              checked={Boolean(token.bossIntro)}
+              disabled={busy}
+              onChange={(e) => onPatch(token.id, { bossIntro: e.target.checked })}
+              className="accent-gold"
+            />
+            Presentación de jefe
+            {token.bossIntroShown && <span className="text-bone/40">(ya presentado)</span>}
+          </label>
+          <p className="mt-1 text-[0.65rem] text-bone/45">
+            La primera vez que la mesa lo vea, un cartel a pantalla completa con su nombre y su imagen.
+          </p>
+          {token.bossIntro && (
+            <div className="mt-1 flex gap-2">
+              <input
+                className={inputClass}
+                value={bossTitle}
+                maxLength={80}
+                placeholder="Título (opcional): El terror del paso"
+                onChange={(e) => setBossTitle(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy || bossTitle.trim() === (token.bossTitle ?? '')}
+                onClick={() => onPatch(token.id, { bossTitle: bossTitle.trim() || null })}
+                className="shrink-0 rounded-sm border border-gold/30 px-2 text-xs text-gold hover:bg-gold/10 disabled:opacity-40"
+              >
+                Guardar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Variante por instancia (miniboss, Fase 17): solo enemigos */}
       {isEnemy && (
