@@ -87,6 +87,7 @@ export function snapshotMap(map) {
     visionRadius: map.vision_radius,
     wallColor: map.wall_color,
     wallLightEvery: map.wall_light_every,
+    terrainStyle: map.terrain_style ?? 'construido',
     fluidEffects: normalizeFluidEffects(map.fluid_effects),
     weather: map.weather ?? 'despejado',
     timeOfDay: map.time_of_day ?? 'dia',
@@ -241,8 +242,8 @@ export function instantiateMap(campaignId, userId, data, nameOverride) {
   const info = db
     .prepare(
       `INSERT INTO maps (campaign_id, name, grid_size, vision_mode, vision_radius, wall_color,
-       wall_light_every, fluid_effects, weather, time_of_day, weather_intensity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       wall_light_every, fluid_effects, weather, time_of_day, weather_intensity, terrain_style)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       campaignId,
@@ -255,7 +256,8 @@ export function instantiateMap(campaignId, userId, data, nameOverride) {
       JSON.stringify(normalizeFluidEffects(data.fluidEffects)),
       data.weather ?? 'despejado',
       data.timeOfDay ?? 'dia',
-      data.weatherIntensity ?? 0.55
+      data.weatherIntensity ?? 0.55,
+      data.terrainStyle === 'natural' ? 'natural' : 'construido'
     );
   const mapId = info.lastInsertRowid;
 

@@ -72,8 +72,8 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     assert.equal(health.commit, 'sha-prueba');
     assert.equal(health.version, 'prueba');
     assert.equal(health.database.ok, true);
-    // Sube con cada migración nueva (la v76 añade reacciones y susurros).
-    assert.equal(health.database.migration, 76);
+    // Sube con cada migración nueva (la v77 añade el aspecto del terreno).
+    assert.equal(health.database.migration, 77);
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
@@ -143,6 +143,9 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
       assert.equal(playerMapResponse.status, 200);
       const playerMap = (await playerMapResponse.json()).map;
       assert.ok(playerMap?.floors?.length, 'el aventurero debe recibir el tablero');
+      // El aspecto del terreno viaja con el tablero: el desfiladero es natural
+      // y la cripta y la fundición son obra de cantería.
+      assert.equal(playerMap.terrainStyle, preset.id === 'paso-del-cuervo' ? 'natural' : 'construido');
       assert.ok(
         playerMap.floors.flatMap((floor) => floor.rooms).every((room) => room.notes === ''),
         'ni el propietario técnico debe recibir notas privadas del mapa'
@@ -253,6 +256,43 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     } finally {
       database.close();
     }
+
+    // El DM elige el aspecto del terreno de su mapa; se valida en el servidor
+    // y se conserva al guardarlo como plantilla y volver a instanciarlo.
+    const json = { 'Content-Type': 'application/json', Cookie: cookie };
+    const ownCampaignResponse = await fetch(`${baseUrl}/api/campaigns`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ campaignType: 'escaramuza', name: 'Mesa de pruebas' }),
+    });
+    assert.equal(ownCampaignResponse.status, 201, await ownCampaignResponse.clone().text());
+    const ownCampaign = (await ownCampaignResponse.json()).campaign;
+    const mapsUrl = `${baseUrl}/api/campaigns/${ownCampaign.id}/mapas`;
+    const created = await fetch(mapsUrl, { method: 'POST', headers: json, body: JSON.stringify({ name: 'Sótano' }) });
+    assert.equal(created.status, 201);
+    const blankMap = (await created.json()).map;
+    assert.equal(blankMap.terrainStyle, 'construido', 'un mapa nuevo nace construido');
+    const invalid = await fetch(`${mapsUrl}/${blankMap.id}`, {
+      method: 'PATCH', headers: json, body: JSON.stringify({ terrainStyle: 'marmol' }),
+    });
+    assert.equal(invalid.status, 400);
+    const patched = await fetch(`${mapsUrl}/${blankMap.id}`, {
+      method: 'PATCH', headers: json, body: JSON.stringify({ terrainStyle: 'natural' }),
+    });
+    assert.equal(patched.status, 200);
+    const patchedMap = (await patched.json()).map;
+    assert.equal(patchedMap.terrainStyle, 'natural');
+    assert.equal(patchedMap.wallColor, blankMap.wallColor, 'cambiar el aspecto no toca el color');
+    const saved = await fetch(`${mapsUrl}/${blankMap.id}/guardar-plantilla`, {
+      method: 'POST', headers: json, body: JSON.stringify({ name: 'Sótano natural' }),
+    });
+    assert.equal(saved.status, 201);
+    const { template } = await saved.json();
+    const copy = await fetch(`${mapsUrl}/desde-plantilla`, {
+      method: 'POST', headers: json, body: JSON.stringify({ templateId: template.id }),
+    });
+    assert.equal(copy.status, 201, await copy.clone().text());
+    assert.equal((await copy.json()).map.terrainStyle, 'natural');
   } finally {
     await stopChild(child);
     await fs.rm(dataDir, { recursive: true, force: true });

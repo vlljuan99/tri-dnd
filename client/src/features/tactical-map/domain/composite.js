@@ -146,6 +146,8 @@ export function composeBoardFromMap(map, preferredFloorId) {
     characterTokens,
     name: map.name,
     wallColor: map.wallColor || '#9b8555',
+    // Aspecto de muros, obstáculos y desniveles (cosmético, no lo lee ninguna regla)
+    terrainStyle: map.terrainStyle === 'natural' ? 'natural' : 'construido',
     // Antorchas automáticas de pared cada N casillas (0 = solo luces a mano)
     wallLightEvery: map.wallLightEvery ?? 0,
     // Reglas por tipo resueltas por el servidor: recomendaciones más los

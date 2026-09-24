@@ -1500,6 +1500,15 @@ export const migrations = [
   );
   ALTER TABLE chat_messages ADD COLUMN recipient_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
   `,
+
+  // v77 — Aspecto del terreno por mapa, solo cosmético. 'construido' pinta
+  // sillería, columnas y muros de contención; 'natural', piedra seca,
+  // peñascos y riscos. Ninguna regla lo lee: paso, visión y alturas siguen
+  // saliendo de las mismas capas del editor.
+  `
+  ALTER TABLE maps ADD COLUMN terrain_style TEXT NOT NULL DEFAULT 'construido'
+    CHECK (terrain_style IN ('construido', 'natural'));
+  `,
 ];
 
 export function runMigrations() {
