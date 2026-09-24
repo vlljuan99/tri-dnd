@@ -43,30 +43,33 @@ test('una tirada ajena rueda y se revela por pasos en la pantalla del jugador', 
     await joinCampaign(playerContext, inviteCode);
 
     const playerPage = await playerContext.newPage();
-    // Que el socket del jugador ya esté en la sala antes de tirar: la respuesta
-    // a room:join es la única que trae el nombre de la campaña.
-    const joined = new Promise((resolve) => {
-      playerPage.on('websocket', (ws) =>
-        ws.on('framereceived', (frame) => {
-          if (String(frame.payload).includes('"campaignName"')) resolve();
-        })
-      );
-    });
     await playerPage.goto(`/campanas/${campaignId}`);
     await expect(playerPage.getByText('Cargando campaña...')).toHaveCount(0, { timeout: 15_000 });
-    await joined;
 
+    // No sabemos cuándo termina el socket del jugador de entrar en la sala (en
+    // CI empieza por long-polling y la confirmación no viaja como frame de
+    // WebSocket): el DM tira, con una etiqueta distinta cada vez, hasta que una
+    // aparece en la pantalla del jugador.
     const dmSocket = await openDmSocket(await sessionCookie(dmContext), campaignId);
+    let rotulo = null;
     try {
-      // El veredicto que traiga el cliente lo descarta el servidor: aquí se
-      // comprueba que la tirada rueda y enseña su total por pasos.
-      await emitRoll(dmSocket, campaignId, d20Roll('TIRADA-AJENA', 14, 5), false);
+      for (let intento = 0; intento < 12 && !rotulo; intento += 1) {
+        const label = `TIRADA-AJENA-${intento}`;
+        // El veredicto que traiga el cliente lo descarta el servidor: aquí se
+        // comprueba que la tirada rueda y enseña su total por pasos.
+        await emitRoll(dmSocket, campaignId, d20Roll(label, 14, 5), false);
+        const candidato = playerPage.getByRole('status').filter({ hasText: label });
+        try {
+          await expect(candidato).toBeVisible({ timeout: 1_000 });
+          rotulo = candidato;
+        } catch {
+          // Todavía no estaba en la sala: otra tirada
+        }
+      }
     } finally {
       dmSocket.close();
     }
-
-    const rotulo = playerPage.getByRole('status').filter({ hasText: 'TIRADA-AJENA' });
-    await expect(rotulo).toBeVisible({ timeout: 5_000 });
+    expect(rotulo, 'la tirada del DM debe rodar en la pantalla del jugador').not.toBeNull();
     // Mientras el dado vuela no hay número todavía
     await expect(rotulo.getByText('Rodando…')).toBeVisible();
     // Cuando cae: el total y su desglose
