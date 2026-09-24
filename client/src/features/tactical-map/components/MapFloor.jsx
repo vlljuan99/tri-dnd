@@ -2,61 +2,26 @@ import { Suspense, useEffect, useMemo } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { disabledCellsToSet, cellKey } from '../domain/cells.js';
-import { ELEV_STEP } from '../domain/elevation.js';
 import { FLUID_TYPE_KEYS } from '../domain/fluids.js';
-import { BoardMaterials, StoneBlock, StoneMaterial } from './BoardMaterials.jsx';
+import { BoardMaterials, RockMaterial, StoneMaterial } from './BoardMaterials.jsx';
+import {
+  buildElevationGeometry,
+  buildObstacleGeometry,
+  buildWallGeometry,
+  isDenseBoard,
+  normalizeTerrainStyle,
+  wallEdgeKey,
+} from '../lib/structureGeometry.js';
+import { buildTerrainSurface } from '../lib/terrainGeometry.js';
 
 // Construye la geometría del suelo de una sala: un cuadrado por casilla
 // activa (las desactivadas se omiten, quedando como vacío/oscuro). Las UV de
 // cada casilla apuntan a su porción de la textura de la sala, para que una
 // imagen rectangular se "recorte" a la forma de la sala.
-function buildRoomGeometry({ col, row, width, height, gridSize, disabledCells, stone = false }) {
-  const disabled = disabledCellsToSet(disabledCells);
-  const positions = [];
-  const uvs = [];
-  const indices = [];
-  let vertex = 0;
-
-  for (let r = 0; r < height; r += 1) {
-    for (let c = 0; c < width; c += 1) {
-      if (disabled.has(cellKey(c, r))) continue;
-
-      const x0 = (col + c) * gridSize;
-      const x1 = (col + c + 1) * gridSize;
-      const z0 = (row + r) * gridSize;
-      const z1 = (row + r + 1) * gridSize;
-      const u0 = c / width;
-      const u1 = (c + 1) / width;
-      const v0 = 1 - r / height;
-      const v1 = 1 - (r + 1) / height;
-
-      positions.push(x0, 0, z0, x1, 0, z0, x1, 0, z1, x0, 0, z1);
-      if (stone) {
-        uvs.push(x0 / gridSize / 4, -z0 / gridSize / 4, x1 / gridSize / 4, -z0 / gridSize / 4,
-          x1 / gridSize / 4, -z1 / gridSize / 4, x0 / gridSize / 4, -z1 / gridSize / 4);
-      } else {
-        uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
-      }
-      // Orden de índices invertido para que la cara quede orientada hacia
-      // +Y (la cámara cenital mira hacia abajo): si no, el culling por
-      // defecto de FrontSide oculta el suelo entero.
-      indices.push(vertex, vertex + 2, vertex + 1, vertex, vertex + 3, vertex + 2);
-      vertex += 4;
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
 function useRoomGeometry(room, gridSize, stone = false) {
   const geometry = useMemo(
-    () => buildRoomGeometry({ ...room, gridSize, stone }),
-    [room.col, room.row, room.width, room.height, room.disabledCells, gridSize, stone]
+    () => buildTerrainSurface(room, gridSize, stone),
+    [room.col, room.row, room.width, room.height, room.disabledCells, room.elevationCells, gridSize, stone]
   );
   useEffect(() => () => geometry.dispose(), [geometry]);
   return geometry;
@@ -66,15 +31,6 @@ function useRoomGeometry(room, gridSize, stone = false) {
 // sepa qué parte del mapa no están viendo los jugadores
 function dimmedProps(room) {
   return room.revealed === false ? { transparent: true, opacity: 0.4 } : {};
-}
-
-function roomWallKey(room, col, row, side) {
-  const x = room.col + col;
-  const y = room.row + row;
-  if (side === 'n') return `h:${x},${y}`;
-  if (side === 's') return `h:${x},${y + 1}`;
-  if (side === 'o') return `v:${x},${y}`;
-  return `v:${x + 1},${y}`;
 }
 
 function boardDoorEdges(doors = []) {
@@ -103,6 +59,7 @@ function RoomImageFloor({ room, gridSize }) {
           ilustración mantiene detalle mínimo sin convertirse en un plano sin luz. */}
       <meshStandardMaterial
         map={texture}
+        vertexColors
         emissive="#ffffff"
         emissiveMap={texture}
         emissiveIntensity={0.25}
@@ -117,90 +74,47 @@ function RoomPlainFloor({ room, gridSize }) {
   const geometry = useRoomGeometry(room, gridSize, true);
   return (
     <mesh geometry={geometry} receiveShadow raycast={() => null}>
-      <StoneMaterial {...dimmedProps(room)} />
+      <StoneMaterial vertexColors {...dimmedProps(room)} />
     </mesh>
   );
 }
 
-// Obstáculos de la sala: bloques bajos que no se pueden pisar (columnas,
-// rocas, muebles). Bloquearán la línea de visión en la niebla de guerra.
-function RoomObstacles({ room, gridSize }) {
-  const cells = room.obstacleCells ?? [];
-  if (!cells.length) return null;
+// Una malla por familia y sala, con materiales/texturas compartidos. El
+// detalle de cada piedra no añade draw calls ni captura clics del tablero. El
+// tono de cada pieza viaja en el color de vértice, así que el material es blanco.
+function StructureMesh({ geometry, room }) {
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  if (!geometry.getAttribute('position')?.count) return null;
   return (
-    <group>
-      {cells.map(([c, r]) => (
-        <StoneBlock
-          key={`${c},${r}`}
-          position={[(room.col + c + 0.5) * gridSize, 0.2, (room.row + r + 0.5) * gridSize]}
-          dimensions={[gridSize * 0.86, 0.4, gridSize * 0.86]}
-          castShadow={room.revealed !== false} receiveShadow
-          raycast={() => null}
-        >
-          <StoneMaterial color="#8b8270" {...dimmedProps(room)} />
-        </StoneBlock>
-      ))}
-    </group>
+    <mesh geometry={geometry} castShadow={room.revealed !== false} receiveShadow raycast={() => null}>
+      <RockMaterial color="#ffffff" vertexColors {...dimmedProps(room)} />
+    </mesh>
   );
 }
 
-// Paredes por arista de la sala: muros gruesos y altos sobre el borde de la
-// casilla. Bloquean paso y visión (validado en servidor); aquí solo se pintan.
-// El color lo elige el DM por mapa (wallColor).
-function RoomWalls({ room, gridSize, wallColor, doorEdges }) {
-  const edges = room.wallEdges ?? [];
-  if (!edges.length) return null;
-  const thickness = gridSize * 0.22;
-  const height = 1;
-  return (
-    <group>
-      {edges.map(([c, r, side]) => {
-        if (doorEdges.has(roomWallKey(room, c, r, side))) return null;
-        const horizontal = side === 'n' || side === 's';
-        // Punto medio de la arista en coordenadas de mundo
-        const x = (room.col + c + (side === 'e' ? 1 : horizontal ? 0.5 : 0)) * gridSize;
-        const z = (room.row + r + (side === 's' ? 1 : horizontal ? 0 : 0.5)) * gridSize;
-        return (
-          <StoneBlock key={`${c},${r},${side}`} position={[x, height / 2, z]} raycast={() => null}
-            dimensions={horizontal ? [gridSize + thickness, height, thickness] : [thickness, height, gridSize + thickness]}
-            castShadow={room.revealed !== false} receiveShadow>
-            <StoneMaterial color={wallColor || '#b0aa96'} {...dimmedProps(room)} />
-          </StoneBlock>
-        );
-      })}
-    </group>
-  );
+// Rocas (estilo natural) o columnas (construido) sobre cada casilla de
+// obstáculo. Bloquean paso y visión en el servidor; aquí solo se pintan.
+function RoomObstacles({ room, gridSize, look }) {
+  const geometry = useMemo(() => buildObstacleGeometry(room, gridSize, look),
+    [room.col, room.row, room.width, room.height, room.obstacleCells, room.disabledCells, room.elevationCells, gridSize, look]);
+  return <StructureMesh geometry={geometry} room={room} />;
 }
 
-// Elevación de la sala: cada casilla con nivel ≠ 0 se pinta como una
-// plataforma (positiva) o un foso (negativo) sobre el suelo plano. Con la luz
-// direccional, las caras superiores quedan más iluminadas que las laterales,
-// dando sensación de relieve incluso en vista cenital. Subir cuesta
-// movimiento extra (validado en servidor); aquí solo se pinta.
-function RoomElevation({ room, gridSize }) {
-  const cells = room.elevationCells ?? [];
-  if (!cells.length) return null;
-  return (
-    <group>
-      {cells.map(([c, r, level]) => {
-        const h = Math.abs(level) * ELEV_STEP;
-        // Positivo: bloque desde el suelo hacia arriba. Negativo: hacia abajo.
-        const yCenter = level > 0 ? h / 2 : -h / 2;
-        const color = level > 0 ? '#aba28c' : '#544f46';
-        return (
-          <mesh
-            key={`${c},${r}`}
-            position={[(room.col + c + 0.5) * gridSize, yCenter, (room.row + r + 0.5) * gridSize]}
-            raycast={() => null}
-            castShadow={room.revealed !== false} receiveShadow
-          >
-            <boxGeometry args={[gridSize, h, gridSize]} />
-            <StoneMaterial color={color} {...dimmedProps(room)} />
-          </mesh>
-        );
-      })}
-    </group>
-  );
+// Paredes por arista de la sala: sillería o piedra seca según el estilo del
+// mapa, con el color de piedra que elige el DM (wallColor).
+function RoomWalls({ room, gridSize, doorEdges, look }) {
+  const geometry = useMemo(() => buildWallGeometry(room, gridSize, doorEdges, look),
+    [room.col, room.row, room.wallEdges, room.elevationCells, gridSize, doorEdges, look]);
+  return <StructureMesh geometry={geometry} room={room} />;
+}
+
+// El suelo ya sigue la altura: aquí se cierran los desniveles expuestos con un
+// muro de contención o un risco. Las casillas contiguas forman una plataforma
+// sin costuras ni caras interiores.
+function RoomElevation({ room, gridSize, look }) {
+  const geometry = useMemo(() => buildElevationGeometry(room, gridSize, look),
+    [room.col, room.row, room.width, room.height, room.disabledCells, room.elevationCells, gridSize, look]);
+  return <StructureMesh geometry={geometry} room={room} />;
 }
 
 // Los fluidos comparten un único shader barato. Cada tipo presente construye
@@ -413,7 +327,7 @@ function collectBoardLights(map) {
   for (const room of map.rooms ?? []) {
     if (every > 0) {
       for (const [c, r, side] of room.wallEdges ?? []) {
-        if (doorEdges.has(roomWallKey(room, c, r, side))) continue;
+        if (doorEdges.has(wallEdgeKey(room, c, r, side))) continue;
         const x = room.col + c;
         const y = room.row + r;
         // Determinista y ~1 por cada `every` casillas a lo largo de un muro
@@ -489,6 +403,13 @@ export default function MapFloor({ map }) {
         },
       ];
   const doorEdges = useMemo(() => boardDoorEdges(map.doors), [map.doors]);
+  // Estilo y color de la piedra, y si el tablero es tan grande que conviene
+  // aligerar los muros. Un objeto estable: cambiarlo reconstruye las mallas.
+  const dense = isDenseBoard(rooms);
+  const look = useMemo(
+    () => ({ style: normalizeTerrainStyle(map.terrainStyle), color: map.wallColor, dense }),
+    [map.terrainStyle, map.wallColor, dense]
+  );
 
   return (
     <BoardMaterials>
@@ -501,9 +422,9 @@ export default function MapFloor({ map }) {
           ) : (
             <RoomPlainFloor room={room} gridSize={map.gridSize} />
           )}
-          <RoomObstacles room={room} gridSize={map.gridSize} />
-          <RoomWalls room={room} gridSize={map.gridSize} wallColor={map.wallColor} doorEdges={doorEdges} />
-          <RoomElevation room={room} gridSize={map.gridSize} />
+          <RoomObstacles room={room} gridSize={map.gridSize} look={look} />
+          <RoomWalls room={room} gridSize={map.gridSize} doorEdges={doorEdges} look={look} />
+          <RoomElevation room={room} gridSize={map.gridSize} look={look} />
         </group>
       ))}
       <BoardFluids rooms={rooms} gridSize={map.gridSize} />
