@@ -109,6 +109,12 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     overrides: forPlayer ? undefined : JSON.parse(row.overrides || '{}'),
     loot: forPlayer ? undefined : loot,
     hasLoot: loot.length > 0,
+    // Fase 4d, solo para el DM: nombre real (si la mesa ve otro) y la
+    // presentación de jefe. Al jugador no le llega ni que existan.
+    trueName: forPlayer ? undefined : row.true_name ?? null,
+    bossIntro: forPlayer ? undefined : Boolean(row.boss_intro),
+    bossTitle: forPlayer ? undefined : row.boss_title ?? null,
+    bossIntroShown: forPlayer ? undefined : Boolean(row.boss_intro_shown),
   };
 }
 
@@ -377,7 +383,9 @@ export function spawnRoomEnemies(campaignId, roomIds, { startCombat = true } = {
       roll.modifier
     );
     syncBossResources(Number(inserted.lastInsertRowid));
-    discovered.push(enemy);
+    // Con el nombre oculto (Fase 4d) no entra en el bestiario: la ficha del
+    // SRD delataría quién es. Entra al revelarlo.
+    if (!enemy.true_name) discovered.push(enemy);
     added += 1;
   }
   if (discovered.length) discoverCreatures(campaignId, discovered);

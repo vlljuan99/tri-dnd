@@ -4,7 +4,7 @@ import InitiativeTracker from '../../../components/InitiativeTracker.jsx';
 import CombatantTooltip from '../../../components/CombatantTooltip.jsx';
 import CompendiumDetail, { COMPENDIUM_LABELS } from '../../../components/CompendiumDetail.jsx';
 import { useRoom } from '../../../store/socket.js';
-import { rollChatCommand } from '../../../lib/chatCommands.js';
+import { narrationCommand, rollChatCommand, whisperCommand } from '../../../lib/chatCommands.js';
 import { api } from '../../../api.js';
 import {
   findActiveMention,
@@ -59,7 +59,7 @@ function ReferencedText({ message, onOpenReference }) {
   });
 }
 
-function Message({ message, selfId, onOpenReference }) {
+function Message({ message, selfId, onOpenReference, onReact }) {
   if (message.type === 'system') {
     return (
       <p className="tactical-journal-event py-1 text-center font-display text-xs uppercase tracking-widest text-gold/60">
@@ -72,7 +72,45 @@ function Message({ message, selfId, onOpenReference }) {
       <RollCard
         roll={{ ...message.body, hiddenBadge: message.hidden }}
         authorName={message.author?.name}
+        reactions={message.reactions}
+        selfId={selfId}
+        onReact={onReact ? (emoji) => onReact(message.id, emoji) : null}
       />
+    );
+  }
+  // Susurro (Fase 4, añadido): solo lo reciben autor, destinatario y DM
+  if (message.recipient) {
+    const toMe = message.recipient.id === selfId;
+    const fromMe = message.author?.id === selfId;
+    return (
+      <p className="rounded-sm border border-dashed border-gold/25 px-2 py-1 text-sm leading-relaxed">
+        <span className="mr-2 font-display text-[0.65rem] uppercase tracking-widest text-gold/70">
+          {fromMe
+            ? `Susurras a ${message.recipient.name}`
+            : toMe
+              ? `${message.author?.name ?? '—'} te susurra`
+              : `${message.author?.name ?? '—'} susurra a ${message.recipient.name}`}
+        </span>
+        <span className="font-serif italic text-bone/85">{message.body}</span>
+      </p>
+    );
+  }
+  // Fase 4d: la narración del DM y el golpe final se leen como narración
+  if (message.style === 'narracion') {
+    return (
+      <p className="tactical-journal-narration border-l-2 border-gold/40 py-1 pl-3 font-serif text-sm italic leading-relaxed text-bone/85">
+        {message.body}
+      </p>
+    );
+  }
+  if (message.style === 'golpe-final') {
+    return (
+      <p className="py-1 text-sm leading-relaxed">
+        <span className="mr-2 font-display text-[0.65rem] uppercase tracking-widest text-blood/80">
+          Golpe final · {message.author?.name ?? '—'}
+        </span>
+        <span className="font-serif italic text-bone/90">«{message.body}»</span>
+      </p>
     );
   }
   const mine = message.author?.id === selfId;
@@ -111,6 +149,8 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [detail, setDetail] = useState(null);
   const [commandError, setCommandError] = useState('');
+  // Fase 4d: el DM escribe como narración (subtítulo sobre el tablero)
+  const [narrate, setNarrate] = useState(false);
   const logRef = useRef(null);
   const inputRef = useRef(null);
   const mention = findActiveMention(text, cursor, references);
@@ -154,9 +194,37 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
       setCommandError(command.error);
       return;
     }
+    // Narración del DM (Fase 4d): «/n …» o el interruptor «Narrar»
+    const narration = narrationCommand(prepared.text);
+    if (narration?.error) {
+      setCommandError(narration.error);
+      return;
+    }
+    // Susurro (Fase 4, añadido): «/s Aria El posadero miente»
+    const whisper = whisperCommand(prepared.text);
+    if (whisper?.error) {
+      setCommandError(whisper.error);
+      return;
+    }
+    if (whisper) {
+      const response = await room.sendChat(whisper.text, [], { whisper: true });
+      if (response?.error) {
+        setCommandError(response.error);
+        return;
+      }
+      setCommandError('');
+      setText('');
+      setReferences([]);
+      setSuggestions([]);
+      setCursor(0);
+      return;
+    }
+    const narrating = isDm && (Boolean(narration) || narrate);
     if (command?.roll) room.sendRoll(command.roll);
     else {
-      const response = await room.sendChat(prepared.text, prepared.references);
+      const response = await room.sendChat(narration?.text ?? prepared.text, narration ? [] : prepared.references, {
+        style: narrating ? 'narracion' : null,
+      });
       if (response?.error) {
         setCommandError(response.error);
         return;
@@ -255,7 +323,13 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               </p>
             )}
             {room.messages.map((m) => (
-              <Message key={m.id} message={m} selfId={userId} onOpenReference={openReference} />
+              <Message
+                key={m.id}
+                message={m}
+                selfId={userId}
+                onOpenReference={openReference}
+                onReact={(messageId, emoji) => room.reactToMessage(messageId, emoji)}
+              />
             ))}
           </div>
           <form onSubmit={send} className="tactical-journal-composer border-t border-gold/15 p-3">
@@ -270,7 +344,7 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               onClick={(event) => setCursor(event.currentTarget.selectionStart ?? text.length)}
               onKeyUp={(event) => setCursor(event.currentTarget.selectionStart ?? text.length)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Escribe, usa @ para el compendio o /r 1d20+4"
+              placeholder="Escribe, @ para el compendio, /r 1d20+4 o /s Nombre para susurrar"
               className="w-full rounded-sm border border-bone/20 bg-night-950 px-3 py-2 text-sm text-bone placeholder:text-bone/40 focus:border-gold focus:outline-none"
             />
             {suggestions.length > 0 && mention && (
@@ -293,6 +367,19 @@ export default function GameDrawer({ campaignId, isDm, userId, onClose }) {
               </ul>
             )}
             </div>
+            {isDm && (
+              <button
+                type="button"
+                aria-pressed={narrate}
+                onClick={() => setNarrate((value) => !value)}
+                title="Lo que escribas sale como narración sobre el tablero (también con /n)"
+                className={`rounded-sm border px-2 font-display text-xs tracking-wide ${
+                  narrate ? 'border-gold bg-gold/15 text-gold' : 'border-bone/20 text-bone/55 hover:text-bone'
+                }`}
+              >
+                Narrar
+              </button>
+            )}
             <button
               type="submit"
               className="tactical-journal-send rounded-sm bg-gold px-3 font-display text-sm tracking-wide text-night-950 hover:bg-gold/90"

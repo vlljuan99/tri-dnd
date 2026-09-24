@@ -20,6 +20,7 @@ import SpellFx from './SpellFx.jsx';
 import TacticalCamera from './TacticalCamera.jsx';
 import WeatherLayer from './WeatherLayer.jsx';
 import SceneLighting from './SceneLighting.jsx';
+import RevealEffects from './RevealEffects.jsx';
 
 const HAZARD_COLORS = {
   fuego: '#ff6a2a',
@@ -153,6 +154,8 @@ export default function TacticalMapCanvas({
       />
       <MapFloor map={map} />
       <MapGrid map={map} visible={showGrid} />
+      {/* Fase 3 (añadido): barrido al revelar una sala y brillo de trampa descubierta */}
+      <RevealEffects map={map} />
       {/* Terreno difícil, visión, camino y peligros conservan su relleno. Solo
           el alcance usa contorno para no teñir la ilustración del suelo. */}
       <MovementRange cells={terrainCells} gridSize={map.gridSize} color="#9c6f2e" opacity={0.3} y={0.012} elevation={elevation} />
@@ -222,6 +225,16 @@ export default function TacticalMapCanvas({
           const matchesToken = (entry) => token.characterId
             ? entry.characterId === token.characterId
             : entry.mapTokenId === token.serverId;
+          // Sus propios golpes (Fase 3, añadido): embiste hacia el objetivo
+          const ownStrikes = combatVisuals
+            .filter((entry) => (entry.type === 'hit' || entry.type === 'miss') && entry.from && matchesToken(entry.from))
+            .map((entry) => {
+              const target = map.tokens.find((candidate) =>
+                entry.characterId ? candidate.characterId === entry.characterId : candidate.serverId === entry.mapTokenId
+              );
+              return target ? { id: entry.id, to: target.position } : null;
+            })
+            .filter(Boolean);
           return (
             <MapToken
               key={token.id}
@@ -232,6 +245,7 @@ export default function TacticalMapCanvas({
               active={token.id === activeTokenId}
               dead={Boolean(combatants.find(matchesToken)?.dead)}
               visuals={combatVisuals.filter(matchesToken)}
+              strikes={ownStrikes}
               movable={canMoveToken({ token, user, role })}
               saving={token.id === savingTokenId}
               onSelect={onSelectToken}

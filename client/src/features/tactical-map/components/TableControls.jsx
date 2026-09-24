@@ -35,6 +35,7 @@ export default function TableControls({
   onRemoveHazard,
   onRest,
   onToggleClock,
+  onRequestRoll,
 }) {
   const [open, setOpen] = useState(false);
 
@@ -67,6 +68,19 @@ export default function TableControls({
               >
                 <span>{combat.active ? 'Modo por turnos' : 'Modo libre'}</span>
                 <span className={`h-2 w-2 rounded-full ${combat.active ? 'bg-gold' : 'bg-bone/35'}`} />
+              </button>
+            </section>
+          )}
+
+          {/* Tiradas que pide el DM (Fase 4c): cada jugador tira la suya */}
+          {isDm && onRequestRoll && (
+            <section aria-label="Tiradas">
+              <p className="mb-1.5 px-0.5 font-display text-[0.65rem] uppercase tracking-widest text-gold/65">
+                Tiradas
+              </p>
+              <button type="button" onClick={onRequestRoll} className={CONTROL_IDLE}>
+                <span>Pedir tirada</span>
+                <span className="text-bone/40">prueba · salvación · grupo</span>
               </button>
             </section>
           )}

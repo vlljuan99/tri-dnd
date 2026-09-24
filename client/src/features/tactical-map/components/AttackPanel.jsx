@@ -11,6 +11,8 @@ import {
 import { isProficientWithWeapon, wearingUnproficientArmor } from '../../../lib/proficiency.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
+import { tirarYEnviar } from '../../../store/reveal.js';
+import { textoDelMargen } from '../../dice-tray/lib/reveal.js';
 import { resolveAttackEffects } from '../domain/combatRules.js';
 import { rangeValidation, weaponGeometry } from '../domain/combatGeometry.js';
 import { useCharacterWeapons } from '../hooks/useCharacterWeapons.js';
@@ -78,6 +80,8 @@ export default function AttackPanel({
   distance = Infinity,
   highGround = false,
   lineOfSight = true,
+  // Ayudar (Fase 4c): nombre de quien ayuda si está a 5 pies del objetivo
+  helpedBy = null,
   onClose,
 }) {
   const attackTarget = useRoom((s) => s.attackTarget);
@@ -92,6 +96,9 @@ export default function AttackPanel({
   // { type: 'attack', weaponId, hit, crit, ac, roll } |
   // { type: 'damage', weaponId, damage, remainingHp, maxHp, defeated }
   const [feedback, setFeedback] = useState(null);
+  // Mientras rueda una tirada propia el panel se aparta: los dados y su rótulo
+  // cuentan lo que pasa, y el objetivo del tablero no queda tapado.
+  const [rolling, setRolling] = useState(false);
 
   // Al cambiar de objetivo se descarta el resultado pendiente
   useEffect(() => setFeedback(null), [target.id]);
@@ -130,6 +137,7 @@ export default function AttackPanel({
       ranged: geometry.ranged,
       longRange: Boolean(range.longRange),
       manualAdvantage,
+      helpedBy,
     });
   }
 
@@ -161,14 +169,23 @@ export default function AttackPanel({
       label: `${row.name} — ataque contra ${target.name}`,
       actorName: char.name,
     });
-    const resp = await attackTarget({
-      characterId: char.id,
-      target: targetRef,
-      weaponId: row.id,
-      thrown,
-      manualAdvantage,
+    setRolling(true);
+    // Rueda cuando el servidor acepta el ataque y el resultado se enseña aquí
+    // cuando el dado ya ha caído (Fase 4b), no antes.
+    const resp = await tirarYEnviar(
       roll,
-    });
+      (tirada) =>
+        attackTarget({
+          characterId: char.id,
+          target: targetRef,
+          weaponId: row.id,
+          thrown,
+          manualAdvantage,
+          roll: tirada,
+        }),
+      { autor: char.name }
+    );
+    setRolling(false);
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -180,7 +197,7 @@ export default function AttackPanel({
       hit: resp.hit,
       crit: resp.crit,
       ac: resp.ac,
-      roll,
+      roll: resp.outcome ? { ...roll, outcome: resp.outcome } : roll,
       effects: resp.effects ?? effects,
     });
   }
@@ -215,13 +232,20 @@ export default function AttackPanel({
       });
     }
     const damageType = row.unarmed ? 'bludgeoning' : row.weapon.damageType ?? null;
-    const resp = await dealDamage({
-      characterId: char.id,
-      target: targetRef,
-      weaponId: row.id,
-      components: [{ amount: roll.total, type: damageType }],
+    setRolling(true);
+    const resp = await tirarYEnviar(
       roll,
-    });
+      (tirada) =>
+        dealDamage({
+          characterId: char.id,
+          target: targetRef,
+          weaponId: row.id,
+          components: [{ amount: tirada.total, type: damageType }],
+          roll: tirada,
+        }),
+      { autor: char.name }
+    );
+    setRolling(false);
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
@@ -242,7 +266,12 @@ export default function AttackPanel({
   }
 
   return (
-    <div className="absolute bottom-20 left-1/2 z-20 w-[24rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-sm border border-blood/40 bg-night-900/95 p-3 text-bone shadow-2xl backdrop-blur">
+    <div
+      className={`absolute bottom-20 left-1/2 z-20 w-[24rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-sm border border-blood/40 bg-night-900/95 p-3 text-bone shadow-2xl backdrop-blur transition-all duration-300 motion-reduce:transition-none ${
+        rolling ? 'pointer-events-none translate-y-6 opacity-0' : 'opacity-100'
+      }`}
+      aria-hidden={rolling || undefined}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="min-w-0 truncate font-display text-sm tracking-wide text-gold">
           {attacker.name} <span className="text-blood">⚔</span> {target.name}
@@ -396,6 +425,11 @@ export default function AttackPanel({
                       </span>
                       <span className="text-bone/50">contra CA {fb.ac}</span>
                     </div>
+                    {textoDelMargen(fb.roll) && (
+                      <p className="mt-1 text-[0.7rem] text-bone/55">
+                        {fb.hit ? 'Impacta' : 'Falla'} {textoDelMargen(fb.roll)}
+                      </p>
+                    )}
                     <motion.p
                       initial={{ scale: 0.6, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}

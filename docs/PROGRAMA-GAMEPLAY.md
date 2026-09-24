@@ -16,7 +16,8 @@ la Fase N». La sesión lee las reglas globales, la fase, y nada más. Termina c
 criterios de aceptación de esa fase están cumplidos y verificados, y **para**: no empieza
 la siguiente. Entre fase y fase Juan confirma.
 
-Orden: **1 → 2 → 3 → 4 → HITO (jugar con el grupo) → 5 → 5b → 6 → 7 → 8 → 9 → 10**.
+Orden: **1 → 2 → 3 → 4 → 4b → 4c → 4d → HITO (jugar con el grupo) → 5 → 5b → 6 → 7 →
+8 → 9 → 10**. Las fases 4b, 4c y 4d se añadieron el 23-sep-2026 (ver su introducción).
 Las tareas «en paralelo» del final no son de código y no bloquean nada.
 
 ---
@@ -185,7 +186,7 @@ viva la subida de nivel de la Fase D), `pages/CharacterSheetPage.jsx`, `PlayerHu
 
 ---
 
-## Fase 3 — Pulido de mesa (cuatro arreglos, un solo corte)
+## Fase 3 — Pulido de mesa (nueve arreglos, un solo corte)
 
 **Objetivo**: cerrar los huecos visibles que quedaron tras la reforma del HUD.
 
@@ -211,13 +212,34 @@ viva la subida de nivel de la Fase D), `pages/CharacterSheetPage.jsx`, `PlayerHu
    no eres administrador («Solo el administrador de la instalación (usuario X) puede
    cambiar los sonidos por defecto; tu volumen y silencio sí son tuyos»).
 
+*Añadido el 23-sep-2026 (misma conversación que las fases 4b–4d):*
+
+5. **El golpe se ve en el tablero.** Al resolverse un ataque, el token atacante embiste
+   un instante hacia el objetivo; si impacta, el objetivo parpadea en rojo y se sacude;
+   si falla, se aparta. Los proyectiles (`Projectiles.jsx`) se encadenan con esto. Lee
+   el evento del store, no decide nada; solo con tokens visibles para ese jugador.
+6. **Cuando te atacan a ti**: rótulo «El orco te ataca», la cámara al atacante (punto 3)
+   y tu retrato se sacude al recibir el golpe.
+7. **Puertas y trampas que revelan.** Al abrir una puerta, la niebla se levanta con un
+   barrido desde la puerta y un sonido, en lugar de apagarse de golpe. Una trampa
+   descubierta con Percepción se ilumina poco a poco solo para quien la encontró (ya es
+   quien la recibe del servidor).
+8. **«¡Tu turno!» aunque estés en otra ventana**: con Discord delante se pierde el turno.
+   Si la pestaña no está visible, el título parpadea («⚔ ¡Tu turno! · TriDnD») hasta
+   volver, y hay una notificación del navegador si el usuario la activa (pedida con un
+   botón, nunca al entrar).
+9. **Vibración en móvil** (`navigator.vibrate`, si existe) al impactar, al recibir daño,
+   en críticos y en «tu turno». Se apaga con el silencio del usuario.
+
 **Qué queda fuera**: samples reales (los consigue Juan y se suben por la página), música,
 Spotify.
 
 **Criterios de aceptación**: prueba de dominio para `isTokenDowned`/muerto; prueba de
 servidor de que el cartel salta en escaramuza; prueba de que la cámara no se mueve hacia
 un token no visible; en el navegador, cada evento suena una vez y `prefers-reduced-motion`
-no lo bloquea (el silencio sí).
+no lo bloquea (el silencio sí). Además: la embestida no se reproduce hacia tokens que el
+jugador no ve; con la pestaña oculta, el título avisa del turno y se restaura al volver;
+el barrido de niebla no revela celdas que el servidor no haya enviado.
 
 ---
 
@@ -243,8 +265,23 @@ y se lee como el log de un videojuego, no como prosa.
   muestran al jugador (hoy tampoco). Nada de datos nuevos hacia el jugador: solo mejor
   presentación de lo que ya recibe.
 
+*Añadido el 23-sep-2026:*
+
+- **Reacciones a las tiradas**: un toque sobre una entrada de tirada añade una reacción
+  de un conjunto cerrado (🔥 😱 😂 👏 💀), visible para quien ve esa tirada; una por
+  usuario y tirada. Se guardan en servidor (migración) y nunca se exponen sobre mensajes
+  que el usuario no pueda ver.
+- **Susurros**: `/s <nombre> <texto>` manda un mensaje privado a un jugador (o al DM).
+  Usa **el mismo filtrado en servidor que las tiradas ocultas**: solo llega al autor, al
+  destinatario y al DM. Al destinatario le aparece además como nota breve sobre el
+  tablero.
+- **Resumen de combate**: al terminar un combate, una tarjeta para toda la mesa con el
+  daño hecho por cada PJ, los críticos y pifias, el golpe final y quién cayó. Se calcula
+  con los mensajes del registro de ese combate; los números de los enemigos solo los ve
+  el DM. No es el resumen de sesión (sigue fuera).
+
 **Qué queda fuera**: exportar el registro, resumen de sesión, diario de campaña (backlog
-§4.12).
+§4.12). La narración del DM en pantalla y «¿cómo quieres hacerlo?» son de la Fase 4d.
 
 **Código que probablemente cambia**: `components/RollCard.jsx`, el cajón de la mesa
 (`GameDrawer.jsx`), `store/socket.js`, los mensajes de sistema de `sockets.js` si les
@@ -254,13 +291,278 @@ falta estructura (añadir campos, nunca quitar).
 tachado, +FUE +competencia por separado, «contra CA 15» tras resolverse, e «impacta»;
 un daño de fuego contra una criatura resistente muestra «12 fuego → 6 (resistencia)»; las
 entradas quedan bajo «Ronda 3»; la tirada oculta del DM no aparece al jugador (prueba de
-privacidad existente sigue en verde).
+privacidad existente sigue en verde). Prueba de servidor: un susurro no llega al socket
+de un tercero, y una reacción sobre una tirada oculta no llega a quien no la ve; el
+resumen de combate no enseña al jugador daño o PG de enemigos que no conociera.
+
+---
+
+## Fases 4b, 4c y 4d — Que los dados se vivan
+
+Decididas con Juan el 23-sep-2026 tras una partida de prueba. El diagnóstico: **el juego se
+siente automatizado, como si no hubiera dados de por medio**. Causas comprobadas en el
+código en esa fecha:
+
+- **El que ataca no ve sus propios dados.** La bandeja 3D (`features/dice-tray/`) solo
+  rueda las tiradas que pasan por `store/dice.js#submitRoll` (el tirador y la ficha
+  completa). El panel de ataque del tablero (`AttackPanel.jsx`), el de monstruo del DM
+  (`MonsterAttackPanel.jsx`) y la ficha rápida (`CharacterQuickView.jsx`) tiran por su
+  cuenta; los conjuros, los ataques de oportunidad, la concentración, la IA enemiga y los
+  fluidos los tira el servidor. Todas llegan como mensaje `roll` con autor = quien actúa,
+  y `dice-tray/lib/incoming.js` descarta a propósito las propias: **ruedan para los
+  demás, nunca para quien las hace**.
+- **El resultado llega sin suspense**: el panel pinta total, CA y «¡Impacta!» en cuanto
+  responde el servidor, todo a la vez.
+- **Todo pasa en el centro, encima del objetivo**: panel de ataque abajo-centro, ficha
+  rápida como modal centrado con fondo oscuro y bandeja también centrada. El token al que
+  atacas queda tapado.
+- **El jugador no tira en sus momentos más tensos**: las salvaciones de un PJ contra un
+  conjuro (`sockets.js`, `combate:lanzar-conjuro`) y la iniciativa (`combat:start`,
+  `combat:add-party`) se tiran solas.
+- **Los tiempos del servidor y del cliente no se conocen**: los turnos de la IA ya tienen
+  ritmo (`services/turnPacing.js`, `BEATS`, escala `TRIDND_TURN_PACE`), pero si el
+  cliente tarda más en revelar un dado que el hueco entre dos ataques, las tiradas se
+  pisan.
+
+Tres fases, en este orden, antes del HITO: **4b** hace que cada tirada sea un momento;
+**4c** pone los dados en manos del jugador; **4d** le da voz al DM como narrador.
+
+---
+
+## Fase 4b — La tirada como momento
+
+**Objetivo**: toda tirada que te afecta se ve rodar, se revela por pasos y se lee sobre el
+tablero, al ritmo que cada uno elija.
+
+**Qué entra**
+
+- **Todas tus tiradas ruedan.** Ataque y daño del tablero (PJ y monstruo del DM), ficha
+  rápida, conjuros, oportunidad y concentración pasan por la bandeja. Las tiradas del
+  cliente, llamando a `submitRoll` (o a un punto único equivalente). Las del servidor,
+  dejando de descartar las propias en `incoming.js` cuando el mensaje es la
+  **respuesta** a una acción tuya que no rodó en local. Regla: **cada tirada rueda una
+  sola vez en cada pantalla**. Las del DM con la IA ruedan para el DM igual que para los
+  jugadores. Las tiradas ocultas siguen sin llegar a quien no debe verlas: el cliente no
+  vuelve a decidir la privacidad.
+- **Revelado por pasos, nunca antes que el dado.** Los paneles muestran «Rodando…» hasta
+  el `onSettled` de la bandeja. Después, en secuencia: número natural → «+5 = 19» →
+  «contra CA 15» → sello **¡IMPACTA! / FALLA / ¡CRÍTICO! / PIFIA**. El daño igual:
+  dados → total → ajuste por resistencia o inmunidad, si lo hay. El resultado ya lo
+  conoce el cliente: es **presentación**, no se retrasa ninguna regla ni ninguna
+  respuesta del servidor. La red de seguridad de `DiceOverlay.jsx` (enseñar pasado el
+  tiempo máximo si la bandeja no carga) se mantiene.
+- **Margen visible tras resolver**: «impacta por 1», «falla por los pelos» (a 1 o 2),
+  «supera la CD por 10». Solo cuando el objetivo (CA/CD) ya se ha revelado en esa
+  tirada; nunca adelanta la CA de una criatura.
+- **Motivos de ventaja o desventaja antes de tirar.** En el panel de ataque, junto a
+  los botones: «Ventaja: objetivo derribado», «Desventaja: objetivo esquivando». Salen
+  de `domain/combatRules.js` (ya los calcula). Cuando caen los dos d20, el descartado
+  se atenúa y el motivo sigue visible.
+- **Resultado sobre el tablero.** Texto flotante sobre el token afectado: «−8», «FALLA»,
+  «¡CRÍTICO!», «+6» de curación, con color por tipo. Vive en un componente de
+  react-three-fiber que **solo lee** un evento del store (regla global 9) y se ancla a
+  la posición del token. Un token fuera de la vista filtrada del jugador no muestra
+  nada.
+- **Los paneles dejan ver.** Mientras rueda una tirada, el panel de ataque o de conjuro
+  se pliega a una tira pequeña y la ficha rápida se aparta a un lateral (o se minimiza
+  en móvil) sin cerrarse. Al terminar el revelado vuelven solos. El objetivo del ataque
+  no puede quedar tapado a 390 px ni en escritorio.
+- **Ritmo configurable por usuario: cinemático / normal / rápido.** Escala el reposo de
+  la bandeja (hoy `REPOSO_MS` 850 y `REPOSO_DRAMATICO_MS` 1500 en `DiceTray.jsx`), las
+  pausas del revelado y el texto flotante. Es preferencia de cada visor (se guarda en su
+  navegador, con `try/catch`), por defecto «normal». `prefers-reduced-motion` equivale a
+  «rápido» sin bandeja. Selector en el tirador de dados y en `/configuracion/sonidos`
+  (que pasa a llamarse «Sonido y ritmo»).
+- **Cola de revelados.** Las tiradas que llegan mientras otra se revela esperan su turno
+  en una cola del cliente y no se pisan. Si la cola acumula más de dos, las siguientes se
+  revelan al ritmo «rápido» hasta ponerse al día: nunca se va más de unos segundos por
+  detrás de la mesa. Los `BEATS` de `turnPacing.js` (`entreAtaques`, `trasAtaque`) se
+  ajustan para que, a ritmo «normal», un ataque de la IA quepa entero en su hueco.
+- **Críticos con ceremonia**: medio segundo de cámara lenta en la bandeja, sello dorado y
+  un leve empujón de cámara hacia el objetivo si está en tu vista. La pifia, sello rojo
+  apagado. Todo con `prefers-reduced-motion`.
+
+**Qué queda fuera**: lanzar el dado a mano (arrastrar o agitar; ver 4c), cambios de
+reglas, cualquier dato nuevo hacia el jugador, animaciones de token (embestida y
+esquiva: Fase 3).
+
+**Código que probablemente cambia**: `components/DiceOverlay.jsx`,
+`features/dice-tray/` (componente, `incoming.js` y una cola nueva en `lib/`),
+`store/dice.js`, `AttackPanel.jsx`, `MonsterAttackPanel.jsx`, `CharacterQuickView.jsx`,
+el panel de conjuros, `TacticalMap.jsx` (colocación de los paneles), un componente nuevo
+de texto flotante en `features/tactical-map/components/`, `services/turnPacing.js`,
+`pages/SoundSettingsPage.jsx`.
+
+**Criterios de aceptación**
+
+1. Prueba de dominio de la cola: tres tiradas que llegan casi a la vez se revelan en
+   orden, sin solaparse, y la tercera acelera si la cola pasa de dos.
+2. Prueba de dominio: una tirada propia rueda exactamente una vez, tanto si nace en el
+   cliente como si la hace el servidor en respuesta a tu acción.
+3. En el navegador: un ataque desde el tablero enseña los dados, «Rodando…», el revelado
+   por pasos y el «−N» sobre el token enemigo. Otro jugador ve lo mismo con el nombre de
+   quien tira.
+4. Un ataque con ventaja muestra el motivo antes de tirar y los dos d20 con el
+   descartado atenuado; tras resolver, «impacta por N».
+5. A 390 px y en escritorio, el token objetivo sigue visible durante todo el revelado.
+6. Los tres ritmos se notan; `prefers-reduced-motion` enseña el resultado directo; la
+   prueba de privacidad de tiradas ocultas sigue en verde.
+
+---
+
+## Fase 4c — Los dados en manos del jugador
+
+**Objetivo**: en los momentos que importan a un PJ (su salvación, su iniciativa, lo que
+pide el DM, su muerte), el jugador pulsa y tira. **El servidor sigue tirando**: el botón
+solo le pide la tirada, y si el jugador tarda, la hace él solo.
+
+**Mecánica común: la tirada pendiente**
+
+- El servidor crea una **tirada pendiente** para un PJ (tipo, característica o
+  habilidad, CD si procede, origen, **fecha límite a 8 s**), la envía **solo** al socket
+  del dueño del PJ y al DM, y espera. Al pulsar «Tirar», el cliente manda
+  `tirada:resolver`; el servidor tira con `serverDice.js` como hoy y continúa. Pasados
+  8 s, el servidor tira solo y lo dice en el registro («tirada automática»). **Ninguna
+  resolución queda colgada**: el plazo lo impone el servidor, no el cliente, y al
+  reiniciarse el servidor las pendientes se resuelven automáticamente.
+- Preferencia por jugador «Tirar mis salvaciones automáticamente» (apagada por defecto)
+  para quien prefiera ir rápido: con ella activa, el servidor no espera.
+- Los PNJ y monstruos siguen tirando solos, sin espera.
+- **Panel de pendientes del DM**: «Salvación de DES: Aria ✓ 14 · Bruno ⏳ 5 s · Cira ✓ 8»
+  con «Tirar ya» por fila y para todos.
+- Todas las tiradas de esta fase pasan por la bandeja y el revelado de la 4b.
+- **Agitar para tirar** (opcional, solo móvil): con una tirada pendiente en pantalla,
+  agitar el teléfono equivale a pulsar «Tirar». Detrás de un permiso explícito del
+  navegador y apagado por defecto.
+
+**Qué entra**
+
+- **Salvaciones propias**: las de un PJ contra un conjuro (`combate:lanzar-conjuro`) y
+  contra una zona de peligro o fluido (`services/fluidEffects.js`,
+  `services/hazardZones.js`). Un conjuro de área con varios objetivos espera a todas
+  sus pendientes y se resuelve una sola vez con todos los resultados.
+- **Salvación de concentración** (`combat:concentration-save`): pendiente para el dueño
+  del PJ.
+- **Iniciativa como ritual**: al empezar el combate (`combat:start` con tirada,
+  `combat:add-party`), cada PJ recibe su pendiente de iniciativa. La tira de iniciativa
+  aparece y los retratos se ordenan con animación según llegan los resultados. Los
+  enemigos tiran solos, como hoy (con su desglose oculto). La iniciativa manual del DM se
+  respeta.
+- **Salvación de muerte con tensión**: ya la pulsa el jugador (`combat:death-save`).
+  Ahora, a pantalla oscurecida, con latido si hay sonido y los tres huecos de éxito y
+  fallo grandes, y el resultado revelado por pasos. Un 20 natural, cerrando con
+  ceremonia.
+- **Tirada pedida por el DM**: el DM elige tipo (prueba de característica, habilidad o
+  salvación), objetivo (uno, varios o todo el grupo), CD opcional y si **revela la CD**
+  al terminar. Cada PJ recibe su pendiente; **los resultados los ve toda la mesa**
+  (decisión de Juan). La CD, solo si el DM la revela.
+- **Tirada de grupo** (SRD 5.1, «Group Checks»): variante de la anterior. Todos tiran, y
+  si **al menos la mitad** supera la CD, el grupo la supera. El resultado colectivo se
+  revela al final, después de todos los dados.
+- **Trampas con susto**: al disparar una trampa con salvación, suena un «¡Clic!», el
+  tablero se oscurece un instante y salta la salvación pendiente de cada PJ afectado. La
+  consecuencia se aplica cuando llegan todas.
+- **Acción Ayudar** (SRD 5.1, «Help»): nueva acción especial junto a Correr, Esquivar y
+  Destrabarse (`turnEconomy.js`, `combat:special-action`). Gasta la acción y da
+  **ventaja** a un aliado en su siguiente prueba de característica para esa tarea, o en
+  su siguiente tirada de ataque contra una criatura a 5 pies o menos de quien ayuda,
+  antes del siguiente turno de quien ayuda. El servidor guarda la ayuda en el
+  combatiente, la consume al usarla y la vence al empezar el turno de quien ayudó. El
+  motivo aparece en la 4b («Ventaja: te ayuda Bruno»). Tecla de atajo junto a las demás
+  (`domain/shortcuts.js`).
+
+**Qué queda fuera**: tirar con dados físicos e introducir el número (modo presencial,
+backlog), reacciones a ataques enemigos (conjuro *Escudo* y similares), inspiración
+(backlog), salvaciones del DM por sus monstruos con botón.
+
+**Código que probablemente cambia**: `server/src/sockets.js` (pendientes, eventos nuevos
+`tirada:pedir` / `tirada:resolver`, conjuros, concentración, iniciativa),
+un servicio nuevo `services/pendingRolls.js` (plazos, puro y probado sin sockets),
+`services/fluidEffects.js`, `services/hazardZones.js`, `services/turnEconomy.js` (Ayudar),
+`db.js` (migración si la ayuda o las pendientes se persisten), `store/socket.js`,
+componentes nuevos del aviso de tirada y del panel del DM, `InitiativeStrip.jsx`, la vista
+de salvación de muerte.
+
+**Criterios de aceptación**
+
+1. Prueba de servidor: una *bola de fuego* sobre dos PJ y un goblin crea dos pendientes y
+   ninguna para el goblin; si un PJ no tira en 8 s, el servidor tira por él y el conjuro
+   se resuelve una sola vez con los tres resultados.
+2. Prueba de servidor: una pendiente solo llega al dueño del PJ y al DM; `tirada:resolver`
+   de otro usuario sobre una pendiente ajena se rechaza.
+3. Prueba de servidor: una tirada de grupo de cuatro PJ con dos éxitos se supera; con uno,
+   no.
+4. Prueba de servidor: Ayudar da ventaja al siguiente ataque del aliado contra una
+   criatura adyacente a quien ayuda, se consume al usarla y vence al empezar el turno de
+   quien ayudó.
+5. Prueba de servidor: con «tirar automáticamente» activo, no se crea espera.
+6. En el navegador: al empezar un combate, cada jugador tira su iniciativa y la tira se
+   ordena al llegar; el DM ve el panel de pendientes y «Tirar ya» funciona.
+
+---
+
+## Fase 4d — El DM como narrador
+
+**Objetivo**: lo que el DM cuenta y cómo acaba una pelea se ve en la mesa como en un
+videojuego, en vez de perderse en el chat.
+
+**Qué entra**
+
+- **Narración en pantalla**: el DM marca un mensaje como narración (botón en el cajón o
+  comando `/n`) y aparece a todos como **subtítulo** sobre el tablero, con tipografía de
+  la casa, durante un tiempo proporcional a su longitud (y ritmo de la 4b). Además queda
+  en el registro como entrada propia.
+- **«¿Cómo quieres hacerlo?»**: cuando un PJ deja a 0 PG a un enemigo, a su jugador le
+  salta un aviso para describir el golpe final en una frase (opcional, se puede cerrar).
+  La frase se muestra a todos como subtítulo y queda en el registro. No toca ninguna
+  regla.
+- **Presentación de jefe**: la **primera vez** que un enemigo marcado como jefe por el DM
+  entra en la vista filtrada de los jugadores, aparece un cartel a pantalla completa con
+  su nombre, un título opcional y su imagen o retrato, y sonido si lo hay. El DM lo activa
+  por criatura (apagado por defecto). Si el jugador no lo ve, no salta (se decide en el
+  servidor, con el mismo filtrado de visión que el tablero).
+- **Nombre oculto hasta conocerlo**: el DM puede dar a un enemigo un **nombre visible**
+  («Criatura escamosa») distinto del real, y revelarlo cuando quiera. **El servidor manda
+  al jugador solo el nombre visible** (también en tiradas, registro, iniciativa y diario
+  de bestiario) hasta la revelación. Por defecto el nombre visible es el real.
+- **Estado de salud del enemigo con palabras**: el jugador ve *ileso* (PG al máximo),
+  *herido* (por encima de la mitad), *malherido* (la mitad o menos), *a punto de caer*
+  (un cuarto o menos) y *caído*. El servidor calcula la etiqueta y **manda solo la
+  etiqueta**, nunca los PG. Umbrales en un módulo de dominio con prueba. Se ve en el
+  tooltip del combatiente, en la tira de iniciativa y tras el texto flotante de daño.
+  No es una regla del SRD, es presentación: no la usa ninguna regla.
+
+**Qué queda fuera**: narración leída en voz alta, textos preparados por sala que saltan
+solos al entrar (motor de disparadores, §4.14), música.
+
+**Código que probablemente cambia**: `server/src/sockets.js` (tipo de mensaje de
+narración, aviso del golpe final, serialización del nombre visible), `db.js` (migración:
+nombre visible, marca de jefe con presentación, «ya presentado»), `GameDrawer.jsx`, un
+componente de subtítulos y otro de cartel en `features/tactical-map/components/`,
+`BestiaryJournalPanel.jsx`, `InitiativeStrip.jsx`.
+
+**Criterios de aceptación**
+
+1. Prueba de privacidad: con el nombre oculto, ningún evento que llegue al socket del
+   jugador (combatientes, tiradas, mensajes, bestiario) contiene el nombre real; tras
+   revelarlo, sí.
+2. Prueba de servidor: la presentación de jefe se emite una sola vez por criatura y solo
+   a quien la ve.
+3. En el navegador: una narración del DM se ve como subtítulo en las dos pantallas y
+   queda en el registro; al derrotar a un enemigo aparece el aviso del golpe final y la
+   frase llega a todos.
+4. Prueba de servidor: la etiqueta de salud cambia en los umbrales y el jugador nunca
+   recibe `hpCurrent`/`hpMax` de un enemigo (la prueba de privacidad actual sigue).
+   *Nota de implementación (24-sep-2026): el repositorio ya enviaba al jugador los PG de
+   los enemigos a la vista en el mapa, para su barra de vida (decisión de producto en
+   `services/mapLibrary.js`). Por la regla 1, manda el repositorio: la barra se queda y
+   el criterio se cumple sobre el estado de combate, que es donde no viajan.*
 
 ---
 
 ## HITO — Jugar con el grupo (Fase 14 del ROADMAP)
 
-No es código. Con las fases 1–4 desplegadas, Juan juega **una sesión real con el grupo**
+No es código. Con las fases 1–4d desplegadas, Juan juega **una sesión real con el grupo**
 y recoge fricciones en una lista corta: qué no se entendió, qué se buscó y no se encontró,
 qué se sintió lento o plano. Esa lista **corrige el orden y el contenido de las fases 5 y
 6** antes de empezarlas. Astra la convierte en criterios concretos.
@@ -288,6 +590,12 @@ regla. La reforma anterior ordenó las zonas; esta les da respuesta, icono y est
 - **Tira de iniciativa**: retratos con el activo grande, el siguiente resaltado y las
   condiciones como iconos con tooltip.
 - **Banner de turno** con ronda y cuenta atrás visual de lo que queda por gastar.
+- **Aviso al terminar turno con recursos sin gastar** (añadido el 23-sep-2026): «Te quedan
+  la acción adicional y 15 pies. ¿Terminar turno?», con «no volver a preguntar» por
+  usuario.
+- **Objetivos a tu alcance** (añadido el 23-sep-2026): con un arma o conjuro
+  seleccionado, los enemigos que puedes atacar desde donde estás (alcance y línea de
+  visión, de `domain/combatGeometry.js`) se resaltan y el resto se atenúa.
 - Verificación a los mismos ocho tamaños y dos roles que la reforma anterior.
 
 **Qué queda fuera**: reglas, datos nuevos hacia el jugador, iconos generados por IA (SVG
@@ -505,5 +813,5 @@ desmontar (auditoría de disposal).
 Fases 12 (luz dinámica), 12.5 (minimapa), 13 (Spotify), 22 (jefes N×N), 27 (homebrew
 elemental), 10 (modo presencial); balance dinámico, táctica avanzada y ciclo de reintento
 del director automático; economía, tiendas, misiones, diario, objetos mágicos, XP,
-multiclase, dotes; G2–G6 de la miniatura. Aportan realismo, pero primero se pule el
-gameplay.
+multiclase, dotes; G2–G6 de la miniatura; inspiración y tirar con dados físicos (anotados
+en el backlog el 23-sep-2026). Aportan realismo, pero primero se pule el gameplay.

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
 import { buildInitiativeStrip } from '../domain/initiativeStrip.js';
 import { conditionLabel } from '../domain/conditions.js';
 import InitiativeOrder from './InitiativeOrder.jsx';
@@ -34,7 +35,9 @@ function portraitRing({ active, mine, kind, state }) {
 
 /** Resumen para el `title`: lo mismo que se pinta, pero en palabras. */
 function entryTitle(entry) {
-  const parts = [`${entry.name} · Ini ${entry.initiative ?? '—'}`];
+  const parts = [`${entry.name} · Ini ${entry.initiativePending ? 'tirando…' : entry.initiative ?? '—'}`];
+  if (entry.helpFrom) parts.push(`Le ayuda ${entry.helpFrom}`);
+  if (entry.healthLabel && entry.kind !== 'pj') parts.push(entry.healthLabel);
   if (entry.hp) parts.push(`${entry.hp.current}/${entry.hp.max} PG${entry.hp.temp > 0 ? ` +${entry.hp.temp} temp.` : ''}`);
   if (entry.state === 'dead') parts.push('Muerto');
   if (entry.state === 'dying') parts.push('Agonizando');
@@ -65,9 +68,14 @@ function InitiativeCard({ entry, selected, onSelect }) {
   const dead = entry.state === 'dead';
   const visibleConditions = entry.conditions.slice(0, 3);
   const extraConditions = entry.conditions.length - visibleConditions.length;
+  const reduceMotion = useReducedMotion();
 
   return (
-    <button
+    // `layout`: cuando llegan las iniciativas del ritual (Fase 4c), los
+    // retratos se deslizan a su sitio en vez de saltar
+    <motion.button
+      layout={reduceMotion ? false : 'position'}
+      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
       type="button"
       disabled={!entry.tokenId}
       aria-current={entry.active ? 'true' : undefined}
@@ -104,9 +112,14 @@ function InitiativeCard({ entry, selected, onSelect }) {
           </span>
         )}
 
-        {/* Iniciativa: el número siempre ha sido público, enemigos incluidos */}
-        <span className="absolute -bottom-px left-0 right-0 bg-night-950/85 text-center font-mono text-[0.5rem] leading-[0.7rem] text-bone/70">
-          {entry.initiative ?? '—'}
+        {/* Iniciativa: el número siempre ha sido público, enemigos incluidos.
+            Mientras su jugador no ha tirado (ritual, Fase 4c), un dado latiendo. */}
+        <span
+          className={`absolute -bottom-px left-0 right-0 bg-night-950/85 text-center font-mono text-[0.5rem] leading-[0.7rem] ${
+            entry.initiativePending ? 'animate-pulse text-gold' : 'text-bone/70'
+          }`}
+        >
+          {entry.initiativePending ? '···' : entry.initiative ?? '—'}
         </span>
       </span>
 
@@ -130,6 +143,17 @@ function InitiativeCard({ entry, selected, onSelect }) {
         <span className="h-1 w-full" />
       )}
 
+      {/* Fase 4d: el estado de un enemigo con palabras, sin números */}
+      {entry.healthLabel && entry.kind !== 'pj' && entry.state !== 'dead' && (
+        <span
+          className={`w-full truncate text-center text-[0.5rem] leading-none ${
+            entry.healthLabel === 'ileso' ? 'text-bone/45' : 'text-blood/75'
+          }`}
+        >
+          {entry.healthLabel}
+        </span>
+      )}
+
       <span
         className={`tactical-initiative-name w-full truncate text-center text-[0.55rem] leading-tight ${
           entry.active ? 'text-gold' : dead ? 'text-bone/30 line-through' : 'text-bone/60'
@@ -138,11 +162,12 @@ function InitiativeCard({ entry, selected, onSelect }) {
         {entry.name}
       </span>
 
-      {(visibleConditions.length > 0 || entry.state === 'stable' || entry.dashed || entry.stance) && (
+      {(visibleConditions.length > 0 || entry.state === 'stable' || entry.dashed || entry.stance || entry.helpFrom) && (
         <span aria-hidden="true" className="flex items-center gap-[2px] text-[0.55rem] leading-none">
           {entry.state === 'stable' && <span className="text-moss">✚</span>}
           {entry.dashed && <span className="text-moss">»</span>}
           {entry.stance && <span className="text-gold/80">{entry.stance === 'esquivar' ? '◈' : '↔'}</span>}
+          {entry.helpFrom && <span className="text-moss">Ayu</span>}
           {visibleConditions.map((cond) => (
             <span key={cond} className="tactical-condition text-blood/90">
               {conditionLabel(cond).slice(0, 3)}
@@ -151,7 +176,7 @@ function InitiativeCard({ entry, selected, onSelect }) {
           {extraConditions > 0 && <span className="text-blood/70">+{extraConditions}</span>}
         </span>
       )}
-    </button>
+    </motion.button>
   );
 }
 

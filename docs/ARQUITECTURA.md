@@ -334,3 +334,15 @@ completo y rebanada en **[MINIATURA-3D.md](MINIATURA-3D.md)** (rebanada vertical
   libre, porque los rasgos narrativos no tienen motor de efectos.
 - **Autoridad de PG al finalizar**: el asistente anterior calcula y envía los PG iniciales;
   conservar esa ruta evita cambiar reglas en la 5b. Centralizar y validar ese cálculo en servidor queda para una fase propia.
+
+### 4.17 Ideas de mesa aparcadas (23-sep-2026)
+Salieron al diseñar las fases 4b–4d del programa de gameplay; Juan decidió dejarlas fuera.
+
+- **Inspiración** (SRD 5.1): el DM la concede por interpretar bien y el jugador la gasta
+  para tener ventaja en una tirada. Regla oficial, no homebrew: campo booleano en el PJ que
+  solo escribe el DM, consumo en servidor y motivo «Ventaja: inspiración» en el revelado de
+  la 4b. Premia el rol; entra cuando se abra superficie nueva.
+- **Tirar con dados físicos**: el jugador escribe el número que le ha salido en la mesa real
+  y queda registrado como «dado físico», marcado así ante la mesa. Es del modo presencial
+  (Fase 10 del ROADMAP, aparcada). Rompe la autoridad del servidor sobre el d20, así que
+  necesita decisión explícita (capacidad por campaña, apagada por defecto).

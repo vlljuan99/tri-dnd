@@ -1443,6 +1443,63 @@ export const migrations = [
   ALTER TABLE campaigns ADD COLUMN clock_enabled INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE campaigns ADD COLUMN day_minutes INTEGER NOT NULL DEFAULT 480;
   `,
+
+  // v74 — Fase 4c del programa de gameplay: los dados en manos del jugador.
+  //
+  // `users.auto_rolls`: preferencia de cada jugador. Con ella activa, el
+  // servidor no espera a que pulse «Tirar» en sus salvaciones, iniciativa ni
+  // tiradas pedidas: las tira al instante como antes. Nace apagada.
+  //
+  // `combatants.help_from_id`: la acción Ayudar (SRD 5.1). Quien ayuda deja su
+  // id en el combatiente ayudado; la ventaja se consume al usarla y vence al
+  // empezar el siguiente turno de quien ayudó. Sin FK a propósito: el tracker
+  // borra combatientes a menudo y una ayuda huérfana simplemente no aplica.
+  `
+  ALTER TABLE users ADD COLUMN auto_rolls INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN help_from_id INTEGER;
+  `,
+
+  // v75 — Fase 4d del programa de gameplay: el DM como narrador.
+  //
+  // Nombre oculto hasta conocerlo: mientras `map_tokens.true_name` no es NULL,
+  // el marcador se llama como lo ve la mesa («Criatura escamosa») y su nombre
+  // real vive aquí, que solo se sirve al DM. Guardarlo al revés (el visible
+  // aparte) obligaría a sustituirlo en cada narración del servidor; así, todo
+  // lo que ya narra con `name` usa el visible sin tocarlo, y no hay fuga.
+  //
+  // Presentación de jefe: `boss_intro` (la activa el DM por marcador),
+  // `boss_title` (subtítulo opcional) y `boss_intro_shown` (se presenta una
+  // sola vez, la primera que la mesa lo ve).
+  //
+  // `chat_messages.style`: narración del DM y «¿cómo quieres hacerlo?» son
+  // mensajes con otra presentación (subtítulo sobre el tablero), no otro tipo:
+  // el CHECK de `type` no admite valores nuevos sin reconstruir la tabla.
+  `
+  ALTER TABLE map_tokens ADD COLUMN true_name TEXT;
+  ALTER TABLE map_tokens ADD COLUMN boss_intro INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE map_tokens ADD COLUMN boss_title TEXT;
+  ALTER TABLE map_tokens ADD COLUMN boss_intro_shown INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chat_messages ADD COLUMN style TEXT;
+  `,
+
+  // v76 — Añadidos del 23-sep-2026 a la Fase 4 (registro de juego).
+  //
+  // `roll_reactions`: una reacción por usuario y tirada, de un conjunto
+  // cerrado de emojis. Se borra con el mensaje.
+  //
+  // `chat_messages.recipient_user_id`: susurros. Un susurro es un mensaje
+  // oculto (hidden = 1) con destinatario: lo reciben el autor, el destinatario
+  // y el DM, con el mismo filtrado en servidor que las tiradas ocultas.
+  `
+  CREATE TABLE roll_reactions (
+    message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (message_id, user_id)
+  );
+  ALTER TABLE chat_messages ADD COLUMN recipient_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+  `,
 ];
 
 export function runMigrations() {

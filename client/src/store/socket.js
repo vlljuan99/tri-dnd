@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import { toastInfo } from './toast.js';
 import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
+import { useReveal } from './reveal.js';
+import { useAuth } from './auth.js';
 
 // Conexión única de Socket.io por pestaña. Se une a la sala de una campaña
 // (mesa de juego o ficha vinculada) y mantiene chat, presencia y estado en vivo.
@@ -12,6 +14,16 @@ let socket = null;
 // actualización reprograma su propia limpieza.
 const AIM_TTL_MS = 45000;
 const aimTimers = new Map();
+
+// Fase 4b: lo que llega detrás de una tirada espera a que su dado caiga. Cada
+// evento se ata a la última tirada aún sin revelar (ver store/reveal.js) y se
+// suelta con su veredicto; sin tiradas pendientes, se aplica al instante. Si
+// entretanto se cambia de sala, lo retenido de la anterior se descarta.
+function afterDice(campaignId, fn) {
+  useReveal.getState().retener(() => {
+    if (useRoom.getState().campaignId === campaignId) fn();
+  });
+}
 
 function clearAimTimers() {
   for (const timer of aimTimers.values()) clearTimeout(timer);
@@ -55,6 +67,23 @@ export const useRoom = create((set, get) => ({
   // para que quien esté en la mesa vea el aviso sin recargar.
   grantedLevel: null,
   grantedLevelVersion: 0,
+  // Fase 4c: tiradas que esperan a que alguien pulse «Tirar». El jugador
+  // recibe solo las suyas; el DM, todas (su panel de pendientes).
+  pendingRolls: [],
+  // Resultados recién llegados de esas tiradas (solo el DM ve total y éxito):
+  // el panel los enseña unos segundos junto a las que aún faltan.
+  pendingResults: [],
+  // Una trampa acaba de saltar: la mesa se oscurece y suena el «¡clic!»
+  trapAlert: null,
+  // Fase 4d: el subtítulo en pantalla (narración del DM o golpe final), la
+  // petición de «¿cómo quieres hacerlo?» y la presentación de un jefe
+  subtitle: null,
+  finisherRequest: null,
+  bossIntro: null,
+  // Fase 4 (añadido): el susurro que te acaba de llegar (nota secreta sobre
+  // el tablero) y la tarjeta de resumen al acabar un combate
+  whisperNote: null,
+  combatSummary: null,
 
   ensureSocket() {
     if (socket) return socket;
@@ -73,6 +102,7 @@ export const useRoom = create((set, get) => ({
               campaignName: resp.campaignName,
               online: resp.members,
               combat: resp.combat ?? s.combat,
+              pendingRolls: resp.pendingRolls ?? [],
               mapVersion: s.mapVersion + 1,
             }));
           }
@@ -81,7 +111,29 @@ export const useRoom = create((set, get) => ({
     });
     socket.on('disconnect', () => set({ connected: false, online: [] }));
     socket.on('chat:new', (message) => {
-      set((s) => ({ messages: [...s.messages.slice(-199), message] }));
+      // Una tirada entra en la cola de revelado (rueda en esta pantalla una
+      // sola vez) y su línea del registro espera al dado como todo lo demás.
+      useReveal.getState().recibir(message);
+      afterDice(get().campaignId, () => {
+        set((s) => ({
+          messages: [...s.messages.slice(-199), message],
+          // Un susurro para ti se lee además como nota secreta sobre el tablero
+          ...(message.recipient && Number(message.recipient.id) === Number(useAuth.getState().user?.id)
+            ? { whisperNote: { id: message.id, text: message.body, from: message.author?.name ?? '—' } }
+            : {}),
+          // La narración y el golpe final también se leen sobre el tablero
+          ...(message.style === 'narracion' || message.style === 'golpe-final'
+            ? {
+                subtitle: {
+                  id: message.id,
+                  text: message.body,
+                  author: message.author?.name ?? null,
+                  style: message.style,
+                },
+              }
+            : {}),
+        }));
+      });
     });
     socket.on('room:members', (online) => set({ online }));
     socket.on('campaign:removed', ({ campaignId }) => {
@@ -98,17 +150,21 @@ export const useRoom = create((set, get) => ({
       });
     });
     socket.on('table:live', ({ isLive }) => set({ isLive }));
-    socket.on('combat:state', (combat) => set({ combat }));
+    // El estado de combate (vida, turno, recursos) también espera: si no, la
+    // barra de vida bajaba antes de que cayera el dado del daño.
+    socket.on('combat:state', (combat) => afterDice(get().campaignId, () => set({ combat })));
     socket.on('combat:condition-expired', ({ name, condition }) => {
-      toastInfo(`${name}: termina ${conditionLabel(condition)}.`);
+      afterDice(get().campaignId, () => toastInfo(`${name}: termina ${conditionLabel(condition)}.`));
     });
     socket.on('combat:visual', (visual) => {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const entry = { id, createdAt: Date.now(), ...visual };
-      set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
-      setTimeout(() => {
-        set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
-      }, 1800);
+      afterDice(get().campaignId, () => {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const entry = { id, createdAt: Date.now(), ...visual };
+        set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
+        setTimeout(() => {
+          set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
+        }, 1800);
+      });
     });
     // Alguien de la mesa está apuntando un conjuro: se guarda una sola mira
     // por lanzador y se sustituye con cada movimiento de la plantilla.
@@ -143,7 +199,55 @@ export const useRoom = create((set, get) => ({
       set((state) => ({ grantedLevel, grantedLevelVersion: state.grantedLevelVersion + 1 }))
     );
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
-    socket.on('mapa:actualizado', () => set((s) => ({ mapVersion: s.mapVersion + 1 })));
+    // Tiradas pendientes (Fase 4c). El aviso no pasa por la cola de dados: es
+    // una petición de gesto, no un resultado, y llega antes que cualquier dado.
+    socket.on('tirada:pendiente', (pending) => {
+      if (Number(pending?.campaignId) !== Number(get().campaignId)) return;
+      set((s) => ({ pendingRolls: [...s.pendingRolls.filter((item) => item.id !== pending.id), pending] }));
+    });
+    socket.on('tirada:resuelta', (resolved) => {
+      set((s) => ({
+        pendingRolls: s.pendingRolls.filter((item) => item.id !== resolved.id),
+        pendingResults:
+          resolved.total != null
+            ? [...s.pendingResults.filter((item) => item.id !== resolved.id), { ...resolved, at: Date.now() }].slice(-12)
+            : s.pendingResults,
+      }));
+      if (resolved.total != null) {
+        setTimeout(() => {
+          set((s) => ({ pendingResults: s.pendingResults.filter((item) => item.id !== resolved.id) }));
+        }, 9000);
+      }
+    });
+    // «¿Cómo quieres hacerlo?» y presentación de jefe (Fase 4d): después del
+    // dado que los provoca, nunca antes
+    socket.on('golpe-final:pedir', (request) => {
+      if (Number(request?.campaignId) !== Number(get().campaignId)) return;
+      afterDice(get().campaignId, () => set({ finisherRequest: { ...request, at: Date.now() } }));
+    });
+    // Reacciones a las tiradas (Fase 4, añadido): el recuento viaja entero
+    socket.on('reaccion:actualizada', ({ messageId, reactions }) => {
+      set((s) => ({
+        messages: s.messages.map((message) => (message.id === messageId ? { ...message, reactions } : message)),
+      }));
+    });
+    // Resumen de combate (Fase 4, añadido): cuando se revela el último golpe
+    socket.on('combate:resumen', (summary) => {
+      afterDice(get().campaignId, () => set({ combatSummary: { ...summary, key: Date.now() } }));
+    });
+    socket.on('jefe:presentacion', (boss) => {
+      afterDice(get().campaignId, () => set({ bossIntro: { ...boss, key: Date.now() } }));
+    });
+    socket.on('trampa:activada', (trap) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      set({ trapAlert: { id, ...trap } });
+      setTimeout(() => {
+        set((s) => ({ trapAlert: s.trapAlert?.id === id ? null : s.trapAlert }));
+      }, 1600);
+    });
+    socket.on('mapa:actualizado', () =>
+      afterDice(get().campaignId, () => set((s) => ({ mapVersion: s.mapVersion + 1 })))
+    );
     socket.on('mundo:actualizado', () => set((s) => ({ worldVersion: s.worldVersion + 1 })));
     socket.on('mapa:ping', (ping) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -177,7 +281,8 @@ export const useRoom = create((set, get) => ({
     clearAimTimers();
     set({
       campaignId, messages: [], online: [], joinError: null, removedCampaignId: null,
-      worldTravel: null, spellAims: [], spellFx: [],
+      worldTravel: null, spellAims: [], spellFx: [], pendingRolls: [], pendingResults: [], trapAlert: null,
+      subtitle: null, finisherRequest: null, bossIntro: null, whisperNote: null, combatSummary: null,
     });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
@@ -191,6 +296,7 @@ export const useRoom = create((set, get) => ({
         messages: resp.messages,
         online: resp.members,
         combat: resp.combat ?? { active: false, round: 1, turnId: null, enemyAiEnabled: false, combatants: [], opportunities: [] },
+        pendingRolls: resp.pendingRolls ?? [],
       });
     });
   },
@@ -210,13 +316,66 @@ export const useRoom = create((set, get) => ({
       worldTravel: null,
       spellAims: [],
       spellFx: [],
+      pendingRolls: [],
+      pendingResults: [],
+      trapAlert: null,
+      subtitle: null,
+      finisherRequest: null,
+      bossIntro: null,
+      whisperNote: null,
+      combatSummary: null,
     });
   },
 
-  sendChat(text, references = []) {
+  /**
+   * `style: 'narracion'` (solo DM, Fase 4d) sale como subtítulo en la mesa.
+   * `whisper: true` (Fase 4, añadido): el texto empieza por el nombre del
+   * destinatario, que resuelve el servidor.
+   */
+  sendChat(text, references = [], { style = null, whisper = false } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
-    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references }, resolve));
+    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references, style, whisper }, resolve));
+  },
+
+  /** Reacciona a una tirada (o quita tu reacción con `null`). */
+  reactToMessage(messageId, emoji) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('reaccion:poner', { campaignId, messageId, emoji }, resolve));
+  },
+
+  clearWhisperNote() {
+    set({ whisperNote: null });
+  },
+
+  clearCombatSummary() {
+    set({ combatSummary: null });
+  },
+
+  // --- El DM como narrador (Fase 4d) ---------------------------------
+
+  /** La frase del golpe final; vacía, se descarta sin publicar nada. */
+  sendFinisher(text) {
+    const { campaignId } = get();
+    set({ finisherRequest: null });
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('golpe-final:narrar', { campaignId, text }, resolve));
+  },
+
+  /** El DM revela el nombre real de un enemigo con nombre oculto. */
+  revealName(tokenId) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('combat:revelar-nombre', { campaignId, tokenId }, resolve));
+  },
+
+  clearSubtitle(id) {
+    set((s) => (s.subtitle?.id === id ? { subtitle: null } : {}));
+  },
+
+  clearBossIntro() {
+    set({ bossIntro: null });
   },
 
   /** Comparte una entrada SRD en una mesa en vivo sin cambiar la sala actual. */
@@ -447,13 +606,39 @@ export const useRoom = create((set, get) => ({
     );
   },
 
-  /** Acción especial del turno: 'correr' | 'esquivar' | 'destrabarse' (gasta la acción). */
-  specialAction(combatantId, kind) {
+  /**
+   * Acción especial del turno: 'correr' | 'esquivar' | 'destrabarse' |
+   * 'ayudar' (gasta la acción). Ayudar necesita a quién: `{ targetId }`.
+   */
+  specialAction(combatantId, kind, { targetId = null } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
-      socket.emit('combat:special-action', { campaignId, combatantId, kind }, resolve)
+      socket.emit('combat:special-action', { campaignId, combatantId, kind, targetId }, resolve)
     );
+  },
+
+  // --- Tiradas pendientes y pedidas (Fase 4c) ------------------------
+
+  /** Pulsa «Tirar» en una tirada pendiente (la tuya, o cualquiera si eres DM). */
+  resolvePendingRoll(id) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:resolver', { campaignId, id }, resolve));
+  },
+
+  /** El DM tira ya por todas las pendientes (o por las indicadas). */
+  forcePendingRolls(ids = null) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:forzar', { campaignId, ids }, resolve));
+  },
+
+  /** El DM pide una tirada (prueba, habilidad o salvación) a unos PJ o a todos. */
+  requestRoll(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:pedir', { campaignId, ...payload }, resolve));
   },
 
   /** Pone/quita una condición de combate a un combatiente (solo DM). */

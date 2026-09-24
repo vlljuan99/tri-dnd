@@ -2,6 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SFX_GROUPS, eventsOfGroup } from '../lib/sfx/catalog.js';
 import { fetchSounds, resetSound, uploadSound } from '../lib/sfx/api.js';
 import { getSettings, preview, setOverrides, setSettings } from '../lib/sfx/index.js';
+import { useReveal } from '../store/reveal.js';
+import { ETIQUETAS_RITMO, RITMOS } from '../features/dice-tray/lib/reveal.js';
+import { agitarActivado, guardarAgitar, pedirPermisoMovimiento } from '../features/dice-tray/lib/shake.js';
+import { useAuth } from '../store/auth.js';
+import { activarNotificaciones, notificacionesActivadas } from '../lib/attention.js';
+
+// Qué supone cada ritmo, para elegir sin tener que probarlo en mitad de una
+// partida (Fase 4b).
+const DESCRIPCION_RITMO = {
+  cinematico: 'Los dados caen despacio y el veredicto se queda en pantalla.',
+  normal: 'El equilibrio: se ve caer cada dado sin frenar la partida.',
+  rapido: 'Para quien quiere ir al grano: vuelo corto y resultado casi inmediato.',
+};
 
 // Configuración de sonido. Tiene dos mitades muy distintas:
 //
@@ -77,6 +90,33 @@ function Fila({ evento, estado, puedeEditar, onSubir, onRestaurar, ocupado }) {
 }
 
 export default function SoundSettingsPage() {
+  const ritmo = useReveal((s) => s.ritmo);
+  const setRitmo = useReveal((s) => s.setRitmo);
+  // Fase 4c: tus tiradas (salvaciones, iniciativa, lo que pide el DM)
+  const autoRolls = useAuth((s) => Boolean(s.user?.autoRolls));
+  const setAutoRolls = useAuth((s) => s.setAutoRolls);
+  const [agitar, setAgitar] = useState(() => agitarActivado());
+  const [avisoTurno, setAvisoTurno] = useState(() => notificacionesActivadas());
+  const [tiradasError, setTiradasError] = useState('');
+
+  async function cambiarAutoRolls(value) {
+    setTiradasError('');
+    try {
+      await setAutoRolls(value);
+    } catch (e) {
+      setTiradasError(e.message || 'No se pudo guardar la preferencia.');
+    }
+  }
+
+  async function cambiarAgitar(value) {
+    setTiradasError('');
+    if (value && !(await pedirPermisoMovimiento())) {
+      setTiradasError('Este navegador no deja leer el movimiento del móvil.');
+      return;
+    }
+    guardarAgitar(value);
+    setAgitar(value);
+  }
   const [sonidos, setSonidos] = useState(null);
   const [puedeEditar, setPuedeEditar] = useState(false);
   const [error, setError] = useState('');
@@ -136,7 +176,7 @@ export default function SoundSettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
-      <h2 className="font-display text-2xl tracking-wide text-ink">Sonido</h2>
+      <h2 className="font-display text-2xl tracking-wide text-ink">Sonido y ritmo</h2>
       <p className="mt-1 text-sm text-ink/70">
         Los efectos nacen sintetizados, sin ficheros. Cualquiera de ellos se puede sustituir por una
         grabación propia: un dado de verdad sobre madera no hay síntesis que lo imite.
@@ -172,6 +212,85 @@ export default function SoundSettingsPage() {
             Silenciar
           </label>
         </div>
+      </section>
+
+      <section className="mt-4 rounded-sm border border-ink/15 bg-parchment-100/60 p-4">
+        <h3 className="font-display text-sm uppercase tracking-widest text-ink/70">Ritmo de los dados</h3>
+        <p className="mt-0.5 text-xs text-ink/55">
+          Cuánto tardan en caer los dados y en revelarse el resultado en tu pantalla. Es tuyo: cada
+          cual en la mesa elige el suyo. Si pides menos animación al sistema, el resultado sale
+          directo.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Ritmo de los dados">
+          {RITMOS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={ritmo === value}
+              onClick={() => setRitmo(value)}
+              className={`rounded-sm border px-3 py-2 text-left transition-colors ${
+                ritmo === value ? 'border-ember bg-ember/10 text-ink' : 'border-ink/15 text-ink/70 hover:border-ink/35'
+              }`}
+            >
+              <span className="block font-display text-sm tracking-wide">{ETIQUETAS_RITMO[value]}</span>
+              <span className="mt-0.5 block text-xs text-ink/55">{DESCRIPCION_RITMO[value]}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-sm border border-ink/15 bg-parchment-100/60 p-4">
+        <h3 className="font-display text-sm uppercase tracking-widest text-ink/70">Tus tiradas</h3>
+        <p className="mt-0.5 text-xs text-ink/55">
+          En tus salvaciones, tu iniciativa y lo que pide el DM, la mesa espera a que pulses «Tirar»
+          (unos segundos; después se tira sola).
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={autoRolls}
+            onChange={(event) => cambiarAutoRolls(event.target.checked)}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Tirar mis salvaciones automáticamente
+            <span className="block text-xs text-ink/55">Para ir rápido: no se espera a que pulses nada.</span>
+          </span>
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={agitar}
+            onChange={(event) => cambiarAgitar(event.target.checked)}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Agitar el móvil para tirar
+            <span className="block text-xs text-ink/55">Con una tirada pendiente en pantalla, agitarlo equivale a pulsar «Tirar».</span>
+          </span>
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={avisoTurno}
+            onChange={async (event) => {
+              setTiradasError('');
+              const ok = await activarNotificaciones(event.target.checked);
+              setAvisoTurno(ok);
+              if (event.target.checked && !ok) setTiradasError('El navegador no ha dado permiso para avisarte.');
+            }}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Avisarme de mi turno con una notificación
+            <span className="block text-xs text-ink/55">
+              Si la mesa está en otra pestaña (la voz suele ir en Discord). Aunque no la actives, el título de la
+              pestaña parpadea cuando te toca.
+            </span>
+          </span>
+        </label>
+        {tiradasError && <p className="mt-2 text-xs text-ember">{tiradasError}</p>}
       </section>
 
       {error && (

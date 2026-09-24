@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRoom } from '../../../store/socket.js';
+import { useReveal } from '../../../store/reveal.js';
 
 export function ScreenBanner({
   signal,
@@ -10,7 +11,12 @@ export function ScreenBanner({
   children,
 }) {
   const [visible, setVisible] = useState(false);
+  const [shownAt, setShownAt] = useState(0);
   const lastSignalRef = useRef(skipInitial ? signal : null);
+  // Un cartel no pisa a unos dados en pantalla (Fase 4b): «¡Tu turno!» sale
+  // cuando se retira el rótulo del último golpe, no encima de él.
+  const diceOnScreen = useReveal((state) => state.activa != null);
+  const canShow = ready && !diceOnScreen;
 
   useEffect(() => {
     if (signal == null || signal === 0) {
@@ -20,12 +26,20 @@ export function ScreenBanner({
       if (skipInitial) lastSignalRef.current = null;
       return undefined;
     }
-    if (!ready || Object.is(lastSignalRef.current, signal)) return undefined;
+    if (!canShow || Object.is(lastSignalRef.current, signal)) return undefined;
     lastSignalRef.current = signal;
     setVisible(true);
+    setShownAt((count) => count + 1);
+    return undefined;
+  }, [canShow, signal]);
+
+  // El cierre va aparte: si después llegan dados, el cartel ya visible se
+  // cierra a su hora igualmente.
+  useEffect(() => {
+    if (!shownAt) return undefined;
     const timer = setTimeout(() => setVisible(false), duration);
     return () => clearTimeout(timer);
-  }, [duration, ready, signal]);
+  }, [duration, shownAt]);
 
   useEffect(() => {
     if (!visible) return undefined;

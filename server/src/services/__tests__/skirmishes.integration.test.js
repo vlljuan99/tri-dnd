@@ -72,8 +72,8 @@ test('crear un escenario sin DM asigna el PJ y arranca la iniciativa', { timeout
     assert.equal(health.commit, 'sha-prueba');
     assert.equal(health.version, 'prueba');
     assert.equal(health.database.ok, true);
-    // Sube con cada migración nueva (la v73 añade descansos y reloj).
-    assert.equal(health.database.migration, 73);
+    // Sube con cada migración nueva (la v76 añade reacciones y susurros).
+    assert.equal(health.database.migration, 76);
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',

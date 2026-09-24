@@ -25,7 +25,7 @@ export default function ParchmentShell({ children }) {
             <NavLink to="/campanas" className={navClass}>Campañas</NavLink>
             <NavLink to="/personajes" className={navClass}>Personajes</NavLink>
             <NavLink to="/compendio" className={navClass}>Compendio</NavLink>
-            <NavLink to="/configuracion/sonidos" className={navClass}>Sonido</NavLink>
+            <NavLink to="/configuracion/sonidos" className={navClass}>Sonido y ritmo</NavLink>
           </nav>
         </div>
         <div className="flex items-center gap-3">

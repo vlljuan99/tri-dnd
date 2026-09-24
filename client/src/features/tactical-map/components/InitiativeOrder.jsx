@@ -11,6 +11,7 @@ import {
   ConcentrationChip,
   BossActionControls,
 } from './CombatantStatus.jsx';
+import { tirarYEnviar } from '../../../store/reveal.js';
 
 // Barritas de vida y color por proporción (mismo criterio que el resto de la mesa)
 function hpColor(ratio) {
@@ -31,7 +32,7 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
   async function rollDeathSave(c) {
     const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: c.name });
     const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
-    const resp = await room.deathSave(c.id, roll, natural);
+    const resp = await tirarYEnviar(roll, (tirada) => room.deathSave(c.id, tirada, natural), { autor: c.name });
     if (resp?.error) toastError(resp.error);
   }
 
@@ -63,7 +64,22 @@ export default function InitiativeOrder({ combat, isDm, userId, ownerByCharId })
               {active && <span className="text-[0.6rem] text-gold">▶</span>}
               <span className={`min-w-0 flex-1 truncate text-sm ${c.kind === 'enemigo' ? 'text-blood/90' : 'text-bone'}`}>
                 {c.name}
+                {/* Fase 4d: el DM ve quién es de verdad mientras la mesa ve otro nombre */}
+                {isDm && c.trueName && <span className="ml-1 text-[0.65rem] text-bone/45">({c.trueName})</span>}
               </span>
+              {isDm && c.trueName && c.mapTokenId && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const resp = await room.revealName(c.mapTokenId);
+                    if (resp?.error) toastError(resp.error);
+                  }}
+                  title={`La mesa ve «${c.name}». Revelar que es ${c.trueName}`}
+                  className="shrink-0 rounded-sm border border-gold/40 px-1 text-[0.6rem] text-gold hover:bg-gold/10"
+                >
+                  Revelar
+                </button>
+              )}
               <TurnBadges combatant={c} />
               <InitiativeValue combatant={c} />
             </div>

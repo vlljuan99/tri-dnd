@@ -11,7 +11,10 @@ import {
   fluidTypeAtRoomPosition,
   normalizeFluidEffects,
 } from './fluidRules.js';
-import { notifyCombatVisual, postSystemMessage } from './liveMap.js';
+import { notifyCampaignMap, notifyCombat, notifyCombatVisual, postRollMessage, postSystemMessage } from './liveMap.js';
+import { getActiveMapId, touchMap } from './mapLibrary.js';
+import { pendingRolls } from './pendingRolls.js';
+import { rollWithOutcome, saveOutcome } from './rollOutcome.js';
 import { dropLootMarker, rollLoot } from './loot.js';
 import { buildServerD20Roll, buildServerDamageRoll } from './serverDice.js';
 import { armorPenaltyAppliesTo } from '../rules/proficiency.js';
@@ -270,12 +273,74 @@ function fluidTypesAtPositions(mapId, positions) {
   return found;
 }
 
-function resolveTypes(campaignId, target, effects, types, trigger) {
-  let changed = clearFluidConditions(target.combatant);
-  const alreadyDown = target.kind === 'personaje'
+function buildFluidSave(target, type, effect) {
+  return buildServerD20Roll({
+    bonus: environmentalSavingThrowBonus(target, effect.saveAbility),
+    advantage: environmentalSaveAdvantage(target, effect.saveAbility),
+    label: `Salvación contra ${FLUID_LABELS[type]}`,
+    actorName: target.name,
+  });
+}
+
+function isFluidTargetDown(target) {
+  return target.kind === 'personaje'
     ? Number(target.character.hp_current) <= 0
     : Number.isInteger(target.combatant?.hp_current) && target.combatant.hp_current <= 0;
-  if (alreadyDown) return { changed, outcomes: [] };
+}
+
+// Un PJ con jugador tira él mismo sus salvaciones (Fase 4c)
+function isPlayerCharacter(target) {
+  return target.kind === 'personaje' && target.character.kind === 'pj' && target.character.user_id != null;
+}
+
+function resolveTypes(campaignId, target, effects, types, trigger) {
+  const changed = clearFluidConditions(target.combatant);
+  if (isFluidTargetDown(target)) return { changed, outcomes: [] };
+  const savingTypes = types.filter((type) => {
+    const effect = effects[type];
+    return effect?.saveAbility && (effect.damageDice || effect.condition);
+  });
+  if (!savingTypes.length || !isPlayerCharacter(target)) {
+    const result = applyTypes(campaignId, target, effects, types, trigger, null);
+    return { changed: changed || result.changed, outcomes: result.outcomes };
+  }
+
+  // Diferido: el jugador tira cada salvación (u ocho segundos) y después se
+  // aplica todo de una vez, con la vida y la posición ya actualizadas.
+  (async () => {
+    const saves = {};
+    for (const type of savingTypes) {
+      const effect = effects[type];
+      const { roll, cancelada } = await pendingRolls.solicitar({
+        campaignId,
+        characterId: target.character.id,
+        ownerUserId: target.character.user_id,
+        tipo: 'salvacion',
+        etiqueta: `Salvación de ${ABILITY_LABELS[effect.saveAbility]}`,
+        nombre: target.name,
+        caracteristica: effect.saveAbility,
+        cd: effect.saveDc,
+        origen: `${FLUID_LABELS[type][0].toUpperCase()}${FLUID_LABELS[type].slice(1)}`,
+        tirar: () => buildFluidSave(target, type, effect),
+      });
+      if (cancelada) return;
+      saves[type] = roll;
+    }
+    const mapId = getActiveMapId(campaignId);
+    const fresh = mapId
+      ? resolveEnvironmentalTarget(campaignId, mapId, 'personaje', target.character.id)
+      : null;
+    if (!fresh || isFluidTargetDown(fresh)) return;
+    const result = applyTypes(campaignId, fresh, effects, types, trigger, saves);
+    if (mapId) touchMap(mapId);
+    notifyCampaignMap(campaignId);
+    if (result.changed) notifyCombat(campaignId);
+  })().catch((error) => console.error('[fluidos] no se pudo aplicar un efecto diferido:', error));
+  return { changed, outcomes: [], pending: true };
+}
+
+function applyTypes(campaignId, target, effects, types, trigger, saves) {
+  let changed = false;
   const outcomes = [];
   for (const type of types) {
     const effect = effects[type];
@@ -283,14 +348,15 @@ function resolveTypes(campaignId, target, effects, types, trigger) {
     let saved = false;
     let saveText = '';
     if (effect.saveAbility) {
-      const roll = buildServerD20Roll({
-        bonus: environmentalSavingThrowBonus(target, effect.saveAbility),
-        advantage: environmentalSaveAdvantage(target, effect.saveAbility),
-        label: `Salvación contra ${FLUID_LABELS[type]}`,
-        actorName: target.name,
-      });
+      const roll = saves?.[type] ?? buildFluidSave(target, type, effect);
       saved = !roll.fumble && (roll.crit || roll.total >= effect.saveDc);
       saveText = `${ABILITY_LABELS[effect.saveAbility]} CD ${effect.saveDc}: ${roll.total} (${saved ? 'éxito' : 'fallo'}). `;
+      // La salvación rueda en todas las pantallas (Fase 4c)
+      postRollMessage(
+        campaignId,
+        rollWithOutcome({ ...roll, kind: 'save' }, saveOutcome({ saved, dc: effect.saveDc, targetName: target.name })),
+        { userId: isPlayerCharacter(target) ? target.character.user_id : null }
+      );
     }
 
     let damageResult = { damage: 0, changed: false, downed: false, suffix: '' };

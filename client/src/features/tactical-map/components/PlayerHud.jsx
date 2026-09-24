@@ -45,6 +45,8 @@ function Icon({ name }) {
       return <svg {...common}><path d="M12 3.5 5 6v5.5c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-2.5Z" /></svg>;
     case 'destrabarse':
       return <svg {...common}><path d="M4 12h7m0 0-2.5-2.5M11 12l-2.5 2.5" /><path d="M20 12h-4" /><path d="M14 5.5v13" /></svg>;
+    case 'ayudar':
+      return <svg {...common}><path d="M7 11.5V7.8a1.3 1.3 0 0 1 2.6 0V11" /><path d="M9.6 10.5V6.3a1.3 1.3 0 0 1 2.6 0v4.2" /><path d="M12.2 10.6V7.2a1.3 1.3 0 0 1 2.6 0v4.6" /><path d="M14.8 11.6V9.4a1.3 1.3 0 0 1 2.6 0v4.1c0 3.6-2.4 6.5-5.8 6.5-2.4 0-3.6-1.1-5-3.3L4.8 14a1.3 1.3 0 0 1 2.2-1.4L7 11.5" /></svg>;
     case 'buscar':
       return <svg {...common}><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /><path d="M10.5 7.5v6m-3-3h6" /></svg>;
     case 'conjuros':
@@ -237,6 +239,9 @@ export default function PlayerHud({
   onOpenSpells,
   onOpenNotes,
   notice,
+  // Sube cada vez que tu personaje recibe daño (Fase 3, añadido): el retrato
+  // se sacude y se tiñe un instante
+  hurtKey = 0,
 }) {
   const hp = combatant?.hpCurrent ?? token?.hp;
   const hpMax = combatant?.hpMax ?? token?.hpMax;
@@ -295,6 +300,9 @@ export default function PlayerHud({
     combatant && onSpecialAction && special('correr', 'Correr', 'correr', Boolean(combatant.dashed)),
     combatant && onSpecialAction && special('esquivar', 'Esquivar', 'esquivar', combatant.stance === 'esquivar'),
     combatant && onSpecialAction && special('destrabarse', 'Destrabar', 'destrabarse', combatant.stance === 'destrabarse'),
+    // Ayudar (Fase 4c): gasta la acción y da ventaja a un aliado; el tablero
+    // pregunta a quién al pulsarlo
+    combatant && onSpecialAction && special('ayudar', 'Ayudar', 'ayudar', false),
     canSearchTraps && {
       key: 'buscar',
       label: 'Buscar trampas',
@@ -379,7 +387,13 @@ export default function PlayerHud({
 
       {/* ── 1. Quién eres ─────────────────────────────────────────────── */}
       <div className="tactical-hud-identity flex items-center gap-3">
-        <div className="tactical-portrait-frame relative">
+        <div
+          key={`retrato-${hurtKey}`}
+          className={`tactical-portrait-frame relative rounded-full ${
+            hurtKey > 0 ? 'motion-safe:animate-[hudHurt_450ms_ease-out]' : ''
+          }`}
+        >
+          <style>{`@keyframes hudHurt{0%{transform:translateX(0);box-shadow:0 0 0 0 rgba(143,43,35,0)}15%{transform:translateX(-4px);box-shadow:0 0 0 4px rgba(143,43,35,0.75)}35%{transform:translateX(4px)}55%{transform:translateX(-3px)}75%{transform:translateX(2px)}100%{transform:translateX(0);box-shadow:0 0 0 0 rgba(143,43,35,0)}}`}</style>
           {token.imageUrl ? (
             <img
               src={token.imageUrl}

@@ -6,6 +6,9 @@ import TokenIcon from './TokenIcon.jsx';
 import TokenLabel from './TokenLabel.jsx';
 import { isTokenDowned } from '../domain/tokens.js';
 
+// Cuánto dura la embestida de un golpe (ida y vuelta)
+const LUNGE_MS = 320;
+
 function tokenShapeSegments(type) {
   if (type === 'enemy') return 6;
   if (type === 'npc') return 4;
@@ -84,28 +87,47 @@ function textTexture(text, color) {
 function FloatingCombatText({ visual, size }) {
   const spriteRef = useRef(null);
   const materialRef = useRef(null);
+  const labelRef = useRef(null);
+  const labelMaterialRef = useRef(null);
   const label = visual.type === 'damage'
     ? `−${visual.value}`
     : visual.type === 'heal'
       ? `+${visual.value}`
-      : visual.text ?? (visual.type === 'miss' ? 'Fallo' : '');
+      : visual.type === 'hit'
+        ? '¡Crítico!'
+        : visual.text ?? (visual.type === 'miss' ? 'Fallo' : '');
   const color = visual.type === 'heal'
     ? '#8ee39b'
     : visual.type === 'damage'
       ? visual.critical ? '#ffd078' : '#ff7b68'
-      : '#e8d7ad';
+      : visual.type === 'hit'
+        ? '#ffd078'
+        : '#e8d7ad';
   const texture = useMemo(() => textTexture(label, color), [color, label]);
   useEffect(() => () => texture.dispose(), [texture]);
+  // Fase 4d: tras el «−8», cómo ha quedado el enemigo (solo la palabra)
+  const healthText = visual.type === 'damage' ? visual.healthLabel ?? null : null;
+  const healthTexture = useMemo(() => (healthText ? textTexture(healthText, '#e8d7ad') : null), [healthText]);
+  useEffect(() => () => healthTexture?.dispose(), [healthTexture]);
   useFrame(() => {
     const age = Math.max(0, (Date.now() - visual.createdAt) / 1000);
     if (spriteRef.current) spriteRef.current.position.y = size * (1.05 + age * 0.95);
     if (materialRef.current) materialRef.current.opacity = Math.max(0, 1 - age / 1.55);
+    if (labelRef.current) labelRef.current.position.y = size * (0.62 + age * 0.95);
+    if (labelMaterialRef.current) labelMaterialRef.current.opacity = Math.max(0, Math.min(1, age * 3) - age / 1.8);
   });
   if (!label) return null;
   return (
-    <sprite ref={spriteRef} position={[0, size * 1.05, 0]} scale={[size * 1.8, size * 0.6, 1]} raycast={() => null}>
-      <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
-    </sprite>
+    <>
+      <sprite ref={spriteRef} position={[0, size * 1.05, 0]} scale={[size * 1.8, size * 0.6, 1]} raycast={() => null}>
+        <spriteMaterial ref={materialRef} map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false} />
+      </sprite>
+      {healthTexture && (
+        <sprite ref={labelRef} position={[0, size * 0.62, 0]} scale={[size * 1.5, size * 0.5, 1]} raycast={() => null}>
+          <spriteMaterial ref={labelMaterialRef} map={healthTexture} transparent opacity={0} depthTest={false} depthWrite={false} toneMapped={false} />
+        </sprite>
+      )}
+    </>
   );
 }
 
@@ -179,6 +201,8 @@ export default function MapToken({
   movable,
   saving,
   visuals = [],
+  // Golpes que da esta ficha (Fase 3, añadido): [{ id, to: { x, z } }]
+  strikes = [],
   onSelect,
   // Altura del suelo bajo el token: sobre una cornisa, la ficha se apoya en la
   // plataforma. Sin esto quedaba enterrada dentro del bloque y desde la cámara
@@ -195,6 +219,11 @@ export default function MapToken({
   const grayOverlayMaterialRef = useRef(null);
   const flashRef = useRef(0);
   const missRef = useRef(0);
+  // Embestida: la ficha se lanza un instante hacia su objetivo y vuelve
+  const lungeRef = useRef(null);
+  // Posición de reposo interpolada; los golpes y los fallos se suman encima
+  // cada fotograma sin acumularse
+  const basePositionRef = useRef(null);
   const targetPosition = useMemo(
     () => new THREE.Vector3(token.position.x, groundY + 0.12, token.position.z),
     [groundY, token.position.x, token.position.z]
@@ -223,9 +252,32 @@ export default function MapToken({
     if (latest.type === 'miss') missRef.current = Date.now() + 300;
   }, [visuals]);
 
+  useEffect(() => {
+    const latest = strikes.at(-1);
+    if (!latest) return;
+    const dx = latest.to.x - token.position.x;
+    const dz = latest.to.z - token.position.z;
+    const length = Math.hypot(dx, dz);
+    if (length < 0.001) return;
+    lungeRef.current = { start: Date.now(), dx: dx / length, dz: dz / length };
+  }, [strikes.at(-1)?.id]);
+
   useFrame(() => {
     if (!groupRef.current) return;
-    groupRef.current.position.lerp(targetPosition, 0.25);
+    if (!basePositionRef.current) basePositionRef.current = groupRef.current.position.clone();
+    basePositionRef.current.lerp(targetPosition, 0.25);
+    groupRef.current.position.copy(basePositionRef.current);
+    const lunge = lungeRef.current;
+    if (lunge) {
+      const t = (Date.now() - lunge.start) / LUNGE_MS;
+      if (t >= 1) {
+        lungeRef.current = null;
+      } else {
+        const reach = Math.sin(Math.PI * t) * token.size * 0.32;
+        groupRef.current.position.x += lunge.dx * reach;
+        groupRef.current.position.z += lunge.dz * reach;
+      }
+    }
     if (missRef.current > Date.now()) {
       const left = missRef.current - Date.now();
       groupRef.current.position.x += Math.sin(left * 0.11) * Math.min(0.11, left / 1800);
@@ -243,9 +295,12 @@ export default function MapToken({
     );
     rimMaterialRef.current?.color.lerp(downed ? deadRimColor : rimColor, 0.16);
     if (grayOverlayMaterialRef.current) {
+      // Apuntando con un arma (Fase 5, añadido): lo que no alcanzas se apaga
+      // un poco para que resalte lo que sí puedes atacar
+      const outOfReach = rangeState === 'fuera' || rangeState === 'sin-vision';
       grayOverlayMaterialRef.current.opacity = THREE.MathUtils.lerp(
         grayOverlayMaterialRef.current.opacity,
-        downed ? 0.68 : 0,
+        downed ? 0.68 : outOfReach ? 0.5 : 0,
         0.16
       );
     }
@@ -315,7 +370,11 @@ export default function MapToken({
       )}
       <TokenLabel token={token} selected={selected} active={active} />
       {visuals
-        .filter((visual) => ['damage', 'heal', 'miss', 'legendary', 'lair'].includes(visual.type))
+        .filter(
+          (visual) =>
+            ['damage', 'heal', 'miss', 'legendary', 'lair'].includes(visual.type) ||
+            (visual.type === 'hit' && visual.critical)
+        )
         .map((visual) => <FloatingCombatText key={visual.id} visual={visual} size={token.size} />)}
     </group>
   );

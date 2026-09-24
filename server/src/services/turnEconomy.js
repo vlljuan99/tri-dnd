@@ -175,6 +175,7 @@ export function startTurnFor(campaignId, combatantId, round) {
     campaignId
   );
   resetCombatantResources(combatantId);
+  expireHelpFrom(campaignId, combatantId);
   const expiredConditions = tickConditionsForTurn(campaignId, combatantId, 'start');
   if (expiredConditions.length) conditionExpirationNotifier?.(campaignId, expiredConditions);
   turnStartEffectsNotifier?.(campaignId, combatantId, round);
@@ -211,31 +212,45 @@ export function ensureTurnStarted(campaignId) {
 //           (initiative_source IS NULL), respetando al resto.
 // En ambos casos se devuelve el desglose de lo tirado para narrarlo: la
 // automatización no vale nada si la mesa no puede ver de dónde sale.
-export function activateTurnMode(campaignId, { rerollAll = true } = {}) {
+//
+// `deferPj` (Fase 4c): los combatientes para los que devuelve true NO se tiran
+// aquí; se devuelven en `deferred` para que su jugador tire (el ritual de
+// iniciativa) y el turno no arranca hasta que lleguen todos.
+export function activateTurnMode(campaignId, { rerollAll = true, deferPj = null } = {}) {
   db.prepare('DELETE FROM opportunity_attacks WHERE campaign_id = ?').run(campaignId);
   db.prepare('UPDATE game_tables SET combat_active = 1 WHERE campaign_id = ?').run(campaignId);
   db.prepare(
     `UPDATE combatants SET moved_squares = 0, action_used = 0, bonus_used = 0,
      dashed = 0, stance = NULL, reaction_used_round = NULL, death_save_round = NULL,
-     multiattack_state = '{}' WHERE campaign_id = ?`
+     multiattack_state = '{}', help_from_id = NULL WHERE campaign_id = ?`
   ).run(campaignId);
 
   const rolls = [];
+  const deferred = [];
   for (const combatant of orderedCombatants(campaignId)) syncBossResources(combatant.id);
   for (const c of orderedCombatants(campaignId)) {
     if (!rerollAll && c.initiative_source !== null) continue;
+    if (deferPj?.(c)) {
+      deferred.push(c);
+      continue;
+    }
     const detail = rollInitiativeDetailed(c);
     storeRolledInitiative(c.id, detail);
     rolls.push({ id: c.id, name: c.name, kind: c.kind, ...detail });
   }
 
   const fresh = orderedCombatants(campaignId);
+  if (deferred.length) {
+    // Nadie actúa hasta que los jugadores hayan tirado su iniciativa
+    db.prepare('UPDATE game_tables SET combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
+    return { order: fresh, rolls, deferred, expiredConditions: [] };
+  }
   const firstConscious = fresh.find(combatantTakesTurn);
   const started = firstConscious ? startTurnFor(campaignId, firstConscious.id, 1) : null;
   if (!firstConscious) {
     db.prepare('UPDATE game_tables SET combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?').run(campaignId);
   }
-  return { order: fresh, rolls, expiredConditions: started?.expiredConditions ?? [] };
+  return { order: fresh, rolls, deferred, expiredConditions: started?.expiredConditions ?? [] };
 }
 
 // ¿Hay iniciativas que "respetar las tiradas existentes" conservaría? El DM
@@ -442,12 +457,16 @@ export const COMBAT_CONDITIONS = [
 ];
 
 // Acciones especiales del turno que gastan la acción (Correr, Esquivar,
-// Destrabarse). Solo el combatiente activo, y solo si aún no ha actuado.
+// Destrabarse, Ayudar). Solo el combatiente activo, y solo si aún no ha actuado.
 // - 'correr' dobla el presupuesto de movimiento (marca dashed).
 // - 'esquivar' aplica desventaja automática mientras pueda ver y moverse.
 // - 'destrabarse' evita que el camino confirmado genere ataques de oportunidad.
-export function trySpecialAction(campaignId, combatantId, kind) {
-  const valid = { correr: 'dash', esquivar: 'esquivar', destrabarse: 'destrabarse' };
+// - 'ayudar' (Fase 4c, SRD 5.1 «Help»): el aliado elegido (`targetId`) gana
+//   ventaja en su siguiente prueba de característica o en su siguiente ataque
+//   contra una criatura a 5 pies o menos de quien ayuda, antes del siguiente
+//   turno de quien ayuda. Se guarda en el ayudado (`help_from_id`).
+export function trySpecialAction(campaignId, combatantId, kind, { targetId = null } = {}) {
+  const valid = { correr: 'dash', esquivar: 'esquivar', destrabarse: 'destrabarse', ayudar: 'ayudar' };
   if (!valid[kind]) return { ok: false, error: 'Acción no válida' };
   const table = db
     .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
@@ -466,12 +485,37 @@ export function trySpecialAction(campaignId, combatantId, kind) {
   }
   if (row.action_used) return { ok: false, error: 'Ya has usado tu acción este turno' };
 
+  if (kind === 'ayudar') {
+    const target = db
+      .prepare('SELECT id, kind, name FROM combatants WHERE id = ? AND campaign_id = ?')
+      .get(Number(targetId), campaignId);
+    if (!target || target.id === combatantId) return { ok: false, error: 'Elige a un aliado al que ayudar' };
+    // Se ayuda a un compañero: un PJ, o un aliado si quien ayuda es del DM
+    const allied = target.kind === 'pj' || (target.kind === 'aliado' && row.kind !== 'enemigo');
+    if (!allied || row.kind === 'enemigo') return { ok: false, error: 'Solo puedes ayudar a un aliado' };
+    db.prepare('UPDATE combatants SET action_used = 1 WHERE id = ?').run(combatantId);
+    db.prepare('UPDATE combatants SET help_from_id = ? WHERE id = ?').run(combatantId, target.id);
+    return { ok: true, target };
+  }
   if (kind === 'correr') {
     db.prepare('UPDATE combatants SET action_used = 1, dashed = 1 WHERE id = ?').run(combatantId);
   } else {
     db.prepare('UPDATE combatants SET action_used = 1, stance = ? WHERE id = ?').run(kind, combatantId);
   }
   return { ok: true };
+}
+
+// La ayuda vence al empezar el siguiente turno de quien la dio (SRD).
+export function expireHelpFrom(campaignId, helperId) {
+  db.prepare('UPDATE combatants SET help_from_id = NULL WHERE campaign_id = ? AND help_from_id = ?').run(
+    campaignId,
+    helperId
+  );
+}
+
+// La ayuda se gasta al usarla (un ataque o una prueba del ayudado).
+export function consumeHelp(combatantId) {
+  db.prepare('UPDATE combatants SET help_from_id = NULL WHERE id = ?').run(combatantId);
 }
 
 function jsonList(value) {
@@ -750,6 +794,13 @@ export function tryUseReaction(campaignId, combatantId) {
 // Si ya no queda ningún combatiente de tipo enemigo, se acabó el encuentro:
 // vuelve a movimiento libre sola. Devuelve true si acaba de desactivarse
 // (para que quien llame decida si avisar por el chat).
+// Aviso de «se acabó el encuentro» (Fase 4, añadido): sockets.js publica el
+// resumen de combate. Se engancha como los demás avisos de este módulo.
+let combatEndedNotifier = null;
+export function bindCombatEndedNotifier(fn) {
+  combatEndedNotifier = typeof fn === 'function' ? fn : null;
+}
+
 export function endCombatIfNoEnemiesLeft(campaignId) {
   const remaining = db
     .prepare("SELECT COUNT(*) AS n FROM combatants WHERE campaign_id = ? AND kind = 'enemigo' AND (hp_current IS NULL OR hp_current > 0)")
@@ -760,5 +811,6 @@ export function endCombatIfNoEnemiesLeft(campaignId) {
   if (!table?.combat_active) return false;
 
   deactivateTurnMode(campaignId);
+  combatEndedNotifier?.(campaignId);
   return true;
 }

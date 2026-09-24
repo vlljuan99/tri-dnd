@@ -29,6 +29,8 @@ export function resolveAttackEffects({
   ranged = false,
   longRange = false,
   manualAdvantage = 'none',
+  // Ayudar (Fase 4c): nombre de quien ayuda si está a 5 pies del objetivo
+  helpedBy = null,
 } = {}) {
   const attacker = new Set(clean(attackerConditions));
   const target = new Set(clean(targetConditions));
@@ -44,6 +46,7 @@ export function resolveAttackEffects({
   addIf(advantageReasons, target.has('inconsciente'), 'objetivo inconsciente');
   addIf(advantageReasons, target.has('derribado') && distance <= 1, 'objetivo derribado a 5 pies');
   addIf(advantageReasons, ranged && highGround, 'cota alta');
+  addIf(advantageReasons, Boolean(helpedBy), `te ayuda ${helpedBy}`);
 
   addIf(disadvantageReasons, attacker.has('cegado'), 'atacante cegado');
   addIf(disadvantageReasons, attacker.has('envenenado'), 'atacante envenenado');

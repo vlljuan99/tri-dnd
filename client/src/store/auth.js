@@ -31,4 +31,14 @@ export const useAuth = create((set) => ({
     await api('/auth/logout', { method: 'POST' });
     set({ user: null });
   },
+
+  /**
+   * Fase 4c: tirar al instante las salvaciones, iniciativas y tiradas pedidas
+   * en vez de esperar a pulsar «Tirar». Lo guarda el servidor: es él quien
+   * decide si espera o no.
+   */
+  async setAutoRolls(autoRolls) {
+    const { user } = await api('/auth/preferencias', { method: 'PUT', body: { autoRolls: Boolean(autoRolls) } });
+    set({ user });
+  },
 }));

@@ -9,6 +9,8 @@ import {
   bindCampaignMemberEvicter,
   bindCombatBroadcaster,
   bindChatPoster,
+  bindRollPoster,
+  bindBossIntroChecker,
   postSystemMessage,
   notifyCampaignMap,
   notifyCombatStarted,
@@ -39,8 +41,10 @@ import {
   combatantTakesTurn,
   bindConditionExpirationNotifier,
   bindTurnStartEffectsNotifier,
+  bindCombatEndedNotifier,
   rollInitiativeDetailed,
   rollInitiativeFor,
+  storeRolledInitiative,
   setManualInitiative,
   initiativeSummary,
   setConcentration,
@@ -55,6 +59,7 @@ import {
   tryUseBonusAction,
   tryUseReaction,
   trySpecialAction,
+  consumeHelp,
   toggleCondition,
   tickConditionsForTurn,
   startDeathSaves,
@@ -76,6 +81,21 @@ import {
 import { buildMultiattackPlans, parseMultiattackState } from './services/monsterActions.js';
 import { sanitizeChatReferences, standaloneChatReference } from './services/chatReferences.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './services/serverDice.js';
+import { attackOutcome, checkOutcome, rollWithOutcome, saveOutcome } from './services/rollOutcome.js';
+import { healthLabel } from './services/healthLabels.js';
+import { recordFall, recordFinalBlow, recordRoll, summaryForPlayer, takeSummary } from './services/combatLedger.js';
+import { pendingRolls, TIPOS_TIRADA } from './services/pendingRolls.js';
+import {
+  ABILITY_KEYS,
+  SKILLS as CHECK_SKILLS,
+  abilityCheckBonus,
+  abilityForCheck,
+  characterSaveBonus,
+  checkDisadvantage,
+  checkLabel,
+  groupCheckSucceeds,
+  skillCheckBonus,
+} from './rules/checks.js';
 import { resolveFluidMovement, resolveFluidTurnEnd } from './services/fluidEffects.js';
 import { resolveHazardMovement, resolveHazardTurnStart } from './services/hazardZones.js';
 import { bossActionsFor, syncBossResources, useBossAction } from './services/bossActions.js';
@@ -99,7 +119,59 @@ import { createPacer } from './services/turnPacing.js';
 
 const roomName = (campaignId) => `campaign:${campaignId}`;
 
-function serializeMessage(row) {
+// Reacciones a las tiradas (Fase 4, añadido): un conjunto cerrado de emojis.
+export const ROLL_REACTIONS = ['🔥', '😱', '😂', '👏', '💀'];
+
+// { messageId: { '🔥': [userId, …] } } para los mensajes indicados
+function reactionsFor(messageIds) {
+  const ids = [...new Set(messageIds.map(Number).filter(Number.isInteger))];
+  const result = new Map();
+  if (!ids.length) return result;
+  const rows = db
+    .prepare(`SELECT message_id, user_id, emoji FROM roll_reactions WHERE message_id IN (${ids.map(() => '?').join(',')})`)
+    .all(...ids);
+  for (const row of rows) {
+    const entry = result.get(row.message_id) ?? {};
+    (entry[row.emoji] ??= []).push(row.user_id);
+    result.set(row.message_id, entry);
+  }
+  return result;
+}
+
+// Sin combate en curso no hay nada que resumir: el libro solo apunta durante uno
+function combatIsActive(campaignId) {
+  return Boolean(db.prepare('SELECT combat_active FROM game_tables WHERE campaign_id = ?').get(campaignId)?.combat_active);
+}
+
+// Destinatario de un susurro: el miembro (por su nombre o el de su PJ) cuyo
+// nombre encabeza el texto. Gana el nombre más largo, para que «Ana María …»
+// no se lo quede «Ana».
+function resolveWhisperTarget(campaignId, text) {
+  const candidates = [
+    ...db
+      .prepare(
+        `SELECT u.id AS userId, u.display_name AS name FROM campaign_members m
+         JOIN users u ON u.id = m.user_id WHERE m.campaign_id = ?`
+      )
+      .all(campaignId),
+    ...db
+      .prepare("SELECT user_id AS userId, name FROM characters WHERE campaign_id = ? AND kind = 'pj' AND user_id IS NOT NULL")
+      .all(campaignId),
+  ].filter((candidate) => candidate.name && candidate.userId != null);
+  const lower = text.toLowerCase();
+  let best = null;
+  for (const candidate of candidates) {
+    const name = candidate.name.trim();
+    const prefix = name.toLowerCase();
+    if (!lower.startsWith(prefix)) continue;
+    const rest = text.slice(name.length);
+    if (rest && !/^\s/.test(rest)) continue;
+    if (!best || name.length > best.name.length) best = { ...candidate, name, text: rest.trim() };
+  }
+  return best;
+}
+
+function serializeMessage(row, reactions = null) {
   let references = [];
   if (row.type === 'chat') {
     try {
@@ -116,35 +188,54 @@ function serializeMessage(row) {
     body: row.type === 'roll' ? JSON.parse(row.body) : row.body,
     references,
     hidden: Boolean(row.hidden),
+    // Fase 4d: 'narracion' (el DM narra) o 'golpe-final' («¿cómo quieres
+    // hacerlo?»). Se pintan como subtítulo sobre el tablero.
+    style: row.style ?? null,
+    // Susurro (Fase 4, añadido): a quién va. Solo lo reciben autor, destinatario y DM.
+    recipient: row.recipient_user_id ? { id: row.recipient_user_id, name: row.recipient_name ?? '—' } : null,
+    reactions: reactions ?? {},
     createdAt: row.created_at,
   };
 }
 
-function insertMessage({ campaignId, userId, type, body, hidden = false, references = [] }) {
+function insertMessage({ campaignId, userId, type, body, hidden = false, references = [], style = null, recipientId = null }) {
   const info = db
     .prepare(
-      'INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden, srd_references) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO chat_messages (campaign_id, user_id, type, body, hidden, srd_references, style, recipient_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(campaignId, userId, type, body, hidden ? 1 : 0, JSON.stringify(references));
+    .run(campaignId, userId, type, body, hidden ? 1 : 0, JSON.stringify(references), style, recipientId);
   const row = db
     .prepare(
-      `SELECT m.*, u.display_name AS author_name FROM chat_messages m
-       LEFT JOIN users u ON u.id = m.user_id WHERE m.id = ?`
+      `SELECT m.*, u.display_name AS author_name, r.display_name AS recipient_name FROM chat_messages m
+       LEFT JOIN users u ON u.id = m.user_id
+       LEFT JOIN users r ON r.id = m.recipient_user_id WHERE m.id = ?`
     )
     .get(info.lastInsertRowid);
+  // Resumen de combate (Fase 4, añadido): las tiradas públicas del combate
+  // alimentan el libro. Las ocultas del DM no cuentan: la mesa no las vio.
+  if (type === 'roll' && !hidden && combatIsActive(campaignId)) {
+    try {
+      recordRoll(campaignId, JSON.parse(body));
+    } catch {
+      // Una tirada ilegible no rompe el chat
+    }
+  }
   return serializeMessage(row);
 }
 
 function recentMessages(campaignId, { includeHidden, userId }) {
+  // Un susurro también lo ve su destinatario (Fase 4, añadido)
   const rows = db
     .prepare(
-      `SELECT m.*, u.display_name AS author_name FROM chat_messages m
+      `SELECT m.*, u.display_name AS author_name, r.display_name AS recipient_name FROM chat_messages m
        LEFT JOIN users u ON u.id = m.user_id
-       WHERE m.campaign_id = ? AND (m.hidden = 0 OR ? OR m.user_id = ?)
+       LEFT JOIN users r ON r.id = m.recipient_user_id
+       WHERE m.campaign_id = ? AND (m.hidden = 0 OR ? OR m.user_id = ? OR m.recipient_user_id = ?)
        ORDER BY m.id DESC LIMIT 100`
     )
-    .all(campaignId, includeHidden ? 1 : 0, userId);
-  return rows.reverse().map(serializeMessage);
+    .all(campaignId, includeHidden ? 1 : 0, userId, userId);
+  const reactions = reactionsFor(rows.map((row) => row.id));
+  return rows.reverse().map((row) => serializeMessage(row, reactions.get(row.id) ?? null));
 }
 
 // --- Tracker de iniciativa ------------------------------------------------
@@ -185,6 +276,20 @@ function combatantView(row, { isDm, round }) {
     // Qué hechizo concentra (null = ninguno). Público: la mesa entera ve al
     // mago apretando los dientes, y el grupo decide a quién protege.
     concentration: row.concentration_spell ?? null,
+    // Ayudar (Fase 4c): quién le está ayudando. Público: la mesa lo ha visto.
+    helpFrom: row.help_from_id
+      ? {
+          id: row.help_from_id,
+          name: db.prepare('SELECT name FROM combatants WHERE id = ?').get(row.help_from_id)?.name ?? null,
+        }
+      : null,
+    // Estado de salud con palabras (Fase 4d): de un enemigo el jugador recibe
+    // solo la etiqueta, nunca los PG del tracker.
+    healthLabel: row.kind === 'pj' ? null : healthLabel(row.hp_current, row.hp_max),
+    // Ritual de iniciativa (Fase 4c): su jugador todavía no ha tirado
+    initiativePending: Boolean(
+      row.character_id && pendingRolls.buscar(row.campaign_id, { characterId: row.character_id, tipo: 'iniciativa' })
+    ),
   };
   if (row.kind === 'pj' && row.character_id) {
     const c = db.prepare('SELECT hp_current, hp_max, hp_temp, ac, speed FROM characters WHERE id = ?').get(row.character_id);
@@ -228,6 +333,10 @@ function combatantView(row, { isDm, round }) {
       initiativeRoll:
         row.initiative_d20 != null ? { d20: row.initiative_d20, modifier: row.initiative_mod } : null,
       monsterIndex: row.monster_index,
+      // Fase 4d: el nombre real de un enemigo con nombre oculto, solo al DM
+      trueName: row.map_token_id
+        ? db.prepare('SELECT true_name FROM map_tokens WHERE id = ?').get(row.map_token_id)?.true_name ?? null
+        : null,
       speed: Number.isInteger(overrides.speed) ? overrides.speed : monsterSpeedFeet(row.monster_index),
       // Variante por instancia (miniboss): el bloque de estadísticas del DM
       // aplica estos deltas a los ataques y muestra los rasgos añadidos.
@@ -639,9 +748,13 @@ function spellAreaTargets(campaignId, attackerToken, cells, { isDm }) {
   }
   const markers = db
     .prepare(
+      // map_tokens no tiene map_id: el mapa se alcanza por la planta de la
+      // sala (antes esta consulta fallaba y ningún conjuro de área resolvía)
       `SELECT token.id, token.x, token.y, token.hidden, room.revealed, token.room_id
-       FROM map_tokens token JOIN map_rooms room ON room.id = token.room_id
-       WHERE token.map_id = ? AND room.floor_id = ? AND token.kind IN ('enemigo', 'aliado')`
+       FROM map_tokens token
+       JOIN map_rooms room ON room.id = token.room_id
+       JOIN map_floors floor ON floor.id = room.floor_id
+       WHERE floor.map_id = ? AND room.floor_id = ? AND token.kind IN ('enemigo', 'aliado')`
     )
     .all(mapId, attackerToken.floor_id);
   for (const row of markers) {
@@ -670,6 +783,36 @@ function elevationAtToken(token) {
   }
 }
 
+// Ayudar (Fase 4c): ¿quien ayudó al atacante está a 5 pies o menos del
+// objetivo? Devuelve su nombre (el motivo de la ventaja) o null.
+function helperAdjacentTo(attackerCombatant, resolved) {
+  if (!attackerCombatant?.help_from_id || !resolved?.token) return null;
+  const helper = db.prepare('SELECT * FROM combatants WHERE id = ?').get(attackerCombatant.help_from_id);
+  if (!helper) return null;
+  const mapId = getActiveMapId(helper.campaign_id);
+  if (!mapId) return null;
+  const token = helper.character_id
+    ? db
+        .prepare(
+          `SELECT t.x, t.y, r.floor_id FROM map_character_tokens t JOIN map_rooms r ON r.id = t.room_id
+           WHERE t.map_id = ? AND t.character_id = ?`
+        )
+        .get(mapId, helper.character_id)
+    : db
+        .prepare('SELECT t.x, t.y, r.floor_id FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id WHERE t.id = ?')
+        .get(helper.map_token_id);
+  if (!token) return null;
+  if (resolved.token.floor_id != null && token.floor_id !== resolved.token.floor_id) return null;
+  const distance = Math.max(Math.abs(token.x - resolved.token.x), Math.abs(token.y - resolved.token.y));
+  return distance <= 1 ? helper.name : null;
+}
+
+// La ayuda se gasta con el ataque al que dio ventaja (SRD: «el siguiente»).
+function consumeHelpIfUsed(attackerCombatant, effects) {
+  if (!attackerCombatant?.id || effects?.advantage !== 'adv') return;
+  if (effects.advantageReasons.some((reason) => reason.startsWith('te ayuda'))) consumeHelp(attackerCombatant.id);
+}
+
 function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage, armorPenalty = false }) {
   const attackerConditions = parseConditions(attackerCombatant?.conditions);
   const targetConditions = parseConditions(resolved.combatant?.conditions);
@@ -693,6 +836,7 @@ function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage,
     ranged: !melee,
     longRange: Boolean(resolved.longRange),
     manualAdvantage,
+    helpedBy: helperAdjacentTo(attackerCombatant, resolved),
   });
 }
 
@@ -825,6 +969,12 @@ function targetDamageProfile(resolved) {
 // calculada y deja el botón en el tracker, porque quien concentra puede tener
 // rasgos que la modifiquen y eso vive en texto libre de la ficha. Sin este
 // aviso la regla simplemente se olvidaba.
+//
+// Desde la Fase 4c, si quien concentra es un PJ, su jugador recibe la
+// salvación como tirada pendiente (pulsa «Tirar» o se tira sola a los ocho
+// segundos). El botón del tracker sigue existiendo para el DM y los PNJ.
+let concentrationRequester = null;
+
 function promptConcentrationCheck(campaignId, combatant, damage) {
   if (!combatant?.concentration_spell) return '';
   const dc = concentrationDC(damage);
@@ -832,6 +982,7 @@ function promptConcentrationCheck(campaignId, combatant, damage) {
     campaignId,
     `${combatant.name} concentra en ${combatant.concentration_spell} y recibe ${damage} de daño: salvación de Constitución CD ${dc}.`
   );
+  if (combatant.kind === 'pj' && combatant.character_id) concentrationRequester?.(campaignId, combatant, dc);
   return ` Debe salvar concentración (CD ${dc}).`;
 }
 
@@ -884,6 +1035,10 @@ function emitAttackVisual(campaignId, resolved, { hit, crit = false, attacker = 
   notifyCombatVisual(campaignId, {
     type: hit ? 'hit' : 'miss',
     ...combatVisualTarget(resolved),
+    // Quién golpea (Fase 3, añadido): su ficha embiste hacia el objetivo y, si
+    // el objetivo eres tú, la mesa te dice quién te ataca. Es la misma
+    // referencia pública que ya viajaba con los proyectiles.
+    from: from ?? null,
     critical: Boolean(crit),
     strong: Boolean(crit),
   });
@@ -1004,6 +1159,7 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
           if (massive) recordDamageAtZero(pjCombatant.id, { massive: true });
           else startDeathSaves(pjCombatant.id);
         }
+        if (combatIsActive(campaignId)) recordFall(campaignId, resolved.name);
         dropConcentrationOnDowned(campaignId, pjCombatant);
         body = massive
           ? `${resolved.name} recibe ${damage} puntos de daño${adjustmentSuffix} y muere al instante por daño masivo.`
@@ -1033,6 +1189,8 @@ function applyCombatDamage(campaignId, resolved, incoming, { source = 'attack', 
       type: 'damage',
       ...combatVisualTarget(resolved),
       value: damage,
+      // Fase 4d: tras el «−8», cómo ha quedado (solo la palabra, nunca los PG)
+      healthLabel: resolved.kind === 'marcador' ? healthLabel(detail.remainingHp, detail.maxHp) : null,
       critical: Boolean(critical),
       strong: Boolean(critical || (detail.maxHp && damage >= Math.max(10, detail.maxHp / 3))),
     });
@@ -1125,23 +1283,44 @@ export function setupSockets(io) {
   });
 
   // Emite un mensaje a la sala; los ocultos solo llegan al DM y a su autor
-  function broadcastMessage(campaignId, message, { senderId, dmUserId }) {
+  // Quién puede ver un mensaje oculto: su autor, el DM y, si es un susurro,
+  // su destinatario. Mismo criterio para el mensaje y para sus reacciones.
+  function hiddenAudience(message, { senderId, dmUserId }) {
+    return new Set([senderId, dmUserId, message.recipient?.id].filter((id) => id != null).map(Number));
+  }
+
+  function emitToAudience(campaignId, message, event, payload, { senderId, dmUserId }) {
     if (!message.hidden) {
-      io.to(roomName(campaignId)).emit('chat:new', message);
+      io.to(roomName(campaignId)).emit(event, payload);
       return;
     }
+    const audience = hiddenAudience(message, { senderId, dmUserId });
     const room = io.sockets.adapter.rooms.get(roomName(campaignId));
     for (const sid of room ?? []) {
       const s = io.sockets.sockets.get(sid);
-      if (s && (s.data.user.id === senderId || s.data.user.id === dmUserId)) {
-        s.emit('chat:new', message);
-      }
+      if (s && audience.has(Number(s.data.user.id))) s.emit(event, payload);
     }
+  }
+
+  function broadcastMessage(campaignId, message, { senderId, dmUserId }) {
+    emitToAudience(campaignId, message, 'chat:new', message, { senderId, dmUserId });
   }
 
   // Emite el estado de combate a cada socket de la sala con la vista que le
   // corresponde según su rol (el DM ve HP/CA exactos de los enemigos)
+  function presentBossesLater(campaignId) {
+    setImmediate(() => {
+      try {
+        presentBosses(campaignId);
+      } catch (error) {
+        console.error('[jefes] no se pudo comprobar la presentación:', error);
+      }
+    });
+  }
+
   function broadcastCombat(campaignId) {
+    // Un jefe que acaba de entrar en el tracker a la vista se presenta (Fase 4d)
+    presentBossesLater(campaignId);
     const room = io.sockets.adapter.rooms.get(roomName(campaignId));
     for (const sid of room ?? []) {
       const s = io.sockets.sockets.get(sid);
@@ -1181,6 +1360,285 @@ export function setupSockets(io) {
     broadcastMessage(campaignId, message, { senderId, dmUserId });
   });
 
+  // --- Tiradas pendientes (Fase 4c) -------------------------------------
+  // El aviso de una tirada pendiente solo llega a quien tiene que tirar y al
+  // DM (que ve el panel de pendientes); el resultado, en cambio, se publica
+  // como una tirada más y lo ve toda la mesa.
+  function campaignDmId(campaignId) {
+    return db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id ?? null;
+  }
+
+  function emitToUsers(campaignId, userIds, event, payload) {
+    const wanted = new Set(userIds.filter((id) => id != null).map(Number));
+    for (const sid of io.sockets.adapter.rooms.get(roomName(campaignId)) ?? []) {
+      const memberSocket = io.sockets.sockets.get(sid);
+      if (memberSocket && wanted.has(Number(memberSocket.data.user.id))) memberSocket.emit(event, payload);
+    }
+  }
+
+  bindRollPoster((campaignId, { roll, hidden, userId }) => {
+    const dmUserId = campaignDmId(campaignId);
+    const message = insertMessage({ campaignId, userId: userId ?? null, type: 'roll', body: JSON.stringify(roll), hidden });
+    if (hidden) broadcastMessage(campaignId, message, { senderId: userId ?? dmUserId, dmUserId });
+    else io.to(roomName(campaignId)).emit('chat:new', message);
+  });
+
+  pendingRolls.configurar({
+    creada: (pending) =>
+      emitToUsers(pending.campaignId, [pending.ownerUserId, campaignDmId(pending.campaignId)], 'tirada:pendiente', pending),
+    // El jugador sabe que su tirada salió; el DM además ve el total y si superó
+    // la CD (aunque esté oculta): es su panel de pendientes.
+    resuelta: (pending, { motivo, total, exito }) => {
+      const dmUserId = campaignDmId(pending.campaignId);
+      emitToUsers(pending.campaignId, [dmUserId], 'tirada:resuelta', { ...pending, motivo, total, exito });
+      if (pending.ownerUserId !== dmUserId) {
+        emitToUsers(pending.campaignId, [pending.ownerUserId], 'tirada:resuelta', { id: pending.id, motivo });
+      }
+    },
+    // No se espera a quien prefiere tirar solo ni a quien no está en la mesa:
+    // esperar ocho segundos a un jugador desconectado solo frena a los demás.
+    debeTirarSola: (pending) => {
+      const owner = db.prepare('SELECT auto_rolls FROM users WHERE id = ?').get(pending.ownerUserId);
+      if (owner?.auto_rolls) return true;
+      return !onlineMembers(pending.campaignId).some((member) => Number(member.id) === Number(pending.ownerUserId));
+    },
+  });
+
+  // Pide la tirada al dueño del PJ si lo tiene (y tira al instante si no):
+  // devuelve la promesa del servicio. `publicar` recibe la tirada ya hecha.
+  function requestCharacterRoll({ campaignId, character, tipo, etiqueta, build, publish, evaluar = null, cd = null, revelarCd = false, origen = null, grupoId = null, caracteristica = null, habilidad = null }) {
+    return pendingRolls.solicitar({
+      campaignId,
+      characterId: character?.id ?? null,
+      // Solo se espera al dueño de un PJ; las fichas del DM (jefes, PNJ) tiran solas
+      ownerUserId: character?.kind === 'pj' ? character.user_id ?? null : null,
+      tipo,
+      etiqueta,
+      nombre: character?.name ?? null,
+      caracteristica,
+      habilidad,
+      cd,
+      revelarCd,
+      origen,
+      grupoId,
+      tirar: build,
+      alTirar: publish,
+      evaluar,
+    });
+  }
+
+  // Salvación de concentración: la tirada (bonificador de la ficha si es un
+  // PJ; un PNJ del DM tira a pelo y el DM ajusta) y su resolución, compartidas
+  // por el botón del tracker y la pendiente del jugador.
+  function buildConcentrationRoll(row, character) {
+    return buildConcentrationSaveRoll({
+      actorName: row.name,
+      bonus: character ? concentrationSaveBonus(character) : 0,
+      spell: row.concentration_spell,
+    });
+  }
+
+  function resolveConcentrationRoll(campaignId, row, roll, targetDc, authorId) {
+    const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
+    const rollNote = insertMessage({
+      campaignId,
+      userId: authorId,
+      type: 'roll',
+      body: JSON.stringify(
+        rollWithOutcome(roll, saveOutcome({ saved: outcome.held, dc: targetDc, targetName: row.name, tipo: 'concentracion' }))
+      ),
+    });
+    io.to(roomName(campaignId)).emit('chat:new', rollNote);
+    const spell = row.concentration_spell;
+    const current = db.prepare('SELECT concentration_spell FROM combatants WHERE id = ?').get(row.id);
+    if (!outcome.held && current?.concentration_spell === spell) {
+      db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(row.id);
+    }
+    postSystemMessage(
+      campaignId,
+      outcome.held
+        ? `${row.name} aguanta la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+        : `${row.name} pierde la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+    );
+    broadcastCombat(campaignId);
+    return outcome;
+  }
+
+  concentrationRequester = (campaignId, combatant, dc) => {
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(combatant.character_id);
+    if (!character) return;
+    // Una pendiente por cada golpe: el SRD pide una salvación por cada fuente
+    // de daño. Si la primera falla, las siguientes ya no tienen nada que salvar.
+    requestCharacterRoll({
+      campaignId,
+      character,
+      tipo: 'concentracion',
+      etiqueta: `Concentración en ${combatant.concentration_spell}`,
+      caracteristica: 'con',
+      cd: dc,
+      revelarCd: true,
+      origen: 'Has recibido daño mientras concentras',
+      build: () => {
+        const row = db.prepare('SELECT * FROM combatants WHERE id = ?').get(combatant.id) ?? combatant;
+        return buildConcentrationRoll(row, character);
+      },
+      publish: (roll) => {
+        const row = db.prepare('SELECT * FROM combatants WHERE id = ?').get(combatant.id);
+        // Si entretanto cayó inconsciente o dejó de concentrar, ya no hay nada que salvar
+        if (!row?.concentration_spell) return;
+        resolveConcentrationRoll(campaignId, row, roll, dc, character.user_id);
+      },
+    });
+  };
+
+  // Ritual de iniciativa (Fase 4c): al empezar el combate cada jugador tira la
+  // de su PJ. La tira de iniciativa se reordena según llegan los resultados y
+  // el primer turno arranca cuando han llegado todas (u ocho segundos).
+  function initiativeRollBody(name, detail) {
+    const sign = detail.modifier >= 0 ? '+' : '−';
+    return {
+      kind: 'check',
+      label: 'Iniciativa',
+      actorName: name,
+      formula: '1d20 ' + sign + ' ' + Math.abs(detail.modifier),
+      groups: [{ die: 'd20', sides: 20, results: [{ rolls: [detail.d20], kept: detail.d20 }] }],
+      modifier: detail.modifier,
+      advantage: 'none',
+      total: detail.total,
+      crit: false,
+      fumble: false,
+    };
+  }
+
+  // `onReady` arranca la IA enemiga si le toca: su programador vive dentro de
+  // cada conexión, así que lo pasa quien llama.
+  async function runInitiativeRitual(campaignId, deferred, onReady) {
+    const requests = deferred.map((combatant) => {
+        const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(combatant.character_id);
+        let detail = null;
+        return requestCharacterRoll({
+          campaignId,
+          character,
+          tipo: 'iniciativa',
+          etiqueta: 'Iniciativa',
+          caracteristica: 'dex',
+          origen: '¡Comienza el combate!',
+          build: () => {
+            detail = rollInitiativeDetailed(combatant);
+            return initiativeRollBody(combatant.name, detail);
+          },
+          publish: (roll) => {
+            if (!db.prepare('SELECT id FROM combatants WHERE id = ?').get(combatant.id)) return;
+            storeRolledInitiative(combatant.id, detail);
+            const message = insertMessage({
+              campaignId,
+              userId: character?.user_id ?? null,
+              type: 'roll',
+              body: JSON.stringify(roll),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', message);
+            broadcastCombat(campaignId);
+          },
+        });
+    });
+    // Ya hay pendientes: la tira de iniciativa enseña quién falta por tirar
+    broadcastCombat(campaignId);
+    await Promise.all(requests);
+    const table = db
+      .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+      .get(campaignId);
+    // Si el DM cerró el combate mientras tanto, o ya arrancó a mano, nada más
+    if (!table?.combat_active || table.combat_turn_id) return;
+    ensureTurnStarted(campaignId);
+    broadcastCombat(campaignId);
+    onReady?.();
+  }
+
+  // Lo asíncrono nunca puede tumbar el servidor: una promesa rechazada sin
+  // capturar mata el proceso de Node, y con él la mesa de todos.
+  function startInitiativeRitual(campaignId, deferred, onReady) {
+    runInitiativeRitual(campaignId, deferred, onReady).catch((error) => {
+      console.error('[iniciativa] el ritual falló; se arranca el turno igualmente:', error);
+      ensureTurnStarted(campaignId);
+      broadcastCombat(campaignId);
+    });
+  }
+
+  // Los PJ con dueño tiran su iniciativa en el ritual; los demás, el servidor.
+  const deferPjInitiative = (combatant) => combatant.kind === 'pj' && Boolean(combatant.character_id);
+
+  // --- El DM como narrador (Fase 4d) ------------------------------------
+
+  // «¿Cómo quieres hacerlo?»: quien derriba a un enemigo puede describir el
+  // golpe final en una frase. La petición caduca al minuto y solo la puede
+  // contestar quien la recibió.
+  const finisherRequests = new Map();
+  const FINISHER_TTL_MS = 60_000;
+
+  function requestFinisher(campaignId, userId, enemyName) {
+    const key = `${campaignId}:${userId}`;
+    finisherRequests.set(key, { enemyName, expires: Date.now() + FINISHER_TTL_MS });
+    emitToUsers(campaignId, [userId], 'golpe-final:pedir', { campaignId: Number(campaignId), enemyName });
+  }
+
+  // Presentación de jefe: la primera vez que un marcador marcado por el DM
+  // queda a la vista de la mesa (sala revelada y marcador sin ocultar), un
+  // cartel para todos. Solo una vez por marcador.
+  function presentBosses(campaignId) {
+    const mapId = getActiveMapId(campaignId);
+    if (!mapId) return;
+    const bosses = db
+      .prepare(
+        `SELECT t.id, t.name, t.boss_title, ch.avatar_path AS boss_avatar, mi.avatar_path AS monster_avatar
+         FROM map_tokens t
+         JOIN map_rooms r ON r.id = t.room_id
+         JOIN map_floors f ON f.id = r.floor_id
+         LEFT JOIN characters ch ON ch.id = t.character_id
+         LEFT JOIN campaigns cp ON cp.id = ?
+         LEFT JOIN monster_images mi ON mi.user_id = cp.dm_user_id AND mi.monster_idx = t.monster_index
+         WHERE f.map_id = ? AND t.boss_intro = 1 AND t.boss_intro_shown = 0 AND t.hidden = 0 AND r.revealed = 1`
+      )
+      .all(campaignId, mapId);
+    for (const boss of bosses) {
+      db.prepare('UPDATE map_tokens SET boss_intro_shown = 1 WHERE id = ?').run(boss.id);
+      io.to(roomName(campaignId)).emit('jefe:presentacion', {
+        id: boss.id,
+        name: boss.name,
+        title: boss.boss_title ?? null,
+        imageUrl: boss.boss_avatar ?? boss.monster_avatar ?? null,
+      });
+    }
+  }
+  bindBossIntroChecker(presentBosses);
+
+  // --- Resumen de combate (Fase 4, añadido) -----------------------------
+  // Al acabar el combate, una tarjeta para toda la mesa. Los números de los
+  // enemigos solo los recibe el DM.
+  function publishCombatSummary(campaignId, { rounds = null } = {}) {
+    const pcNames = db
+      .prepare("SELECT name FROM characters WHERE campaign_id = ? AND kind = 'pj'")
+      .all(campaignId)
+      .map((row) => row.name);
+    const round =
+      rounds ?? db.prepare('SELECT combat_round FROM game_tables WHERE campaign_id = ?').get(campaignId)?.combat_round ?? null;
+    const summary = takeSummary(campaignId, { pcNames, rounds: round });
+    if (!summary) return;
+    const dmUserId = campaignDmId(campaignId);
+    const forPlayers = summaryForPlayer(summary);
+    for (const sid of io.sockets.adapter.rooms.get(roomName(campaignId)) ?? []) {
+      const memberSocket = io.sockets.sockets.get(sid);
+      if (!memberSocket) continue;
+      const isDm = Number(memberSocket.data.user.id) === Number(dmUserId) && !isSoloCampaign(campaignId);
+      memberSocket.emit('combate:resumen', isDm ? summary : forPlayers);
+    }
+  }
+  bindCombatEndedNotifier((campaignId) => setImmediate(() => publishCombatSummary(campaignId)));
+
+  // El libro solo apunta durante un combate
+  function whileInCombat(campaignId, fn) {
+    if (combatIsActive(campaignId)) fn();
+  }
+
   io.on('connection', (socket) => {
     const user = socket.data.user;
 
@@ -1206,6 +1664,9 @@ export function setupSockets(io) {
         }),
         members: onlineMembers(campaignId),
         combat: combatStateFor(campaignId, { isDm: membership.role === 'dm', userId: user.id }),
+        // Tiradas que le esperan (las suyas; el DM, todas): al recargar la
+        // página el aviso de «¡Salvación de DES!» no se pierde.
+        pendingRolls: pendingRolls.listar(campaignId, { userId: user.id, isDm: membership.role === 'dm' }),
       });
       scheduleEnemyAiTurn(campaignId);
     });
@@ -1216,11 +1677,36 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('room:members', onlineMembers(campaignId));
     });
 
-    socket.on('chat:send', ({ campaignId, text, references }, cb) => {
+    socket.on('chat:send', ({ campaignId, text, references, style = null, whisper = false }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
       const clean = typeof text === 'string' ? text.trim().slice(0, 2000) : '';
       if (!clean) return cb?.({ error: 'Mensaje vacío' });
+      // Narración en pantalla (Fase 4d): solo el DM narra
+      if (style != null && style !== 'narracion') return cb?.({ error: 'Estilo de mensaje no válido' });
+      if (style === 'narracion' && membership.role !== 'dm') return cb?.({ error: 'Solo el DM puede narrar' });
+
+      // Susurro (Fase 4, añadido): «/s Aria El posadero miente». El nombre es
+      // el de un miembro o el de su personaje; gana el más largo que encaje.
+      if (whisper) {
+        const target = resolveWhisperTarget(campaignId, clean);
+        if (!target) {
+          return cb?.({ error: 'No encuentro a quién susurrar: escribe /s y el nombre de un jugador o de su personaje.' });
+        }
+        if (Number(target.userId) === Number(user.id)) return cb?.({ error: 'No hace falta susurrarte a ti' });
+        if (!target.text) return cb?.({ error: 'Escribe qué le susurras.' });
+        const campaign = db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId);
+        const message = insertMessage({
+          campaignId,
+          userId: user.id,
+          type: 'chat',
+          body: target.text,
+          hidden: true,
+          recipientId: target.userId,
+        });
+        broadcastMessage(campaignId, message, { senderId: user.id, dmUserId: campaign.dm_user_id });
+        return cb?.({ ok: true });
+      }
 
       const checked = sanitizeChatReferences(clean, references, (category, index) =>
         db
@@ -1235,8 +1721,97 @@ export function setupSockets(io) {
         type: 'chat',
         body: clean,
         references: checked.references,
+        style,
       });
       io.to(roomName(campaignId)).emit('chat:new', message);
+      cb?.({ ok: true });
+    });
+
+    // Reacción a una tirada (Fase 4, añadido): una por usuario, de un conjunto
+    // cerrado; `emoji: null` la quita. Solo sobre tiradas que puedes ver, y
+    // el recuento solo llega a quien puede ver esa tirada.
+    socket.on('reaccion:poner', ({ campaignId, messageId, emoji = null }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      if (emoji != null && !ROLL_REACTIONS.includes(emoji)) return cb?.({ error: 'Reacción no válida' });
+      const row = db
+        .prepare(
+          `SELECT m.*, r.display_name AS recipient_name FROM chat_messages m
+           LEFT JOIN users r ON r.id = m.recipient_user_id WHERE m.id = ? AND m.campaign_id = ?`
+        )
+        .get(messageId, campaignId);
+      if (!row || row.type !== 'roll') return cb?.({ error: 'Solo se reacciona a tiradas' });
+      const dmUserId = campaignDmId(campaignId);
+      const message = serializeMessage(row);
+      if (message.hidden && !hiddenAudience(message, { senderId: row.user_id, dmUserId }).has(Number(user.id))) {
+        return cb?.({ error: 'Esa tirada no está a tu vista' });
+      }
+      if (emoji == null) {
+        db.prepare('DELETE FROM roll_reactions WHERE message_id = ? AND user_id = ?').run(row.id, user.id);
+      } else {
+        db.prepare(
+          `INSERT INTO roll_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)
+           ON CONFLICT(message_id, user_id) DO UPDATE SET emoji = excluded.emoji, created_at = datetime('now')`
+        ).run(row.id, user.id, emoji);
+      }
+      const reactions = reactionsFor([row.id]).get(row.id) ?? {};
+      emitToAudience(campaignId, message, 'reaccion:actualizada', { messageId: row.id, reactions }, {
+        senderId: row.user_id,
+        dmUserId,
+      });
+      cb?.({ ok: true, reactions });
+    });
+
+    // «¿Cómo quieres hacerlo?» (Fase 4d): la frase del golpe final, solo de
+    // quien acaba de derribar a un enemigo y mientras no caduque la petición.
+    socket.on('golpe-final:narrar', ({ campaignId, text }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const key = `${campaignId}:${user.id}`;
+      const request = finisherRequests.get(key);
+      if (!request || request.expires < Date.now()) {
+        finisherRequests.delete(key);
+        return cb?.({ error: 'Ese golpe final ya no espera descripción' });
+      }
+      const clean = typeof text === 'string' ? text.trim().slice(0, 240) : '';
+      finisherRequests.delete(key);
+      if (!clean) return cb?.({ ok: true, skipped: true });
+      const message = insertMessage({ campaignId, userId: user.id, type: 'chat', body: clean, style: 'golpe-final' });
+      io.to(roomName(campaignId)).emit('chat:new', message);
+      cb?.({ ok: true });
+    });
+
+    // Nombre oculto (Fase 4d): el DM revela quién era de verdad. Desde aquí
+    // el nombre real es el de todos y la criatura entra en el bestiario.
+    socket.on('combat:revelar-nombre', ({ campaignId, tokenId }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede revelar un nombre' });
+      const mapId = getActiveMapId(campaignId);
+      const token = db
+        .prepare(
+          `SELECT t.* FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id JOIN map_floors f ON f.id = r.floor_id
+           JOIN maps m ON m.id = f.map_id WHERE t.id = ? AND m.campaign_id = ?`
+        )
+        .get(tokenId, campaignId);
+      if (!token) return cb?.({ error: 'Marcador no encontrado' });
+      if (!token.true_name) return cb?.({ error: 'Ese marcador ya muestra su nombre real' });
+      const shownAs = token.name;
+      db.transaction(() => {
+        db.prepare('UPDATE map_tokens SET name = true_name, true_name = NULL WHERE id = ?').run(token.id);
+        db.prepare('UPDATE combatants SET name = ? WHERE campaign_id = ? AND map_token_id = ?').run(
+          token.true_name,
+          campaignId,
+          token.id
+        );
+      })();
+      if (token.monster_index) {
+        discoverCreatures(campaignId, [{ ...token, name: token.true_name }]);
+        notifyBestiary(campaignId);
+      }
+      postSystemMessage(campaignId, `${shownAs} se revela: es ${token.true_name}.`);
+      if (mapId) touchMap(mapId);
+      notifyCampaignMap(campaignId);
+      broadcastCombat(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1269,7 +1844,7 @@ export function setupSockets(io) {
     socket.on('roll:send', ({ campaignId, roll, hidden }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
-      const body = JSON.stringify(roll ?? {});
+      const body = JSON.stringify(rollWithOutcome(roll ?? {}));
       if (body.length > 8000) return cb?.({ error: 'Tirada demasiado grande' });
 
       // Solo el DM puede ocultar tiradas
@@ -1701,13 +2276,17 @@ export function setupSockets(io) {
 
       // Arranque fresco: resetea los recursos de todos y tira iniciativa según
       // lo que haya elegido el DM (por todos, o solo por quien no tenga)
-      const { rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false });
+      const { rolls, deferred } = activateTurnMode(campaignId, {
+        rerollAll: rerollAll !== false,
+        deferPj: deferPjInitiative,
+      });
       // Primero el estado (para que el cartel ya tenga el orden), luego el
       // aviso: cartel a pantalla + mensaje de chat, igual que el automático
       broadcastCombat(campaignId);
       notifyCombatStarted(campaignId);
       narrateInitiativeRolls(campaignId, rolls);
-      scheduleEnemyAiTurn(campaignId);
+      if (deferred.length) startInitiativeRitual(campaignId, deferred, () => scheduleEnemyAiTurn(campaignId));
+      else scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -1957,7 +2536,10 @@ export function setupSockets(io) {
         const critical = hit && (naturalCrit || effects.autoCrit);
         publishEnemyRoll(
           campaignId,
-          critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll
+          rollWithOutcome(
+            critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+            attackOutcome({ hit, crit: critical, fumble: attackRoll.fumble, targetName: resolved.name, ac: resolved.ac, effects })
+          )
         );
         emitAttackVisual(campaignId, resolved, {
           hit,
@@ -2256,7 +2838,7 @@ export function setupSockets(io) {
     // Acción especial del turno que gasta la acción: Correr (dobla el
     // movimiento), Esquivar (ya altera ataques) o Destrabarse. La puede
     // lanzar el dueño del PJ activo o el DM (controla enemigos/ausentes).
-    socket.on('combat:special-action', ({ campaignId, combatantId, kind }, cb) => {
+    socket.on('combat:special-action', ({ campaignId, combatantId, kind, targetId = null }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
 
@@ -2270,10 +2852,17 @@ export function setupSockets(io) {
         if (!owns) return cb?.({ error: 'Ese combatiente no es tuyo' });
       }
 
-      const result = trySpecialAction(campaignId, row.id, kind);
+      const result = trySpecialAction(campaignId, row.id, kind, { targetId });
       if (!result.ok) return cb?.(result);
 
-      const verb = kind === 'correr' ? 'corre' : kind === 'esquivar' ? 'se prepara para esquivar' : 'se destraba';
+      const verb =
+        kind === 'correr'
+          ? 'corre'
+          : kind === 'esquivar'
+            ? 'se prepara para esquivar'
+            : kind === 'ayudar'
+              ? `ayuda a ${result.target.name}`
+              : 'se destraba';
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: `${row.name} ${verb}.` });
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
@@ -2333,32 +2922,20 @@ export function setupSockets(io) {
       }
 
       const targetDc = Number.isInteger(dc) && dc >= 10 && dc <= 40 ? dc : 10;
-      // El bonificador sale de la ficha si es un PJ; un PNJ del DM no tiene
-      // ficha 5e completa aquí, así que tira a pelo y el DM ajusta si toca.
+      // Si el jugador ya tiene la salvación pendiente, el botón la adelanta en
+      // vez de tirar otra distinta (Fase 4c).
+      const pendingSave = row.character_id
+        ? pendingRolls.buscar(campaignId, { characterId: row.character_id, tipo: 'concentracion' })
+        : null;
+      if (pendingSave) {
+        const resolvedPending = pendingRolls.resolver(pendingSave.id, { userId: user.id, isDm: membership.role === 'dm' });
+        return cb?.(resolvedPending.error ? resolvedPending : { ok: true, pending: true });
+      }
       const character = row.character_id
         ? db.prepare('SELECT * FROM characters WHERE id = ?').get(row.character_id)
         : null;
-      const roll = buildConcentrationSaveRoll({
-        actorName: row.name,
-        bonus: character ? concentrationSaveBonus(character) : 0,
-        spell: row.concentration_spell,
-      });
-      const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
-
-      const rollNote = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
-      io.to(roomName(campaignId)).emit('chat:new', rollNote);
-
-      const spell = row.concentration_spell;
-      if (!outcome.held) {
-        db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(row.id);
-      }
-      postSystemMessage(
-        campaignId,
-        outcome.held
-          ? `${row.name} aguanta la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
-          : `${row.name} pierde la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
-      );
-      broadcastCombat(campaignId);
+      const roll = buildConcentrationRoll(row, character);
+      const outcome = resolveConcentrationRoll(campaignId, row, roll, targetDc, user.id);
       cb?.({ ok: true, held: outcome.held, total: roll.total, dc: targetDc });
     });
 
@@ -2422,7 +2999,27 @@ export function setupSockets(io) {
       }
 
       if (roll) {
-        const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+        // Veredicto de la salvación de muerte: CD 10, sin objetivo que revelar;
+        // el 20 y el 1 naturales tienen su propio sello.
+        const deathOutcome = {
+          tipo: 'muerte',
+          objetivo: row.name,
+          contra: { etiqueta: 'CD', valor: 10 },
+          resultado:
+            result.outcome === 'revive'
+              ? 'critico'
+              : die === 1
+                ? 'pifia'
+                : ['exito', 'estable'].includes(result.outcome)
+                  ? 'supera'
+                  : 'no-supera',
+        };
+        const rollMessage = insertMessage({
+          campaignId,
+          userId: user.id,
+          type: 'roll',
+          body: JSON.stringify(rollWithOutcome(roll, deathOutcome)),
+        });
         io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       }
 
@@ -2469,11 +3066,16 @@ export function setupSockets(io) {
 
       let body;
       let rolls = [];
+      let deferred = [];
       if (turningOn) {
-        ({ rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false }));
+        ({ rolls, deferred } = activateTurnMode(campaignId, {
+          rerollAll: rerollAll !== false,
+          deferPj: deferPjInitiative,
+        }));
         body = 'Modo por turnos activado: movimiento y acciones solo en tu turno.';
       } else {
         deactivateTurnMode(campaignId);
+        pendingRolls.cancelar(campaignId, { tipos: ['iniciativa'] });
         body = 'Modo libre: movimiento y acciones sin restricción de turno.';
       }
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
@@ -2482,7 +3084,10 @@ export function setupSockets(io) {
       // Cartel de aviso tras difundir el estado, para que ya tenga el orden
       if (turningOn) io.to(roomName(campaignId)).emit('combat:started');
       narrateInitiativeRolls(campaignId, rolls);
-      if (turningOn) scheduleEnemyAiTurn(campaignId);
+      if (turningOn && deferred.length) {
+        startInitiativeRitual(campaignId, deferred, () => scheduleEnemyAiTurn(campaignId));
+      }
+      else if (turningOn) scheduleEnemyAiTurn(campaignId);
       else cancelEnemyAiTurn(campaignId);
       cb?.({ ok: true, active: turningOn });
     });
@@ -2535,11 +3140,15 @@ export function setupSockets(io) {
       const membership = getMembership(campaignId, user.id);
       if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede terminar el combate' });
 
+      // El resumen sale antes de vaciar el tracker (Fase 4, añadido)
+      publishCombatSummary(campaignId);
       db.prepare('DELETE FROM combatants WHERE campaign_id = ?').run(campaignId);
       db.prepare(
         'UPDATE game_tables SET combat_active = 0, combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?'
       ).run(campaignId);
       cancelEnemyAiTurn(campaignId);
+      // Sin combate, una iniciativa o una concentración pendientes ya no significan nada
+      pendingRolls.cancelar(campaignId, { tipos: ['iniciativa', 'concentracion'] });
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha terminado' });
       io.to(roomName(campaignId)).emit('chat:new', note);
@@ -2654,13 +3263,14 @@ export function setupSockets(io) {
         label: `Ataque de oportunidad: ${option.name}`,
         actorName: attacker.name,
       });
+      consumeHelpIfUsed(attacker, effects);
       const naturalCrit = attackRoll.crit;
       const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= resolved.ac);
       const critical = hit && (naturalCrit || effects.autoCrit);
-      emitAttackVisual(campaignId, resolved, { hit, crit: critical });
-      const sharedAttack = critical && !naturalCrit
-        ? { ...attackRoll, crit: true, forcedCrit: true }
-        : attackRoll;
+      const sharedAttack = rollWithOutcome(
+        critical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+        attackOutcome({ hit, crit: critical, fumble: attackRoll.fumble, targetName: resolved.name, ac: resolved.ac, effects })
+      );
       const attackMessage = insertMessage({
         campaignId,
         userId: user.id,
@@ -2668,6 +3278,7 @@ export function setupSockets(io) {
         body: JSON.stringify(sharedAttack),
       });
       io.to(roomName(campaignId)).emit('chat:new', attackMessage);
+      emitAttackVisual(campaignId, resolved, { hit, crit: critical });
 
       let damage = null;
       if (hit && option.damage.length) {
@@ -2766,7 +3377,17 @@ export function setupSockets(io) {
     // Conjuros lanzados desde el tablero: el cliente solo elige conjuro,
     // centro/dirección y espacio. Alcance, visión, objetivos de la plantilla,
     // CA, salvaciones y daño salen de la ficha y del SRD en el servidor.
-    socket.on('combate:lanzar-conjuro', ({ campaignId, characterId, spellIndex, aim, target, slotLevel }, cb) => {
+    // Asíncrono desde la Fase 4c: las salvaciones de los PJ afectados esperan a
+    // que cada jugador pulse «Tirar» (u ocho segundos). El conjuro se resuelve
+    // UNA vez, con todas las salvaciones dentro.
+    socket.on('combate:lanzar-conjuro', (payload, cb) => {
+      castBoardSpell(payload ?? {}, cb).catch((error) => {
+        console.error('[conjuros] error al resolver un conjuro:', error);
+        cb?.({ error: 'No se pudo resolver el conjuro' });
+      });
+    });
+
+    async function castBoardSpell({ campaignId, characterId, spellIndex, aim, target, slotLevel }, cb) {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
       const character = db
@@ -2917,12 +3538,21 @@ export function setupSockets(io) {
           label: `${data.name} — ataque de conjuro`,
           actorName: character.name,
         });
+        consumeHelpIfUsed(attackerCombatant, attackEffects);
         const naturalCrit = attackRoll.crit;
         const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= targetForAttack.ac);
         spellAttackCritical = hit && (naturalCrit || attackEffects.autoCrit);
-        const shared = spellAttackCritical && !naturalCrit
-          ? { ...attackRoll, crit: true, forcedCrit: true }
-          : attackRoll;
+        const shared = rollWithOutcome(
+          spellAttackCritical && !naturalCrit ? { ...attackRoll, crit: true, forcedCrit: true } : attackRoll,
+          attackOutcome({
+            hit,
+            crit: spellAttackCritical,
+            fumble: attackRoll.fumble,
+            targetName: targetForAttack.name,
+            ac: targetForAttack.ac,
+            effects: attackEffects,
+          })
+        );
         const message = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(shared) });
         io.to(roomName(campaignId)).emit('chat:new', message);
         outcomes.push({ target: targetForAttack, hit, saved: null, critical: spellAttackCritical });
@@ -2935,6 +3565,7 @@ export function setupSockets(io) {
           weapon: { geometry: { ranged: true }, name: data.name, srdIndex: null },
         });
       } else {
+        const pendingSaves = [];
         for (const resolved of targets) {
           const saveAbility = data.dc?.dc_type?.index ?? null;
           if (!saveAbility) {
@@ -2952,27 +3583,52 @@ export function setupSockets(io) {
           const automaticFailure =
             ['str', 'dex'].includes(saveAbility) &&
             conditions.some((condition) => ['paralizado', 'aturdido', 'inconsciente'].includes(condition));
-          const saveRoll = buildServerD20Roll({
-            bonus: savingThrowBonus({ ...resolved, combatant: targetCombatant }, saveAbility),
-            advantage: savingThrowAdvantage(resolved, targetCombatant, saveAbility),
-            label: `Salvación de ${saveAbility.toUpperCase()} contra ${data.name}`,
-            actorName: resolved.name,
-          });
-          const sharedSave = { ...saveRoll, kind: 'save', crit: false, fumble: false };
-          const saveMessage = insertMessage({
-            campaignId,
-            userId: user.id,
-            type: 'roll',
-            body: JSON.stringify(sharedSave),
-          });
-          io.to(roomName(campaignId)).emit('chat:new', saveMessage);
-          outcomes.push({
+          const saveBonus = savingThrowBonus({ ...resolved, combatant: targetCombatant }, saveAbility);
+          const saveAdvantage = savingThrowAdvantage(resolved, targetCombatant, saveAbility);
+          const saveLabel = `Salvación de ${saveAbility.toUpperCase()} contra ${data.name}`;
+          const entry = {
             target: { ...resolved, combatant: targetCombatant },
             hit: true,
-            saved: !automaticFailure && saveRoll.total >= profile.saveDc,
+            saved: false,
             critical: false,
-          });
+          };
+          outcomes.push(entry);
+          const buildSave = () =>
+            buildServerD20Roll({ bonus: saveBonus, advantage: saveAdvantage, label: saveLabel, actorName: resolved.name });
+          // La salvación de un PJ la firma su jugador: es él quien ha pulsado
+          const saveAuthor = resolved.kind === 'personaje' ? resolved.character.user_id ?? user.id : user.id;
+          const publishSave = (saveRoll) => {
+            entry.saved = !automaticFailure && saveRoll.total >= profile.saveDc;
+            const sharedSave = rollWithOutcome(
+              { ...saveRoll, kind: 'save', crit: false, fumble: false },
+              saveOutcome({ saved: entry.saved, dc: profile.saveDc, targetName: resolved.name })
+            );
+            const saveMessage = insertMessage({
+              campaignId,
+              userId: saveAuthor,
+              type: 'roll',
+              body: JSON.stringify(sharedSave),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', saveMessage);
+          };
+          if (resolved.kind === 'personaje') {
+            pendingSaves.push(
+              requestCharacterRoll({
+                campaignId,
+                character: resolved.character,
+                tipo: 'salvacion',
+                etiqueta: saveLabel,
+                caracteristica: saveAbility,
+                origen: `${data.name} de ${character.name}`,
+                build: buildSave,
+                publish: publishSave,
+              })
+            );
+          } else {
+            publishSave(buildSave());
+          }
         }
+        if (pendingSaves.length) await Promise.all(pendingSaves);
       }
 
       const hasDamage = Boolean(spellDamageNotation(data, character.level, requestedSlot));
@@ -2990,6 +3646,7 @@ export function setupSockets(io) {
       }
 
       const publicOutcomes = [];
+      let finisherAsked = false;
       for (const outcome of outcomes) {
         let detail = null;
         const avoidsDamage = outcome.saved && data.dc?.dc_success !== 'half';
@@ -3005,6 +3662,13 @@ export function setupSockets(io) {
           );
           const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: applied.body });
           io.to(roomName(campaignId)).emit('chat:new', note);
+          if (applied.detail.defeated && outcome.target.kind === 'marcador') {
+            recordFinalBlow(campaignId, { by: character.name, target: outcome.target.name });
+          }
+          if (applied.detail.defeated && outcome.target.kind === 'marcador' && !finisherAsked) {
+            finisherAsked = true;
+            requestFinisher(campaignId, user.id, outcome.target.name);
+          }
           detail = damageDetailForViewer(applied.detail, {
             enemy: outcome.target.kind === 'marcador',
             isDm: membership.role === 'dm',
@@ -3048,7 +3712,7 @@ export function setupSockets(io) {
       notifyCampaignMap(campaignId);
       broadcastCombat(campaignId);
       cb?.({ ok: true, outcomes: publicOutcomes });
-    });
+    }
 
     // --- Combate en el tablero: atacar y aplicar daño -----------------
 
@@ -3084,20 +3748,25 @@ export function setupSockets(io) {
       // validado el objetivo, para no penalizar un intento inválido
       const actionSpend = trySpendAction(campaignId, checked.character.id);
       if (!actionSpend.ok) return cb?.({ error: actionSpend.error });
+      // La ayuda recibida se gasta con este ataque si le dio ventaja
+      consumeHelpIfUsed(attackerCombatant, effects);
 
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      const outcome = attackOutcome({ hit, crit, fumble: roll.fumble, targetName: resolved.name, ac: resolved.ac, effects });
+
+      // La tirada sale ANTES que su efecto: la mesa retiene el destello y el
+      // «−N» hasta que el dado cae, y para eso tiene que saber de qué tirada son.
+      const sharedRoll = rollWithOutcome(crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll, outcome);
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       emitAttackVisual(campaignId, resolved, {
         hit,
         crit,
         attacker: { character: checked.character },
         weapon: weaponData,
       });
-
-      const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
-      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const weapon = ` con ${weaponData.name.slice(0, 40)}`;
       const note = insertMessage({
@@ -3112,7 +3781,7 @@ export function setupSockets(io) {
       broadcastCombat(campaignId);
       // La CA viaja solo tras resolver el ataque: es el feedback de por qué
       // impacta o falla (en la mesa real también se acaba deduciendo)
-      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total), effects });
+      cb?.({ ok: true, hit, crit, ac: resolved.ac, total: Number(roll.total), effects, outcome });
     });
 
     // Aplica el daño al objetivo: enemigos por el tracker (y si caen,
@@ -3140,7 +3809,7 @@ export function setupSockets(io) {
         silvered: weaponData.silvered,
         adamantine: weaponData.adamantine,
       }));
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const { body, detail } = applyCombatDamage(campaignId, resolved, incoming, {
@@ -3156,6 +3825,11 @@ export function setupSockets(io) {
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
       io.to(roomName(campaignId)).emit('chat:new', note);
+      // Fase 4d: quien derriba a un enemigo describe el golpe final
+      if (detail.defeated && resolved.kind === 'marcador') {
+        recordFinalBlow(campaignId, { by: checked.character.name, target: resolved.name });
+        requestFinisher(campaignId, user.id, resolved.name);
+      }
       const visibleDetail = damageDetailForViewer(detail, {
         enemy: resolved.kind === 'marcador',
         isDm: membership.role === 'dm',
@@ -3246,19 +3920,21 @@ export function setupSockets(io) {
         multiattackResolved = spend.multiattackResolved;
       }
 
+      consumeHelpIfUsed(attackerCombatant, effects);
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
+      const outcome = attackOutcome({ hit, crit, fumble: roll.fumble, targetName: resolved.name, ac: resolved.ac, effects });
+
+      const sharedRoll = rollWithOutcome(crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll, outcome);
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
+      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
       emitAttackVisual(campaignId, resolved, {
         hit,
         crit,
         attacker: { token: attackerToken },
         weapon: actionData,
       });
-
-      const sharedRoll = crit && !naturalCrit ? { ...roll, crit: true, forcedCrit: true } : roll;
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(sharedRoll) });
-      io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const attackerName = attackerToken?.name ?? 'El enemigo';
       const weapon = ` con ${attackName.slice(0, 40)}`;
@@ -3287,6 +3963,7 @@ export function setupSockets(io) {
         ac: resolved.ac,
         total: Number(roll.total),
         effects,
+        outcome,
         multiattackState,
         multiattackCompleted,
         multiattackResolved,
@@ -3319,7 +3996,7 @@ export function setupSockets(io) {
         silvered: false,
         adamantine: false,
       }));
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const { body, detail } = applyCombatDamage(campaignId, resolved, incoming, {
@@ -3352,7 +4029,7 @@ export function setupSockets(io) {
       if (resolved.error) return cb?.({ error: resolved.error });
 
       const roll = buildFallDamageRoll({ feet, targetName: resolved.name });
-      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(roll) });
+      const rollMessage = insertMessage({ campaignId, userId: user.id, type: 'roll', body: JSON.stringify(rollWithOutcome(roll)) });
       io.to(roomName(campaignId)).emit('chat:new', rollMessage);
 
       const incoming = sanitizeDamageComponents(
@@ -3419,6 +4096,152 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
       cb?.({ ok: true, remainingQty: item.qty <= 1 ? 0 : item.qty - 1 });
+    });
+
+    // --- Tiradas pendientes y tiradas pedidas por el DM (Fase 4c) ---------
+
+    // El dueño pulsa «Tirar» (o el DM adelanta una ajena: «Tirar ya»). El
+    // servidor tira en ese instante; el cliente nunca manda el número.
+    socket.on('tirada:resolver', ({ campaignId, id }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const pending = pendingRolls.listar(campaignId, { isDm: true }).find((item) => item.id === Number(id));
+      if (!pending) return cb?.({ error: 'Esa tirada ya no está pendiente' });
+      cb?.(pendingRolls.resolver(id, { userId: user.id, isDm: membership.role === 'dm' }));
+    });
+
+    // «Tirar ya» por todas (o por varias) las pendientes de la mesa: solo el DM.
+    socket.on('tirada:forzar', ({ campaignId, ids = null }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede tirar por los demás' });
+      const list = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger) : null;
+      cb?.({ ok: true, count: pendingRolls.forzar(campaignId, { ids: list }) });
+    });
+
+    // El DM pide una tirada: prueba de característica, de habilidad o
+    // salvación, a unos PJ o a todo el grupo, con CD opcional (oculta salvo
+    // que la revele) y, si es de grupo, con el resultado colectivo al final.
+    socket.on('tirada:pedir', ({
+      campaignId,
+      tipo,
+      caracteristica = null,
+      habilidad = null,
+      characterIds = [],
+      cd = null,
+      revelarCd = false,
+      grupal = false,
+    }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede pedir tiradas' });
+      if (!['prueba', 'salvacion'].includes(tipo)) return cb?.({ error: 'Tipo de tirada no válido' });
+      const skill = tipo === 'prueba' && habilidad && CHECK_SKILLS[habilidad] ? habilidad : null;
+      if (habilidad && !skill) return cb?.({ error: 'Habilidad no válida' });
+      const ability = abilityForCheck({ caracteristica, habilidad: skill });
+      if (!ability || !ABILITY_KEYS.includes(ability)) return cb?.({ error: 'Elige una característica o una habilidad' });
+      const dc = cd == null || cd === '' ? null : Number(cd);
+      if (dc != null && (!Number.isInteger(dc) || dc < 1 || dc > 40)) {
+        return cb?.({ error: 'La CD debe estar entre 1 y 40' });
+      }
+      if (grupal && dc == null) return cb?.({ error: 'Una tirada de grupo necesita una CD' });
+
+      const wanted = Array.isArray(characterIds) ? characterIds.map(Number).filter(Number.isInteger) : [];
+      const characters = db
+        .prepare("SELECT * FROM characters WHERE campaign_id = ? AND kind = 'pj' ORDER BY name")
+        .all(campaignId)
+        .filter((character) => !wanted.length || wanted.includes(character.id));
+      if (!characters.length) return cb?.({ error: 'No hay personajes a los que pedir la tirada' });
+
+      const label = checkLabel({ tipo, caracteristica: ability, habilidad: skill });
+      const grupoId = `pedida-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const everyone = !wanted.length;
+      postSystemMessage(
+        campaignId,
+        `El DM pide ${grupal ? 'una tirada de grupo de' : 'una tirada de'} ${label}${
+          everyone ? ' a todo el grupo' : ` a ${characters.map((character) => character.name).join(', ')}`
+        }${dc != null && revelarCd ? ` (CD ${dc})` : ''}.`
+      );
+
+      const results = [];
+      const requests = characters.map((character) => {
+        const combatant = db
+          .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
+          .get(campaignId, character.id);
+        return requestCharacterRoll({
+          campaignId,
+          character,
+          tipo: tipo === 'salvacion' ? 'salvacion' : 'prueba',
+          etiqueta: label,
+          caracteristica: ability,
+          habilidad: skill,
+          cd: dc,
+          revelarCd,
+          origen: grupal ? 'Tirada de grupo que pide el DM' : 'El DM pide una tirada',
+          grupoId,
+          build: () => {
+            const bonus =
+              tipo === 'salvacion'
+                ? characterSaveBonus(character, ability)
+                : skill
+                  ? skillCheckBonus(character, skill)
+                  : abilityCheckBonus(character, ability);
+            // Ayudar (SRD): ventaja en la siguiente prueba de característica
+            // del ayudado. Se consume aquí, al tirarla.
+            const current = combatant
+              ? db.prepare('SELECT help_from_id FROM combatants WHERE id = ?').get(combatant.id)
+              : null;
+            const helped = tipo === 'prueba' && Boolean(current?.help_from_id);
+            if (helped) db.prepare('UPDATE combatants SET help_from_id = NULL WHERE id = ?').run(combatant.id);
+            const disadvantage = checkDisadvantage(character, ability);
+            const advantage = helped && !disadvantage ? 'adv' : disadvantage && !helped ? 'dis' : 'none';
+            return buildServerD20Roll({ bonus, advantage, label, actorName: character.name });
+          },
+          evaluar: (roll) => (dc == null ? null : roll.total >= dc),
+          publish: (roll) => {
+            const success = dc == null ? null : roll.total >= dc;
+            results.push({ name: character.name, total: roll.total, success });
+            const outcome = checkOutcome({
+              success,
+              dc,
+              reveal: revelarCd,
+              targetName: character.name,
+              tipo: tipo === 'salvacion' ? 'salvacion' : 'prueba',
+            });
+            const message = insertMessage({
+              campaignId,
+              userId: character.user_id ?? null,
+              type: 'roll',
+              body: JSON.stringify(rollWithOutcome({ ...roll, kind: 'check' }, outcome)),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', message);
+          },
+        });
+      });
+
+      // El resultado colectivo, cuando han tirado todos (sin bloquear la respuesta)
+      Promise.all(requests).then(() => {
+        if (!results.length) return;
+        if (grupal) {
+          const successes = results.filter((result) => result.success).length;
+          const passed = groupCheckSucceeds(successes, results.length);
+          postSystemMessage(
+            campaignId,
+            `Tirada de grupo de ${label}: el grupo ${passed ? 'la supera' : 'no la supera'} (${successes} de ${results.length}${
+              revelarCd ? `, CD ${dc}` : ''
+            }).`
+          );
+        } else if (dc != null && !revelarCd) {
+          // Con la CD oculta, el reparto de éxitos es del DM: nota privada
+          postSystemMessage(
+            campaignId,
+            `Resultados de ${label} (CD ${dc}): ${results
+              .map((result) => `${result.name} ${result.total} ${result.success ? '✓' : '✗'}`)
+              .join(', ')}.`,
+            { hidden: true }
+          );
+        }
+      });
+
+      cb?.({ ok: true, grupoId, count: characters.length });
     });
 
     socket.on('disconnecting', () => {
