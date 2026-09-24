@@ -537,10 +537,6 @@ export default function AttackPanel({
           );
         })}
       </div>
-
-      <p className="mt-2 text-[0.65rem] text-bone/40">
-        Las tiradas se comparten con la mesa; el impacto y el daño los resuelve el servidor.
-      </p>
     </div>
   );
 }

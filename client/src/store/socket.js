@@ -3,7 +3,8 @@ import { io } from 'socket.io-client';
 import { toastInfo } from './toast.js';
 import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
 import { sfxForCombatVisual } from '../features/tactical-map/domain/attackFlow.js';
-import { play } from '../lib/sfx/index.js';
+import { loadOverrides, play } from '../lib/sfx/index.js';
+import { api } from '../api.js';
 import { useReveal } from './reveal.js';
 import { useAuth } from './auth.js';
 
@@ -295,6 +296,9 @@ export const useRoom = create((set, get) => ({
         set({ joinError: resp.error, campaignId: null });
         return;
       }
+      // Al sentarse a la mesa, los sonidos vigentes: los subidos desde otro
+      // dispositivo después de iniciar sesión también cuentan.
+      loadOverrides(api);
       set({
         role: resp.role,
         isLive: resp.isLive,

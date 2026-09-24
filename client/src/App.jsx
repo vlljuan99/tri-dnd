@@ -60,9 +60,17 @@ function Protected() {
   // sonidos personalizados de la instalación. Si algo de esto falla, la mesa se
   // queda en silencio pero nada más se rompe.
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
     bindUnlock();
     loadOverrides(api);
+    // Los sonidos se suben desde otra pestaña u otro dispositivo: al volver a
+    // esta se recogen sin recargar (antes se quedaba con los del inicio de
+    // sesión y seguía sonando lo sintetizado).
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadOverrides(api);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
   }, [user]);
 
   if (loading) {
