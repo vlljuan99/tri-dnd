@@ -20,9 +20,12 @@ export function seedSkirmishMap(
   campaignId,
   userId,
   mapData,
-  { name, enemyAi = false, soloPartySize = null } = {}
+  { name, enemyAi = false, soloPartySize = null, presetId = null } = {}
 ) {
   const mapId = instantiateMap(campaignId, userId, mapData, name);
+  // El mapa recuerda de qué escenario de fábrica salió para pintar sus
+  // figuras con las imágenes del administrador (services/skirmishImages.js)
+  if (presetId) db.prepare('UPDATE maps SET skirmish_preset_id = ? WHERE id = ?').run(presetId, mapId);
 
   // `instantiateMap` crea toda sala sin revelar (lo correcto para una
   // plantilla que el DM estampa en su dungeon). Una escaramuza sí abre las
@@ -96,6 +99,7 @@ export function resolveSkirmishSource({ presetId, template }) {
     const preset = getSkirmishPreset(presetId);
     if (!preset) return { error: 'Ese escenario predefinido no existe' };
     return {
+      presetId: preset.id,
       mapData: preset.map,
       name: preset.name,
       maxPlayers: preset.players,

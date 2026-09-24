@@ -76,3 +76,54 @@ test('la migración v70 conserva las fichas y les deriva su competencia', async 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+// La v78 enlaza cada mapa con el escenario de fábrica del que salió para
+// pintar sus figuras con las imágenes del administrador. Las escaramuzas ya
+// montadas se reconocen por el nombre estable del mapa; una campaña que
+// casualmente llame igual a un mapa suyo no debe heredar nada.
+test('la migración v78 enlaza las escaramuzas ya montadas con su escenario', async () => {
+  const V78 = 78;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tridnd-mig-'));
+  process.env.TRIDND_DATA_DIR ??= dir;
+  const { migrations } = await import('../../db.js');
+
+  const db = new Database(path.join(dir, 'probe.db'));
+  try {
+    applyUpTo(db, migrations, V78 - 1);
+    db.prepare(
+      "INSERT INTO users (id, username, display_name, password_hash) VALUES (1, 'veterana', 'Veterana', 'x')"
+    ).run();
+    const campaign = (name, type) =>
+      Number(
+        db
+          .prepare("INSERT INTO campaigns (name, dm_user_id, invite_code, campaign_type) VALUES (?, 1, ?, ?)")
+          .run(name, `C${Math.random().toString(36).slice(2, 8)}`, type).lastInsertRowid
+      );
+    const map = (campaignId, name) =>
+      Number(db.prepare('INSERT INTO maps (campaign_id, name) VALUES (?, ?)').run(campaignId, name).lastInsertRowid);
+
+    const paso = map(campaign('Emboscada', 'escaramuza'), 'Paso del Cuervo');
+    const cripta = map(campaign('Cripta', 'escaramuza'), 'Cripta de los Doce Silentes');
+    const fundicion = map(campaign('Fundición', 'escaramuza'), 'Fundición de Escoria Roja');
+    const propio = map(campaign('Mesa propia', 'escaramuza'), 'Sótano');
+    const homonimo = map(campaign('Campaña larga', 'campana'), 'Paso del Cuervo');
+
+    const v78 = migrations[V78 - 1];
+    if (typeof v78 === 'function') v78(db);
+    else db.exec(v78);
+
+    const presetOf = (id) => db.prepare('SELECT skirmish_preset_id FROM maps WHERE id = ?').get(id).skirmish_preset_id;
+    assert.equal(presetOf(paso), 'paso-del-cuervo');
+    assert.equal(presetOf(cripta), 'cripta-anegada');
+    assert.equal(presetOf(fundicion), 'puente-igneo');
+    assert.equal(presetOf(propio), null, 'un mapa propio no sale de ningún escenario');
+    assert.equal(presetOf(homonimo), null, 'una campaña no es una escaramuza aunque su mapa se llame igual');
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'skirmish_figure_images'").get().n,
+      1
+    );
+  } finally {
+    db.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

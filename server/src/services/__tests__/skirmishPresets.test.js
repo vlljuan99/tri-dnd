@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SKIRMISH_PRESETS, getSkirmishPreset, listSkirmishPresets } from '../skirmishPresets.js';
+import {
+  FIGURE_IMAGE_KINDS,
+  SKIRMISH_PRESETS,
+  getSkirmishPreset,
+  listSkirmishFigures,
+  listSkirmishPresets,
+  skirmishFigureKey,
+} from '../skirmishPresets.js';
 
 // Los escenarios de fábrica se escriben a mano y su geometría se genera, así
 // que es fácil dejar un enemigo sobre una casilla que no existe o dos
@@ -146,5 +153,51 @@ test('las puertas apuntan a salas reales y respetan sus reglas', () => {
         assert.notDeepEqual(door.from, door.to, `${label}: una escalera debe unir salas distintas`);
       }
     }
+  }
+});
+
+test('la clave de una figura es estable, sin tildes y distingue el tipo', () => {
+  assert.equal(skirmishFigureKey('objeto', 'Carro volcado'), 'objeto-carro-volcado');
+  assert.equal(skirmishFigureKey('objeto', 'Arcón del sagrario'), 'objeto-arcon-del-sagrario');
+  assert.equal(skirmishFigureKey('enemigo', 'Vhorra, la Escoria Roja'), 'enemigo-vhorra-la-escoria-roja');
+  assert.notEqual(skirmishFigureKey('enemigo', 'Lobo'), skirmishFigureKey('objeto', 'Lobo'));
+});
+
+test('cada escenario lista sus enemigos y objetos una vez por figura', () => {
+  const paso = listSkirmishFigures('paso-del-cuervo');
+  const byKey = new Map(paso.map((figure) => [figure.key, figure]));
+  // Los cuatro arqueros comparten figura (y por tanto imagen); el capitán no.
+  assert.equal(byKey.get('enemigo-bandido-arquero')?.count, 4);
+  assert.equal(byKey.get('enemigo-bandido')?.count, 2);
+  assert.equal(byKey.get('enemigo-yerna-la-tuerta')?.monsterIndex, 'bandit-captain');
+  assert.deepEqual(byKey.get('objeto-carro-volcado'), {
+    key: 'objeto-carro-volcado',
+    kind: 'objeto',
+    name: 'Carro volcado',
+    monsterIndex: null,
+    count: 1,
+    rooms: ['El paso'],
+  });
+  // Las trampas no son figuras con imagen.
+  assert.ok(paso.every((figure) => FIGURE_IMAGE_KINDS.includes(figure.kind)));
+  assert.equal(listSkirmishFigures('no-existe'), null);
+});
+
+test('dos figuras distintas de un escenario nunca comparten clave', () => {
+  for (const preset of SKIRMISH_PRESETS) {
+    const names = new Set();
+    for (const floor of preset.map.floors) {
+      for (const room of floor.rooms) {
+        for (const token of room.tokens ?? []) {
+          const kind = token.kind ?? 'enemigo';
+          if (FIGURE_IMAGE_KINDS.includes(kind)) names.add(`${kind}|${token.trueName ?? token.name}`);
+        }
+      }
+    }
+    assert.equal(
+      listSkirmishFigures(preset.id).length,
+      names.size,
+      `${preset.id}: dos nombres distintos producen la misma clave de figura`
+    );
   }
 });

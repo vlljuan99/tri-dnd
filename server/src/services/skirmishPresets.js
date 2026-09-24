@@ -545,5 +545,55 @@ export function getSkirmishPreset(id) {
   return PRESETS.find((preset) => preset.id === id) ?? null;
 }
 
+// ---- Figuras con imagen ----
+//
+// El administrador de la instalación puede poner imagen a los enemigos y
+// objetos de cada escenario (services/skirmishImages.js). La imagen es de la
+// FIGURA, no de cada marcador: los cuatro «Bandido arquero» del Paso del
+// Cuervo comparten la suya, y la de «Yerna la Tuerta» es solo de ella.
+//
+// La clave sale del tipo y del nombre real del marcador (el oculto, si lo
+// tiene), así que la misma función identifica la figura en el catálogo y en
+// las partidas ya montadas, donde el marcador conserva ese nombre.
+
+export const FIGURE_IMAGE_KINDS = ['enemigo', 'objeto'];
+
+export function skirmishFigureKey(kind, name) {
+  const slug = String(name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${kind}-${slug}`;
+}
+
+/**
+ * Figuras distintas de un escenario a las que se les puede poner imagen, en el
+ * orden en que aparecen. `null` si el escenario no existe.
+ */
+export function listSkirmishFigures(presetId) {
+  const preset = getSkirmishPreset(presetId);
+  if (!preset) return null;
+  const figures = new Map();
+  for (const floor of preset.map.floors) {
+    for (const room of floor.rooms) {
+      for (const token of room.tokens ?? []) {
+        const kind = token.kind ?? 'enemigo';
+        if (!FIGURE_IMAGE_KINDS.includes(kind)) continue;
+        const name = token.trueName ?? token.name;
+        const key = skirmishFigureKey(kind, name);
+        if (!figures.has(key)) {
+          figures.set(key, { key, kind, name, monsterIndex: token.monsterIndex ?? null, count: 0, rooms: [] });
+        }
+        const figure = figures.get(key);
+        figure.count += 1;
+        if (!figure.rooms.includes(room.name)) figure.rooms.push(room.name);
+      }
+    }
+  }
+  return [...figures.values()];
+}
+
 // Solo para pruebas: el catálogo entero con su geometría
 export const SKIRMISH_PRESETS = PRESETS;

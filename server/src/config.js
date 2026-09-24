@@ -22,6 +22,9 @@ export const AVATAR_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
 // Sonidos subidos para sustituir a los sintetizados. No son secretos: se
 // sirven como estáticos igual que los avatares.
 export const SOUND_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'sounds');
+// Imágenes que el administrador pone a los enemigos y objetos de los
+// escenarios de fábrica. Públicas como los avatares: las ve toda la mesa.
+export const SKIRMISH_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'skirmishes');
 // El archivo narrativo del DM es privado: sus imágenes nunca se sirven desde
 // /uploads, que es una ruta estática pública. Solo las entrega la API tras
 // comprobar que quien las pide es el DM de la campaña.
@@ -30,10 +33,11 @@ export const NARRATIVE_MEDIA_DIR = path.join(DATA_DIR, 'narrative-media');
 // Se mantiene fuera de /uploads: además de ser un respaldo local, puede
 // contener notas privadas del DM que nunca deben servirse como estáticas.
 export const NARRATIVE_BACKUP_DIR = path.join(DATA_DIR, 'backups', 'narrativa');
-// Quién puede cambiar los sonidos por defecto de TODA la instalación. Es la
-// única capacidad "de administrador" que existe en TriDnD, así que no se monta
-// un sistema de roles para ella: se listan nombres de usuario separados por
-// comas en `TRIDND_ADMIN_USERS`.
+// Quién administra la instalación: cambia lo que es de TODA ella y no de una
+// mesa (los sonidos por defecto y las imágenes de las figuras de los
+// escenarios de fábrica). Son pocas capacidades, así que no se monta un
+// sistema de roles: se listan nombres de usuario separados por comas en
+// `TRIDND_ADMIN_USERS` (ver services/admin.js).
 //
 // Sin la variable, manda el usuario fundador (el de id más bajo, que es quien
 // levantó la instalación). Así funciona en local sin configurar nada y en el
@@ -52,6 +56,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(MAP_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(AVATAR_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(SOUND_UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(SKIRMISH_UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(NARRATIVE_MEDIA_DIR, { recursive: true });
 fs.mkdirSync(NARRATIVE_BACKUP_DIR, { recursive: true });
 
