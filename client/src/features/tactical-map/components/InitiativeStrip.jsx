@@ -145,7 +145,13 @@ function InitiativeCard({ entry, selected, onSelect }) {
 
       {/* Fase 4d: el estado de un enemigo con palabras, sin números */}
       {entry.healthLabel && entry.kind !== 'pj' && entry.state !== 'dead' && (
-        <span className="w-full truncate text-center text-[0.5rem] leading-none text-blood/75">{entry.healthLabel}</span>
+        <span
+          className={`w-full truncate text-center text-[0.5rem] leading-none ${
+            entry.healthLabel === 'ileso' ? 'text-bone/45' : 'text-blood/75'
+          }`}
+        >
+          {entry.healthLabel}
+        </span>
       )}
 
       <span

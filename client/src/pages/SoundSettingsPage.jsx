@@ -6,6 +6,7 @@ import { useReveal } from '../store/reveal.js';
 import { ETIQUETAS_RITMO, RITMOS } from '../features/dice-tray/lib/reveal.js';
 import { agitarActivado, guardarAgitar, pedirPermisoMovimiento } from '../features/dice-tray/lib/shake.js';
 import { useAuth } from '../store/auth.js';
+import { activarNotificaciones, notificacionesActivadas } from '../lib/attention.js';
 
 // Qué supone cada ritmo, para elegir sin tener que probarlo en mitad de una
 // partida (Fase 4b).
@@ -95,6 +96,7 @@ export default function SoundSettingsPage() {
   const autoRolls = useAuth((s) => Boolean(s.user?.autoRolls));
   const setAutoRolls = useAuth((s) => s.setAutoRolls);
   const [agitar, setAgitar] = useState(() => agitarActivado());
+  const [avisoTurno, setAvisoTurno] = useState(() => notificacionesActivadas());
   const [tiradasError, setTiradasError] = useState('');
 
   async function cambiarAutoRolls(value) {
@@ -266,6 +268,26 @@ export default function SoundSettingsPage() {
           <span>
             Agitar el móvil para tirar
             <span className="block text-xs text-ink/55">Con una tirada pendiente en pantalla, agitarlo equivale a pulsar «Tirar».</span>
+          </span>
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={avisoTurno}
+            onChange={async (event) => {
+              setTiradasError('');
+              const ok = await activarNotificaciones(event.target.checked);
+              setAvisoTurno(ok);
+              if (event.target.checked && !ok) setTiradasError('El navegador no ha dado permiso para avisarte.');
+            }}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Avisarme de mi turno con una notificación
+            <span className="block text-xs text-ink/55">
+              Si la mesa está en otra pestaña (la voz suele ir en Discord). Aunque no la actives, el título de la
+              pestaña parpadea cuando te toca.
+            </span>
           </span>
         </label>
         {tiradasError && <p className="mt-2 text-xs text-ember">{tiradasError}</p>}

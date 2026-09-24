@@ -965,6 +965,10 @@ function emitAttackVisual(campaignId, resolved, { hit, crit = false, attacker = 
   notifyCombatVisual(campaignId, {
     type: hit ? 'hit' : 'miss',
     ...combatVisualTarget(resolved),
+    // Quién golpea (Fase 3, añadido): su ficha embiste hacia el objetivo y, si
+    // el objetivo eres tú, la mesa te dice quién te ataca. Es la misma
+    // referencia pública que ya viajaba con los proyectiles.
+    from: from ?? null,
     critical: Boolean(crit),
     strong: Boolean(crit),
   });

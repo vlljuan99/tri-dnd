@@ -45,6 +45,19 @@ import TrapAlert from './TrapAlert.jsx';
 import Subtitles from './Subtitles.jsx';
 import FinisherPrompt from './FinisherPrompt.jsx';
 import BossIntro from './BossIntro.jsx';
+import { endTurnWarning, unspentTurnResources } from '../domain/endTurnWarning.js';
+import { vibrar } from '../../../lib/haptics.js';
+import { avisarTurno } from '../../../lib/attention.js';
+
+// Fase 5 (añadido): «no volver a preguntar» del aviso de fin de turno
+const END_TURN_WARNING_KEY = 'tri-dnd:aviso-fin-turno';
+function endTurnWarningEnabled() {
+  try {
+    return window.localStorage.getItem(END_TURN_WARNING_KEY) !== 'no';
+  } catch {
+    return true;
+  }
+}
 
 const HAZARD_PRESETS = {
   fuego: {
@@ -149,6 +162,11 @@ export default function TacticalMap({
   // Fase 4c: el DM pide una tirada; el jugador elige a quién ayuda
   const [requestRollOpen, setRequestRollOpen] = useState(false);
   const [helpPickerOpen, setHelpPickerOpen] = useState(false);
+  // Aviso de fin de turno con recursos sin gastar: { message } o null
+  const [endTurnConfirm, setEndTurnConfirm] = useState(null);
+  // Fase 3 (añadido): «El orco te ataca» y el golpe en tu retrato
+  const [incomingAttack, setIncomingAttack] = useState(null);
+  const [hurtKey, setHurtKey] = useState(0);
   const [fallTarget, setFallTarget] = useState(null); // { token, suggestedFeet } para una caída manual del DM
   const [interactTarget, setInteractTarget] = useState(null); // { type: 'door' | 'token', target }
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -251,6 +269,13 @@ export default function TacticalMap({
   // propio personaje, nunca el DM salvo que además sea el dueño (caso raro,
   // PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
+  // «¡Tu turno!» aunque estés en otra ventana (Fase 3, añadido): el título
+  // parpadea y, si lo has activado, llega una notificación; el móvil vibra.
+  useEffect(() => {
+    if (!isOwnCharacterTurn) return undefined;
+    vibrar('turno');
+    return avisarTurno({ nombre: activeToken?.name });
+  }, [isOwnCharacterTurn, combat.round, combat.turnId]);
 
   // Salvación de muerte del PJ del HUD: la usan el botón del hotbar y la
   // escena de tensión (Fase 4c). El dado rueda y se revela en la bandeja.
@@ -296,6 +321,27 @@ export default function TacticalMap({
   }, [activeToken?.id, combat.active, combat.round, combat.turnId]);
 
   const latestCombatVisual = combatVisuals.at(-1);
+  // Cuando el golpe va contra TU personaje (Fase 3, añadido): quién te ataca,
+  // tu retrato se sacude al recibir daño y el móvil vibra.
+  useEffect(() => {
+    const visual = latestCombatVisual;
+    if (!visual || !ownCharacterId || visual.characterId !== ownCharacterId) return undefined;
+    if (visual.type === 'damage') {
+      setHurtKey((key) => key + 1);
+      vibrar(visual.critical ? 'critico' : 'dano');
+      return undefined;
+    }
+    if ((visual.type !== 'hit' && visual.type !== 'miss') || !visual.from) return undefined;
+    const attacker = map.tokens.find((token) =>
+      visual.from.characterId ? token.characterId === visual.from.characterId : token.serverId === visual.from.mapTokenId
+    );
+    if (!attacker) return undefined;
+    setIncomingAttack({ id: visual.id, name: attacker.name, hit: visual.type === 'hit' });
+    if (visual.type === 'hit') vibrar(visual.critical ? 'critico' : 'impacto');
+    const timer = setTimeout(() => setIncomingAttack((current) => (current?.id === visual.id ? null : current)), 1900);
+    return () => clearTimeout(timer);
+  }, [latestCombatVisual?.id]);
+
   useEffect(() => {
     if (!latestCombatVisual?.strong) return;
     // Un crítico sobre un objetivo que VES empuja la cámara hacia él; si no lo
@@ -1041,6 +1087,21 @@ export default function TacticalMap({
       <CombatAlert />
       {/* Fase 4c: la trampa salta en todas las pantallas */}
       <TrapAlert alert={trapAlert} />
+      {/* Fase 3 (añadido): quién te ataca */}
+      {incomingAttack && (
+        <div className="pointer-events-none absolute inset-x-0 top-[26vh] z-20 flex justify-center px-4">
+          <p
+            key={incomingAttack.id}
+            role="status"
+            className={`rounded-sm border bg-night-950/90 px-4 py-1.5 font-display text-sm uppercase tracking-[0.2em] shadow-xl motion-safe:animate-[attackBannerPop_320ms_ease-out] ${
+              incomingAttack.hit ? 'border-blood/60 text-blood' : 'border-bone/25 text-bone/70'
+            }`}
+          >
+            {incomingAttack.name} te ataca
+            <style>{`@keyframes attackBannerPop{0%{transform:scale(0.8);opacity:0}60%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}`}</style>
+          </p>
+        </div>
+      )}
       {/* Fase 4d: el DM como narrador */}
       <Subtitles />
       <FinisherPrompt />
@@ -1455,6 +1516,49 @@ export default function TacticalMap({
         </div>
       )}
 
+      {endTurnConfirm && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-night-950/50 p-4" onClick={() => setEndTurnConfirm(null)}>
+          <form
+            role="alertdialog"
+            aria-label="Terminar turno"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const dontAsk = event.currentTarget.elements.namedItem('no-preguntar')?.checked;
+              if (dontAsk) {
+                try {
+                  window.localStorage.setItem(END_TURN_WARNING_KEY, 'no');
+                } catch {
+                  // Sin almacenamiento: se volverá a preguntar
+                }
+              }
+              setEndTurnConfirm(null);
+              const resp = await endTurn();
+              if (resp?.error) showHudNotice(resp.error);
+            }}
+            className="w-[min(92vw,22rem)] rounded-md border border-gold/30 bg-night-900 p-4 text-bone shadow-2xl"
+          >
+            <p className="text-sm">{endTurnConfirm.message}</p>
+            <label className="mt-3 flex items-center gap-2 text-xs text-bone/60">
+              <input type="checkbox" name="no-preguntar" className="accent-gold" />
+              No volver a preguntar
+            </label>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setEndTurnConfirm(null)}
+                className="flex-1 rounded-sm border border-bone/20 py-1.5 text-sm text-bone/70 hover:text-bone"
+              >
+                Seguir en mi turno
+              </button>
+              <button type="submit" autoFocus className="flex-1 rounded-sm bg-gold py-1.5 font-display text-sm text-night-950 hover:bg-gold/90">
+                Terminar turno
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {requestRollOpen && isDm && (
         <RequestRollDialog
           characters={map.tokens
@@ -1543,6 +1647,14 @@ export default function TacticalMap({
               // falta, PJ ausentes)
               isMyTurn={Boolean(hudCombatant) && combat.turnId === hudCombatant.id && (isDm || isOwnCharacterTurn)}
               onEndTurn={async () => {
+                // Te queda algo por gastar: una pregunta antes de pasar el turno
+                const warning = isOwnCharacterTurn && endTurnWarningEnabled()
+                  ? endTurnWarning(unspentTurnResources({ combatant: hudCombatant, remaining: hudGate?.remaining ?? null }))
+                  : null;
+                if (warning) {
+                  setEndTurnConfirm({ message: warning });
+                  return;
+                }
                 const resp = await endTurn();
                 if (resp?.error) showHudNotice(resp.error);
               }}
@@ -1587,6 +1699,7 @@ export default function TacticalMap({
               }}
               onOpenNotes={() => setNotesOpen((v) => !v)}
               notice={hudNotice}
+              hurtKey={hurtKey}
             />
           )}
         </div>

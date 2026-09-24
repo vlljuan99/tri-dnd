@@ -239,6 +239,9 @@ export default function PlayerHud({
   onOpenSpells,
   onOpenNotes,
   notice,
+  // Sube cada vez que tu personaje recibe daño (Fase 3, añadido): el retrato
+  // se sacude y se tiñe un instante
+  hurtKey = 0,
 }) {
   const hp = combatant?.hpCurrent ?? token?.hp;
   const hpMax = combatant?.hpMax ?? token?.hpMax;
@@ -384,7 +387,13 @@ export default function PlayerHud({
 
       {/* ── 1. Quién eres ─────────────────────────────────────────────── */}
       <div className="tactical-hud-identity flex items-center gap-3">
-        <div className="tactical-portrait-frame relative">
+        <div
+          key={`retrato-${hurtKey}`}
+          className={`tactical-portrait-frame relative rounded-full ${
+            hurtKey > 0 ? 'motion-safe:animate-[hudHurt_450ms_ease-out]' : ''
+          }`}
+        >
+          <style>{`@keyframes hudHurt{0%{transform:translateX(0);box-shadow:0 0 0 0 rgba(143,43,35,0)}15%{transform:translateX(-4px);box-shadow:0 0 0 4px rgba(143,43,35,0.75)}35%{transform:translateX(4px)}55%{transform:translateX(-3px)}75%{transform:translateX(2px)}100%{transform:translateX(0);box-shadow:0 0 0 0 rgba(143,43,35,0)}}`}</style>
           {token.imageUrl ? (
             <img
               src={token.imageUrl}

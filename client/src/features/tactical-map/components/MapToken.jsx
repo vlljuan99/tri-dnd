@@ -6,6 +6,9 @@ import TokenIcon from './TokenIcon.jsx';
 import TokenLabel from './TokenLabel.jsx';
 import { isTokenDowned } from '../domain/tokens.js';
 
+// Cuánto dura la embestida de un golpe (ida y vuelta)
+const LUNGE_MS = 320;
+
 function tokenShapeSegments(type) {
   if (type === 'enemy') return 6;
   if (type === 'npc') return 4;
@@ -198,6 +201,8 @@ export default function MapToken({
   movable,
   saving,
   visuals = [],
+  // Golpes que da esta ficha (Fase 3, añadido): [{ id, to: { x, z } }]
+  strikes = [],
   onSelect,
   // Altura del suelo bajo el token: sobre una cornisa, la ficha se apoya en la
   // plataforma. Sin esto quedaba enterrada dentro del bloque y desde la cámara
@@ -214,6 +219,11 @@ export default function MapToken({
   const grayOverlayMaterialRef = useRef(null);
   const flashRef = useRef(0);
   const missRef = useRef(0);
+  // Embestida: la ficha se lanza un instante hacia su objetivo y vuelve
+  const lungeRef = useRef(null);
+  // Posición de reposo interpolada; los golpes y los fallos se suman encima
+  // cada fotograma sin acumularse
+  const basePositionRef = useRef(null);
   const targetPosition = useMemo(
     () => new THREE.Vector3(token.position.x, groundY + 0.12, token.position.z),
     [groundY, token.position.x, token.position.z]
@@ -242,9 +252,32 @@ export default function MapToken({
     if (latest.type === 'miss') missRef.current = Date.now() + 300;
   }, [visuals]);
 
+  useEffect(() => {
+    const latest = strikes.at(-1);
+    if (!latest) return;
+    const dx = latest.to.x - token.position.x;
+    const dz = latest.to.z - token.position.z;
+    const length = Math.hypot(dx, dz);
+    if (length < 0.001) return;
+    lungeRef.current = { start: Date.now(), dx: dx / length, dz: dz / length };
+  }, [strikes.at(-1)?.id]);
+
   useFrame(() => {
     if (!groupRef.current) return;
-    groupRef.current.position.lerp(targetPosition, 0.25);
+    if (!basePositionRef.current) basePositionRef.current = groupRef.current.position.clone();
+    basePositionRef.current.lerp(targetPosition, 0.25);
+    groupRef.current.position.copy(basePositionRef.current);
+    const lunge = lungeRef.current;
+    if (lunge) {
+      const t = (Date.now() - lunge.start) / LUNGE_MS;
+      if (t >= 1) {
+        lungeRef.current = null;
+      } else {
+        const reach = Math.sin(Math.PI * t) * token.size * 0.32;
+        groupRef.current.position.x += lunge.dx * reach;
+        groupRef.current.position.z += lunge.dz * reach;
+      }
+    }
     if (missRef.current > Date.now()) {
       const left = missRef.current - Date.now();
       groupRef.current.position.x += Math.sin(left * 0.11) * Math.min(0.11, left / 1800);
@@ -262,9 +295,12 @@ export default function MapToken({
     );
     rimMaterialRef.current?.color.lerp(downed ? deadRimColor : rimColor, 0.16);
     if (grayOverlayMaterialRef.current) {
+      // Apuntando con un arma (Fase 5, añadido): lo que no alcanzas se apaga
+      // un poco para que resalte lo que sí puedes atacar
+      const outOfReach = rangeState === 'fuera' || rangeState === 'sin-vision';
       grayOverlayMaterialRef.current.opacity = THREE.MathUtils.lerp(
         grayOverlayMaterialRef.current.opacity,
-        downed ? 0.68 : 0,
+        downed ? 0.68 : outOfReach ? 0.5 : 0,
         0.16
       );
     }
