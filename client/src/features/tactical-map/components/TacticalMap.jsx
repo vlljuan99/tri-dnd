@@ -1438,7 +1438,11 @@ export default function TacticalMap({
           lineOfSight={attackLineOfSight}
           weaponId={aimingWeaponId}
           helpedBy={attackHelperName}
-          onClose={() => setCombatTarget(null)}
+          onClose={(result) => {
+            setCombatTarget(null);
+            // Ataque resuelto y sin otro disponible: el arma deja de apuntar
+            if (result?.attackFinished) setAimingWeaponId(null);
+          }}
         />
       )}
 

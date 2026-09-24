@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import { toastInfo } from './toast.js';
 import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
+import { sfxForCombatVisual } from '../features/tactical-map/domain/attackFlow.js';
+import { play } from '../lib/sfx/index.js';
 import { useReveal } from './reveal.js';
 import { useAuth } from './auth.js';
 
@@ -161,6 +163,10 @@ export const useRoom = create((set, get) => ({
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const entry = { id, createdAt: Date.now(), ...visual };
         set((state) => ({ combatVisuals: [...state.combatVisuals.slice(-19), entry] }));
+        // Impacto, crítico, fallo o curación: suena en toda la mesa a la vez
+        // que se pinta, con el sample subido si lo hay.
+        const sonido = sfxForCombatVisual(entry);
+        if (sonido) play(sonido);
         setTimeout(() => {
           set((state) => ({ combatVisuals: state.combatVisuals.filter((item) => item.id !== id) }));
         }, 1800);

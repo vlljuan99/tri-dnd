@@ -17,6 +17,7 @@ import { resolveAttackEffects } from '../domain/combatRules.js';
 import { rangeValidation, weaponGeometry } from '../domain/combatGeometry.js';
 import { useCharacterWeapons } from '../hooks/useCharacterWeapons.js';
 import { isWielded } from '../domain/weaponSlots.js';
+import { awaitingDamage, canStartAttack, hasAttackLeft, visibleAttackRows } from '../domain/attackFlow.js';
 
 // Golpe desarmado de 5e: ataque FUE + competencia, daño fijo 1 + FUE
 function unarmedWeapon(char) {
@@ -62,6 +63,25 @@ export function D20Chips({ roll }) {
   );
 }
 
+// Veredicto del paso 1, una sola vez: «Falla · por los pelos», «¡Impacta! ·
+// por 6». Antes salía dos veces (la línea del margen y el rótulo grande).
+export function AttackVerdict({ hit, crit, roll }) {
+  const margin = textoDelMargen(roll);
+  return (
+    <motion.p
+      initial={{ scale: 0.6, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.1 }}
+      className="mt-1.5 flex flex-wrap items-baseline gap-x-2"
+    >
+      <span className={`font-display text-lg uppercase tracking-widest ${hit ? 'text-gold' : 'text-bone/40'}`}>
+        {hit ? `¡Impacta${crit ? ' — crítico!' : '!'}` : 'Falla'}
+      </span>
+      {margin && <span className="text-[0.7rem] text-bone/55">{margin}</span>}
+    </motion.p>
+  );
+}
+
 /**
  * Panel de combate del tablero: con tu token seleccionado y un objetivo
  * pulsado, ataca con tus armas equipadas. El cliente tira los dados (los ve
@@ -86,6 +106,7 @@ export default function AttackPanel({
 }) {
   const attackTarget = useRoom((s) => s.attackTarget);
   const dealDamage = useRoom((s) => s.dealDamage);
+  const combatActive = useRoom((s) => Boolean(s.combat?.active));
   // La ficha con el alcance de cada arma la carga el hook compartido: el
   // hotbar pinta los mismos slots que este panel usa para tirar.
   const { character: char, error: loadError } = useCharacterWeapons(attacker.characterId);
@@ -112,7 +133,11 @@ export default function AttackPanel({
     : [];
   const allRows = char ? [...weapons, unarmedWeapon(char)] : [];
   const armed = weaponId != null ? allRows.find((row) => row.id === weaponId) ?? null : null;
-  const rows = armed ? [armed, ...allRows.filter((row) => row !== armed)] : allRows;
+  // Con un arma empuñada solo se ve esa, y en cuanto se tira con una, solo la
+  // de la tirada: el golpe desarmado no pinta nada si has elegido el dardo.
+  const attackLeft = hasAttackLeft({ combatActive, combatant: attackerCombatant });
+  const rows = visibleAttackRows(allRows, { armedId: armed?.id ?? null, feedback, attackLeft });
+  const showAttackControls = canStartAttack({ feedback, attackLeft });
 
   function effectsFor(row, manualAdvantage = 'none', thrown = false) {
     const geometry = row.unarmed
@@ -203,7 +228,7 @@ export default function AttackPanel({
   }
 
   async function damage(row) {
-    if (!char || busy || feedback?.type !== 'attack' || !feedback.hit) return;
+    if (!char || busy || !awaitingDamage(feedback)) return;
     setBusy(true);
     setError('');
     const label = (typeName) =>
@@ -249,6 +274,12 @@ export default function AttackPanel({
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
+      return;
+    }
+    // El daño cierra el ataque: sin otro disponible, el panel se va (el «−8»
+    // ya flota sobre el objetivo y el chat lo narra).
+    if (!attackLeft) {
+      onClose?.({ attackFinished: true });
       return;
     }
     setFeedback({
@@ -337,7 +368,7 @@ export default function AttackPanel({
                   {row.unarmed ? ` · ${row.damageTotal} contundente` : ` · ${row.weapon.damageDice}`}
                 </span>
               </div>
-              {canThrow && (
+              {canThrow && showAttackControls && (
                 <div className="mt-1.5 flex gap-1 text-[0.65rem]">
                   <button
                     type="button"
@@ -361,44 +392,46 @@ export default function AttackPanel({
                   </button>
                 </div>
               )}
-              {geometryBlocked && (
+              {geometryBlocked && showAttackControls && (
                 <p className="mt-1 text-[0.65rem] text-blood">
                   {!lineOfSight ? 'Sin línea de visión' : range.error}
                 </p>
               )}
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <button
-                  onClick={() => attack(row, 'dis')}
-                  disabled={busy || geometryBlocked}
-                  className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40"
-                >
-                  Desv.
-                </button>
-                <button
-                  onClick={() => attack(row, 'none')}
-                  disabled={busy || geometryBlocked}
-                  className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
-                    automaticEffects.advantage === 'adv'
-                      ? 'border-moss bg-moss/15 text-bone/90 hover:bg-moss/25'
+              {showAttackControls && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => attack(row, 'dis')}
+                    disabled={busy || geometryBlocked}
+                    className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40"
+                  >
+                    Desv.
+                  </button>
+                  <button
+                    onClick={() => attack(row, 'none')}
+                    disabled={busy || geometryBlocked}
+                    className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
+                      automaticEffects.advantage === 'adv'
+                        ? 'border-moss bg-moss/15 text-bone/90 hover:bg-moss/25'
+                        : automaticEffects.advantage === 'dis'
+                          ? 'border-blood/50 bg-blood/10 text-blood hover:bg-blood/20'
+                        : 'border-gold/50 text-gold hover:bg-gold/10'
+                    }`}
+                  >
+                    {automaticEffects.advantage === 'adv'
+                      ? 'Atacar (ventaja)'
                       : automaticEffects.advantage === 'dis'
-                        ? 'border-blood/50 bg-blood/10 text-blood hover:bg-blood/20'
-                      : 'border-gold/50 text-gold hover:bg-gold/10'
-                  }`}
-                >
-                  {automaticEffects.advantage === 'adv'
-                    ? 'Atacar (ventaja)'
-                    : automaticEffects.advantage === 'dis'
-                      ? 'Atacar (desventaja)'
-                      : 'Atacar'}
-                </button>
-                <button
-                  onClick={() => attack(row, 'adv')}
-                  disabled={busy || geometryBlocked}
-                  className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40"
-                >
-                  Vent.
-                </button>
-              </div>
+                        ? 'Atacar (desventaja)'
+                        : 'Atacar'}
+                  </button>
+                  <button
+                    onClick={() => attack(row, 'adv')}
+                    disabled={busy || geometryBlocked}
+                    className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40"
+                  >
+                    Vent.
+                  </button>
+                </div>
+              )}
 
               <AnimatePresence mode="wait">
                 {/* Paso 1 — ¿impacta?: dados + bonificador = total contra la CA */}
@@ -425,21 +458,7 @@ export default function AttackPanel({
                       </span>
                       <span className="text-bone/50">contra CA {fb.ac}</span>
                     </div>
-                    {textoDelMargen(fb.roll) && (
-                      <p className="mt-1 text-[0.7rem] text-bone/55">
-                        {fb.hit ? 'Impacta' : 'Falla'} {textoDelMargen(fb.roll)}
-                      </p>
-                    )}
-                    <motion.p
-                      initial={{ scale: 0.6, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.1 }}
-                      className={`mt-1.5 font-display text-lg uppercase tracking-widest ${
-                        fb.hit ? 'text-gold' : 'text-bone/40'
-                      }`}
-                    >
-                      {fb.hit ? `¡Impacta${fb.crit ? ' — crítico!' : '!'}` : 'Falla'}
-                    </motion.p>
+                    <AttackVerdict hit={fb.hit} crit={fb.crit} roll={fb.roll} />
                     {fb.hit && (
                       <button
                         onClick={() => damage(row)}
