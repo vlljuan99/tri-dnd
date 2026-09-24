@@ -93,6 +93,8 @@ export default function MonsterAttackPanel({
   distance = Infinity,
   highGround = false,
   lineOfSight = true,
+  // Ayudar (Fase 4c): nombre de quien ayuda si está a 5 pies del objetivo
+  helpedBy = null,
   onClose,
 }) {
   const attackMarker = useRoom((s) => s.attackMarker);
@@ -207,6 +209,7 @@ export default function MonsterAttackPanel({
       ranged: geometry.ranged,
       longRange: Boolean(range.longRange),
       manualAdvantage,
+      helpedBy,
     });
   }
 

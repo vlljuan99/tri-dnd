@@ -20,6 +20,7 @@ export const HOTBAR_KEYS = {
   esquivar: '6',
   destrabarse: '7',
   buscar: '8',
+  ayudar: '9',
   conjuros: 'c',
   inventario: 'i',
   ficha: 'h',

@@ -80,6 +80,8 @@ export default function AttackPanel({
   distance = Infinity,
   highGround = false,
   lineOfSight = true,
+  // Ayudar (Fase 4c): nombre de quien ayuda si está a 5 pies del objetivo
+  helpedBy = null,
   onClose,
 }) {
   const attackTarget = useRoom((s) => s.attackTarget);
@@ -135,6 +137,7 @@ export default function AttackPanel({
       ranged: geometry.ranged,
       longRange: Boolean(range.longRange),
       manualAdvantage,
+      helpedBy,
     });
   }
 

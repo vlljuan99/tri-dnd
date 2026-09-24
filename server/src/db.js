@@ -1443,6 +1443,21 @@ export const migrations = [
   ALTER TABLE campaigns ADD COLUMN clock_enabled INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE campaigns ADD COLUMN day_minutes INTEGER NOT NULL DEFAULT 480;
   `,
+
+  // v74 — Fase 4c del programa de gameplay: los dados en manos del jugador.
+  //
+  // `users.auto_rolls`: preferencia de cada jugador. Con ella activa, el
+  // servidor no espera a que pulse «Tirar» en sus salvaciones, iniciativa ni
+  // tiradas pedidas: las tira al instante como antes. Nace apagada.
+  //
+  // `combatants.help_from_id`: la acción Ayudar (SRD 5.1). Quien ayuda deja su
+  // id en el combatiente ayudado; la ventaja se consume al usarla y vence al
+  // empezar el siguiente turno de quien ayudó. Sin FK a propósito: el tracker
+  // borra combatientes a menudo y una ayuda huérfana simplemente no aplica.
+  `
+  ALTER TABLE users ADD COLUMN auto_rolls INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE combatants ADD COLUMN help_from_id INTEGER;
+  `,
 ];
 
 export function runMigrations() {

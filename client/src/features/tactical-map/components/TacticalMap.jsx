@@ -39,6 +39,9 @@ import OpportunityPrompt from './OpportunityPrompt.jsx';
 import SpellPanel from './SpellPanel.jsx';
 import TableControls from './TableControls.jsx';
 import { tirarYEnviar, trasElDado, useReveal } from '../../../store/reveal.js';
+import RequestRollDialog from './RequestRollDialog.jsx';
+import DeathSaveOverlay from './DeathSaveOverlay.jsx';
+import TrapAlert from './TrapAlert.jsx';
 
 const HAZARD_PRESETS = {
   fuego: {
@@ -140,6 +143,9 @@ export default function TacticalMap({
   const [movePreview, setMovePreview] = useState(null); // { cell, cost, path, remaining } | null
   const [combatTarget, setCombatTarget] = useState(null); // token objetivo del ataque
   const [aimingWeaponId, setAimingWeaponId] = useState(null); // arma empuñada desde el hotbar
+  // Fase 4c: el DM pide una tirada; el jugador elige a quién ayuda
+  const [requestRollOpen, setRequestRollOpen] = useState(false);
+  const [helpPickerOpen, setHelpPickerOpen] = useState(false);
   const [fallTarget, setFallTarget] = useState(null); // { token, suggestedFeet } para una caída manual del DM
   const [interactTarget, setInteractTarget] = useState(null); // { type: 'door' | 'token', target }
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -187,6 +193,7 @@ export default function TacticalMap({
       : null;
   const selectedCombatant = combatantForToken(selectedToken);
   const targetCombatant = combatantForToken(combatTarget);
+  const trapAlert = useRoom((s) => s.trapAlert);
   // Qué permite ahora mismo el token seleccionado (turno, movimiento gastado,
   // inconsciencia, condiciones). Mismo criterio que valida el servidor: los
   // controles que no pueden funcionar se apagan en vez de dar error al pulsar.
@@ -210,6 +217,22 @@ export default function TacticalMap({
           Math.abs(worldToGrid(selectedToken.position, map.gridSize).row - worldToGrid(combatTarget.position, map.gridSize).row)
         )
       : Infinity;
+  // Ayudar (Fase 4c): si alguien ayudó al atacante y está a 5 pies del
+  // objetivo, el ataque sale con ventaja. Espejo de lo que valida el servidor.
+  const attackHelperName = (() => {
+    const help = selectedCombatant?.helpFrom;
+    if (!help || !combatTarget) return null;
+    const helper = combat.combatants.find((c) => c.id === help.id);
+    const helperToken = helper
+      ? map.tokens.find((token) =>
+          helper.characterId ? token.characterId === helper.characterId : token.serverId === helper.mapTokenId
+        )
+      : null;
+    if (!helperToken) return null;
+    const from = worldToGrid(helperToken.position, map.gridSize);
+    const to = worldToGrid(combatTarget.position, map.gridSize);
+    return Math.max(Math.abs(from.col - to.col), Math.abs(from.row - to.row)) <= 1 ? help.name : null;
+  })();
   const activeCombatant = combat.active
     ? combat.combatants.find((c) => c.id === combat.turnId) ?? null
     : null;
@@ -225,6 +248,18 @@ export default function TacticalMap({
   // propio personaje, nunca el DM salvo que además sea el dueño (caso raro,
   // PJ del propio DM)
   const isOwnCharacterTurn = Boolean(activeToken && activeToken.ownerUserId === user?.id);
+
+  // Salvación de muerte del PJ del HUD: la usan el botón del hotbar y la
+  // escena de tensión (Fase 4c). El dado rueda y se revela en la bandeja.
+  async function rollHudDeathSave() {
+    if (!hudCombatant) return;
+    const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: hudDisplay?.name });
+    const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
+    const resp = await tirarYEnviar(roll, (tirada) => deathSave(hudCombatant.id, tirada, natural), {
+      autor: hudDisplay?.name,
+    });
+    if (resp?.error) showHudNotice(resp.error);
+  }
 
   function showHudNotice(message) {
     const text = typeof message === 'string' ? message.trim() : '';
@@ -1001,6 +1036,16 @@ export default function TacticalMap({
       </CanvasErrorBoundary>
 
       <CombatAlert />
+      {/* Fase 4c: la trampa salta en todas las pantallas */}
+      <TrapAlert alert={trapAlert} />
+      {/* Fase 4c: tu turno a las puertas de la muerte, con toda la tensión */}
+      {hudCombatant?.dying &&
+        !hudCombatant.deathSaveRolled &&
+        combat.active &&
+        combat.turnId === hudCombatant.id &&
+        hudToken?.ownerUserId === user?.id && (
+          <DeathSaveOverlay name={hudDisplay?.name} saves={hudCombatant.deathSaves} onRoll={rollHudDeathSave} />
+        )}
       <TurnAlert trigger={combat.active && isOwnCharacterTurn ? `${combat.round}-${combat.turnId}` : null} />
       {combat.opportunities?.[0] && (
         <OpportunityPrompt
@@ -1161,6 +1206,7 @@ export default function TacticalMap({
           restBusy={restBusy}
           onRest={onRest}
           onToggleClock={onToggleClock}
+          onRequestRoll={() => setRequestRollOpen(true)}
           combat={combat}
           playerView={playerView}
           floors={map.floors ?? []}
@@ -1318,6 +1364,7 @@ export default function TacticalMap({
           highGround={selectedHasHighGround}
           lineOfSight={attackLineOfSight}
           weaponId={aimingWeaponId}
+          helpedBy={attackHelperName}
           onClose={() => setCombatTarget(null)}
         />
       )}
@@ -1331,6 +1378,7 @@ export default function TacticalMap({
           distance={attackDistance}
           highGround={selectedHasHighGround}
           lineOfSight={attackLineOfSight}
+          helpedBy={attackHelperName}
           onClose={() => setCombatTarget(null)}
         />
       )}
@@ -1364,6 +1412,49 @@ export default function TacticalMap({
 
       {sheetOpen && hudCharacterId && (
         <CharacterQuickView characterId={hudCharacterId} onClose={() => setSheetOpen(false)} />
+      )}
+
+      {/* Ayudar (Fase 4c): a qué aliado. Gasta la acción al elegirlo. */}
+      {helpPickerOpen && hudCombatant && (
+        <div className="absolute bottom-[13rem] left-1/2 z-30 w-[17rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 rounded-sm border border-moss/50 bg-night-900/95 p-3 text-bone shadow-2xl backdrop-blur sm:bottom-[10rem] md:bottom-[6.5rem]">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-display text-xs uppercase tracking-widest text-moss">¿A quién ayudas?</p>
+            <button type="button" onClick={() => setHelpPickerOpen(false)} aria-label="Cancelar" className="px-1 text-bone/60 hover:text-bone">
+              ✕
+            </button>
+          </div>
+          <p className="mb-2 text-[0.65rem] leading-snug text-bone/50">
+            Ventaja en su próxima prueba, o en su próximo ataque contra una criatura a 5 pies de ti, antes de tu siguiente turno.
+          </p>
+          <div className="space-y-1">
+            {combat.combatants
+              .filter((c) => c.id !== hudCombatant.id && (c.kind === 'pj' || c.kind === 'aliado') && !c.dead)
+              .map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={async () => {
+                    setHelpPickerOpen(false);
+                    const resp = await specialAction(hudCombatant.id, 'ayudar', { targetId: c.id });
+                    if (resp?.error) showHudNotice(resp.error);
+                  }}
+                  className="flex w-full items-center justify-between rounded-sm border border-bone/15 px-2 py-1.5 text-left text-sm hover:border-moss/60 hover:bg-moss/10"
+                >
+                  <span>{c.name}</span>
+                  {c.helpFrom && <span className="text-[0.65rem] text-moss">ya ayudado</span>}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {requestRollOpen && isDm && (
+        <RequestRollDialog
+          characters={map.tokens
+            .filter((token) => token.characterId)
+            .map((token) => ({ id: token.characterId, name: token.name }))}
+          onClose={() => setRequestRollOpen(false)}
+        />
       )}
 
       {drawerOpen && (
@@ -1451,18 +1542,16 @@ export default function TacticalMap({
               // Acciones especiales del turno (gastan la acción): las lanza el
               // controlador del combatiente activo (su dueño, o el DM con enemigos)
               onSpecialAction={async (kind) => {
+                // Ayudar necesita a quién: el tablero lo pregunta antes
+                if (kind === 'ayudar') {
+                  setHelpPickerOpen(true);
+                  return;
+                }
                 const resp = await specialAction(hudCombatant.id, kind);
                 if (resp?.error) showHudNotice(resp.error);
               }}
               // Salvación de muerte de un PJ agonizante mostrado en el HUD
-              onDeathSave={async () => {
-                const roll = rollPool({ d20: 1 }, { kind: 'check', label: 'Salvación de muerte', actorName: hudDisplay?.name });
-                const natural = roll.groups.find((g) => g.sides === 20)?.results[0]?.kept ?? roll.total;
-                const resp = await tirarYEnviar(roll, (tirada) => deathSave(hudCombatant.id, tirada, natural), {
-                  autor: hudDisplay?.name,
-                });
-                if (resp?.error) showHudNotice(resp.error);
-              }}
+              onDeathSave={rollHudDeathSave}
               // Ficha/Inventario son conceptos de personaje: no existen para un
               // enemigo, solo se ofrecen si hay un characterId (aunque sea el de
               // otro PJ, se ven en solo lectura); Notas es siempre tuyo y punto

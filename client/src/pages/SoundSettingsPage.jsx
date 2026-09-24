@@ -4,6 +4,8 @@ import { fetchSounds, resetSound, uploadSound } from '../lib/sfx/api.js';
 import { getSettings, preview, setOverrides, setSettings } from '../lib/sfx/index.js';
 import { useReveal } from '../store/reveal.js';
 import { ETIQUETAS_RITMO, RITMOS } from '../features/dice-tray/lib/reveal.js';
+import { agitarActivado, guardarAgitar, pedirPermisoMovimiento } from '../features/dice-tray/lib/shake.js';
+import { useAuth } from '../store/auth.js';
 
 // Qué supone cada ritmo, para elegir sin tener que probarlo en mitad de una
 // partida (Fase 4b).
@@ -89,6 +91,30 @@ function Fila({ evento, estado, puedeEditar, onSubir, onRestaurar, ocupado }) {
 export default function SoundSettingsPage() {
   const ritmo = useReveal((s) => s.ritmo);
   const setRitmo = useReveal((s) => s.setRitmo);
+  // Fase 4c: tus tiradas (salvaciones, iniciativa, lo que pide el DM)
+  const autoRolls = useAuth((s) => Boolean(s.user?.autoRolls));
+  const setAutoRolls = useAuth((s) => s.setAutoRolls);
+  const [agitar, setAgitar] = useState(() => agitarActivado());
+  const [tiradasError, setTiradasError] = useState('');
+
+  async function cambiarAutoRolls(value) {
+    setTiradasError('');
+    try {
+      await setAutoRolls(value);
+    } catch (e) {
+      setTiradasError(e.message || 'No se pudo guardar la preferencia.');
+    }
+  }
+
+  async function cambiarAgitar(value) {
+    setTiradasError('');
+    if (value && !(await pedirPermisoMovimiento())) {
+      setTiradasError('Este navegador no deja leer el movimiento del móvil.');
+      return;
+    }
+    guardarAgitar(value);
+    setAgitar(value);
+  }
   const [sonidos, setSonidos] = useState(null);
   const [puedeEditar, setPuedeEditar] = useState(false);
   const [error, setError] = useState('');
@@ -210,6 +236,39 @@ export default function SoundSettingsPage() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="mt-4 rounded-sm border border-ink/15 bg-parchment-100/60 p-4">
+        <h3 className="font-display text-sm uppercase tracking-widest text-ink/70">Tus tiradas</h3>
+        <p className="mt-0.5 text-xs text-ink/55">
+          En tus salvaciones, tu iniciativa y lo que pide el DM, la mesa espera a que pulses «Tirar»
+          (unos segundos; después se tira sola).
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={autoRolls}
+            onChange={(event) => cambiarAutoRolls(event.target.checked)}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Tirar mis salvaciones automáticamente
+            <span className="block text-xs text-ink/55">Para ir rápido: no se espera a que pulses nada.</span>
+          </span>
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={agitar}
+            onChange={(event) => cambiarAgitar(event.target.checked)}
+            className="mt-0.5 accent-ember"
+          />
+          <span>
+            Agitar el móvil para tirar
+            <span className="block text-xs text-ink/55">Con una tirada pendiente en pantalla, agitarlo equivale a pulsar «Tirar».</span>
+          </span>
+        </label>
+        {tiradasError && <p className="mt-2 text-xs text-ember">{tiradasError}</p>}
       </section>
 
       {error && (

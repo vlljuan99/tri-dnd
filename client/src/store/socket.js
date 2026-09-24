@@ -66,6 +66,14 @@ export const useRoom = create((set, get) => ({
   // para que quien esté en la mesa vea el aviso sin recargar.
   grantedLevel: null,
   grantedLevelVersion: 0,
+  // Fase 4c: tiradas que esperan a que alguien pulse «Tirar». El jugador
+  // recibe solo las suyas; el DM, todas (su panel de pendientes).
+  pendingRolls: [],
+  // Resultados recién llegados de esas tiradas (solo el DM ve total y éxito):
+  // el panel los enseña unos segundos junto a las que aún faltan.
+  pendingResults: [],
+  // Una trampa acaba de saltar: la mesa se oscurece y suena el «¡clic!»
+  trapAlert: null,
 
   ensureSocket() {
     if (socket) return socket;
@@ -84,6 +92,7 @@ export const useRoom = create((set, get) => ({
               campaignName: resp.campaignName,
               online: resp.members,
               combat: resp.combat ?? s.combat,
+              pendingRolls: resp.pendingRolls ?? [],
               mapVersion: s.mapVersion + 1,
             }));
           }
@@ -163,6 +172,33 @@ export const useRoom = create((set, get) => ({
       set((state) => ({ grantedLevel, grantedLevelVersion: state.grantedLevelVersion + 1 }))
     );
     socket.on('combat:started', () => set((s) => ({ combatAlert: s.combatAlert + 1 })));
+    // Tiradas pendientes (Fase 4c). El aviso no pasa por la cola de dados: es
+    // una petición de gesto, no un resultado, y llega antes que cualquier dado.
+    socket.on('tirada:pendiente', (pending) => {
+      if (Number(pending?.campaignId) !== Number(get().campaignId)) return;
+      set((s) => ({ pendingRolls: [...s.pendingRolls.filter((item) => item.id !== pending.id), pending] }));
+    });
+    socket.on('tirada:resuelta', (resolved) => {
+      set((s) => ({
+        pendingRolls: s.pendingRolls.filter((item) => item.id !== resolved.id),
+        pendingResults:
+          resolved.total != null
+            ? [...s.pendingResults.filter((item) => item.id !== resolved.id), { ...resolved, at: Date.now() }].slice(-12)
+            : s.pendingResults,
+      }));
+      if (resolved.total != null) {
+        setTimeout(() => {
+          set((s) => ({ pendingResults: s.pendingResults.filter((item) => item.id !== resolved.id) }));
+        }, 9000);
+      }
+    });
+    socket.on('trampa:activada', (trap) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      set({ trapAlert: { id, ...trap } });
+      setTimeout(() => {
+        set((s) => ({ trapAlert: s.trapAlert?.id === id ? null : s.trapAlert }));
+      }, 1600);
+    });
     socket.on('mapa:actualizado', () =>
       afterDice(get().campaignId, () => set((s) => ({ mapVersion: s.mapVersion + 1 })))
     );
@@ -199,7 +235,7 @@ export const useRoom = create((set, get) => ({
     clearAimTimers();
     set({
       campaignId, messages: [], online: [], joinError: null, removedCampaignId: null,
-      worldTravel: null, spellAims: [], spellFx: [],
+      worldTravel: null, spellAims: [], spellFx: [], pendingRolls: [], pendingResults: [], trapAlert: null,
     });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
@@ -213,6 +249,7 @@ export const useRoom = create((set, get) => ({
         messages: resp.messages,
         online: resp.members,
         combat: resp.combat ?? { active: false, round: 1, turnId: null, enemyAiEnabled: false, combatants: [], opportunities: [] },
+        pendingRolls: resp.pendingRolls ?? [],
       });
     });
   },
@@ -232,6 +269,9 @@ export const useRoom = create((set, get) => ({
       worldTravel: null,
       spellAims: [],
       spellFx: [],
+      pendingRolls: [],
+      pendingResults: [],
+      trapAlert: null,
     });
   },
 
@@ -469,13 +509,39 @@ export const useRoom = create((set, get) => ({
     );
   },
 
-  /** Acción especial del turno: 'correr' | 'esquivar' | 'destrabarse' (gasta la acción). */
-  specialAction(combatantId, kind) {
+  /**
+   * Acción especial del turno: 'correr' | 'esquivar' | 'destrabarse' |
+   * 'ayudar' (gasta la acción). Ayudar necesita a quién: `{ targetId }`.
+   */
+  specialAction(combatantId, kind, { targetId = null } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
     return new Promise((resolve) =>
-      socket.emit('combat:special-action', { campaignId, combatantId, kind }, resolve)
+      socket.emit('combat:special-action', { campaignId, combatantId, kind, targetId }, resolve)
     );
+  },
+
+  // --- Tiradas pendientes y pedidas (Fase 4c) ------------------------
+
+  /** Pulsa «Tirar» en una tirada pendiente (la tuya, o cualquiera si eres DM). */
+  resolvePendingRoll(id) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:resolver', { campaignId, id }, resolve));
+  },
+
+  /** El DM tira ya por todas las pendientes (o por las indicadas). */
+  forcePendingRolls(ids = null) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:forzar', { campaignId, ids }, resolve));
+  },
+
+  /** El DM pide una tirada (prueba, habilidad o salvación) a unos PJ o a todos. */
+  requestRoll(payload) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('tirada:pedir', { campaignId, ...payload }, resolve));
   },
 
   /** Pone/quita una condición de combate a un combatiente (solo DM). */

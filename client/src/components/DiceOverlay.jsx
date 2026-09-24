@@ -6,6 +6,7 @@ import { useRoom } from '../store/socket.js';
 import { useReveal } from '../store/reveal.js';
 import { ETIQUETAS_RITMO, RITMOS, estaRevelada } from '../features/dice-tray/lib/reveal.js';
 import RevealCaption from '../features/dice-tray/components/RevealCaption.jsx';
+import PendingRolls from '../features/dice-tray/components/PendingRolls.jsx';
 import RollCard from './RollCard.jsx';
 
 // La bandeja arrastra three.js y react-three-fiber. Este tirador vive en el
@@ -114,6 +115,10 @@ export default function DiceOverlay() {
           escenario={escenario}
         />
       )}
+
+      {/* Tiradas que esperan a que pulses «Tirar» (Fase 4c): el aviso del
+          jugador y el panel de pendientes del DM. Solo en una mesa. */}
+      {inRoom && <PendingRolls />}
 
       {/* Botón flotante: arrastrable, cada cual lo deja donde no le estorbe.
           onTap (y no onClick) para que soltar tras arrastrar no lo abra. */}

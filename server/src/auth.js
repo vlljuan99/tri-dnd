@@ -7,7 +7,13 @@ import { JWT_SECRET, COOKIE_NAME } from './config.js';
 const USERNAME_RE = /^[a-z0-9_-]{3,20}$/i;
 
 function publicUser(row) {
-  return { id: row.id, username: row.username, displayName: row.display_name };
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    // Fase 4c: tirar al instante en vez de esperar a pulsar «Tirar»
+    autoRolls: Boolean(row.auto_rolls),
+  };
 }
 
 function setSessionCookie(res, user) {
@@ -79,4 +85,15 @@ authRouter.post('/logout', (req, res) => {
 
 authRouter.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
+});
+
+// Preferencias de juego de cada usuario (Fase 4c). Por ahora una: tirar solo
+// sus salvaciones, iniciativa y tiradas pedidas en vez de esperar a que pulse.
+authRouter.put('/preferencias', requireAuth, (req, res) => {
+  if (typeof req.body?.autoRolls !== 'boolean') {
+    return res.status(400).json({ error: 'Preferencia no válida' });
+  }
+  db.prepare('UPDATE users SET auto_rolls = ? WHERE id = ?').run(req.body.autoRolls ? 1 : 0, req.user.id);
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.json({ user: publicUser(row) });
 });

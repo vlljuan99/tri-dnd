@@ -44,6 +44,23 @@ export function postSystemMessage(campaignId, body, { hidden = false, userId = n
   chatPoster?.(campaignId, { body, hidden, userId });
 }
 
+// Lo mismo para tiradas (Fase 4c): una salvación contra una zona de peligro o
+// una prueba pedida por el DM se publica como tirada, para que ruede en todas
+// las pantallas en vez de quedarse en una línea de texto.
+let rollPoster = null;
+export function bindRollPoster(fn) {
+  rollPoster = fn;
+}
+export function postRollMessage(campaignId, roll, { hidden = false, userId = null } = {}) {
+  rollPoster?.(campaignId, { roll, hidden, userId });
+}
+
+// Una trampa se dispara (Fase 4c): «¡clic!» y el tablero se oscurece un
+// instante en todas las pantallas. Solo nombre y afectado, que ya se narran.
+export function notifyTrapTriggered(campaignId, trap) {
+  ioRef?.to(`campaign:${campaignId}`).emit('trampa:activada', trap);
+}
+
 export function notifyCombat(campaignId) {
   combatBroadcaster?.(campaignId);
 }

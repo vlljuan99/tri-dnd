@@ -72,6 +72,10 @@ export function buildInitiativeStrip({ combatants = [], tokens = [], turnId = nu
       deathSaves: combatant.deathSaves ?? null,
       dashed: Boolean(combatant.dashed),
       stance: combatant.stance ?? null,
+      // Fase 4c: su jugador aún no ha tirado la iniciativa (ritual de combate)
+      initiativePending: Boolean(combatant.initiativePending),
+      // Fase 4c: quién le está ayudando (acción Ayudar)
+      helpFrom: combatant.helpFrom?.name ?? null,
     };
   });
 }

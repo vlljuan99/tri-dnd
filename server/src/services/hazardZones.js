@@ -7,7 +7,17 @@ import {
   environmentalSaveAdvantage,
   resolveEnvironmentalTarget,
 } from './fluidEffects.js';
-import { notifyCombatVisual, postSystemMessage } from './liveMap.js';
+import {
+  notifyCampaignMap,
+  notifyCombat,
+  notifyCombatVisual,
+  notifyTrapTriggered,
+  postRollMessage,
+  postSystemMessage,
+} from './liveMap.js';
+import { getActiveMapId, touchMap } from './mapLibrary.js';
+import { pendingRolls } from './pendingRolls.js';
+import { rollWithOutcome, saveOutcome } from './rollOutcome.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './serverDice.js';
 
 const ABILITY_LABELS = {
@@ -125,23 +135,90 @@ function addTemporaryCondition(target, condition) {
   return { changed: true, immune: false };
 }
 
-function resolveZone(campaignId, target, zone, triggerText) {
-  const alreadyDown = target.kind === 'personaje'
+function isTargetDown(target) {
+  return target.kind === 'personaje'
     ? Number(target.character.hp_current) <= 0
     : Number.isInteger(target.combatant?.hp_current) && target.combatant.hp_current <= 0;
-  if (alreadyDown) return { changed: false, damage: 0 };
+}
 
+function buildZoneSave(target, zone) {
+  return buildServerD20Roll({
+    bonus: environmentalSavingThrowBonus(target, zone.save_ability),
+    advantage: environmentalSaveAdvantage(target, zone.save_ability),
+    label: `Salvación contra ${zone.name}`,
+    actorName: target.name,
+  });
+}
+
+// Un PJ con jugador tira él mismo la salvación de una trampa (Fase 4c)
+function isPlayerCharacter(target) {
+  return target.kind === 'personaje' && target.character.kind === 'pj' && target.character.user_id != null;
+}
+
+function refreshTarget(campaignId, target) {
+  const mapId = getActiveMapId(campaignId);
+  if (!mapId) return null;
+  return resolveEnvironmentalTarget(
+    campaignId,
+    mapId,
+    target.kind,
+    target.kind === 'personaje' ? target.character.id : target.token.id
+  );
+}
+
+function resolveZone(campaignId, target, zone, triggerText) {
+  if (isTargetDown(target)) return { changed: false, damage: 0 };
+
+  if (zone.save_ability) {
+    // «¡Clic!»: la trampa salta en todas las pantallas antes de la salvación
+    notifyTrapTriggered(campaignId, {
+      name: zone.name,
+      ...(target.kind === 'personaje' ? { characterId: target.character.id } : { mapTokenId: target.token.id }),
+    });
+  }
+
+  if (zone.save_ability && isPlayerCharacter(target)) {
+    // La trampa espera a que el jugador tire su salvación (u ocho segundos);
+    // el movimiento ya se ha hecho, así que el resto se aplica al llegar.
+    pendingRolls.solicitar({
+      campaignId,
+      characterId: target.character.id,
+      ownerUserId: target.character.user_id,
+      tipo: 'salvacion',
+      etiqueta: `Salvación de ${ABILITY_LABELS[zone.save_ability]}`,
+      nombre: target.name,
+      caracteristica: zone.save_ability,
+      cd: zone.save_dc,
+      origen: `¡Trampa! ${zone.name}`,
+      tirar: () => buildZoneSave(refreshTarget(campaignId, target) ?? target, zone),
+      alTirar: (roll) => {
+        const fresh = refreshTarget(campaignId, target);
+        if (!fresh || isTargetDown(fresh)) return;
+        const result = finishZone(campaignId, fresh, zone, triggerText, roll);
+        const mapId = getActiveMapId(campaignId);
+        if (mapId) touchMap(mapId);
+        notifyCampaignMap(campaignId);
+        if (result.changed) notifyCombat(campaignId);
+      },
+    });
+    return { changed: false, damage: 0, pending: true };
+  }
+
+  return finishZone(campaignId, target, zone, triggerText, zone.save_ability ? buildZoneSave(target, zone) : null);
+}
+
+function finishZone(campaignId, target, zone, triggerText, saveRoll) {
   let saved = false;
   let saveText = '';
-  if (zone.save_ability) {
-    const roll = buildServerD20Roll({
-      bonus: environmentalSavingThrowBonus(target, zone.save_ability),
-      advantage: environmentalSaveAdvantage(target, zone.save_ability),
-      label: `Salvación contra ${zone.name}`,
-      actorName: target.name,
-    });
-    saved = !roll.fumble && (roll.crit || roll.total >= zone.save_dc);
-    saveText = `${ABILITY_LABELS[zone.save_ability]} CD ${zone.save_dc}: ${roll.total} (${saved ? 'éxito' : 'fallo'}). `;
+  if (zone.save_ability && saveRoll) {
+    saved = !saveRoll.fumble && (saveRoll.crit || saveRoll.total >= zone.save_dc);
+    saveText = `${ABILITY_LABELS[zone.save_ability]} CD ${zone.save_dc}: ${saveRoll.total} (${saved ? 'éxito' : 'fallo'}). `;
+    // La salvación rueda en todas las pantallas (Fase 4c), no solo se narra
+    postRollMessage(
+      campaignId,
+      rollWithOutcome({ ...saveRoll, kind: 'save' }, saveOutcome({ saved, dc: zone.save_dc, targetName: target.name })),
+      { userId: isPlayerCharacter(target) ? target.character.user_id : null }
+    );
   }
 
   let damageResult = { damage: 0, changed: false, downed: false, suffix: '' };

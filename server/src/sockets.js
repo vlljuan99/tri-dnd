@@ -9,6 +9,7 @@ import {
   bindCampaignMemberEvicter,
   bindCombatBroadcaster,
   bindChatPoster,
+  bindRollPoster,
   postSystemMessage,
   notifyCampaignMap,
   notifyCombatStarted,
@@ -41,6 +42,7 @@ import {
   bindTurnStartEffectsNotifier,
   rollInitiativeDetailed,
   rollInitiativeFor,
+  storeRolledInitiative,
   setManualInitiative,
   initiativeSummary,
   setConcentration,
@@ -55,6 +57,7 @@ import {
   tryUseBonusAction,
   tryUseReaction,
   trySpecialAction,
+  consumeHelp,
   toggleCondition,
   tickConditionsForTurn,
   startDeathSaves,
@@ -76,6 +79,19 @@ import {
 import { buildMultiattackPlans, parseMultiattackState } from './services/monsterActions.js';
 import { sanitizeChatReferences, standaloneChatReference } from './services/chatReferences.js';
 import { buildServerD20Roll, buildServerDamageRoll, parseDiceNotation } from './services/serverDice.js';
+import { attackOutcome, checkOutcome, rollWithOutcome, saveOutcome } from './services/rollOutcome.js';
+import { pendingRolls, TIPOS_TIRADA } from './services/pendingRolls.js';
+import {
+  ABILITY_KEYS,
+  SKILLS as CHECK_SKILLS,
+  abilityCheckBonus,
+  abilityForCheck,
+  characterSaveBonus,
+  checkDisadvantage,
+  checkLabel,
+  groupCheckSucceeds,
+  skillCheckBonus,
+} from './rules/checks.js';
 import { resolveFluidMovement, resolveFluidTurnEnd } from './services/fluidEffects.js';
 import { resolveHazardMovement, resolveHazardTurnStart } from './services/hazardZones.js';
 import { bossActionsFor, syncBossResources, useBossAction } from './services/bossActions.js';
@@ -185,6 +201,17 @@ function combatantView(row, { isDm, round }) {
     // Qué hechizo concentra (null = ninguno). Público: la mesa entera ve al
     // mago apretando los dientes, y el grupo decide a quién protege.
     concentration: row.concentration_spell ?? null,
+    // Ayudar (Fase 4c): quién le está ayudando. Público: la mesa lo ha visto.
+    helpFrom: row.help_from_id
+      ? {
+          id: row.help_from_id,
+          name: db.prepare('SELECT name FROM combatants WHERE id = ?').get(row.help_from_id)?.name ?? null,
+        }
+      : null,
+    // Ritual de iniciativa (Fase 4c): su jugador todavía no ha tirado
+    initiativePending: Boolean(
+      row.character_id && pendingRolls.buscar(row.campaign_id, { characterId: row.character_id, tipo: 'iniciativa' })
+    ),
   };
   if (row.kind === 'pj' && row.character_id) {
     const c = db.prepare('SELECT hp_current, hp_max, hp_temp, ac, speed FROM characters WHERE id = ?').get(row.character_id);
@@ -639,9 +666,13 @@ function spellAreaTargets(campaignId, attackerToken, cells, { isDm }) {
   }
   const markers = db
     .prepare(
+      // map_tokens no tiene map_id: el mapa se alcanza por la planta de la
+      // sala (antes esta consulta fallaba y ningún conjuro de área resolvía)
       `SELECT token.id, token.x, token.y, token.hidden, room.revealed, token.room_id
-       FROM map_tokens token JOIN map_rooms room ON room.id = token.room_id
-       WHERE token.map_id = ? AND room.floor_id = ? AND token.kind IN ('enemigo', 'aliado')`
+       FROM map_tokens token
+       JOIN map_rooms room ON room.id = token.room_id
+       JOIN map_floors floor ON floor.id = room.floor_id
+       WHERE floor.map_id = ? AND room.floor_id = ? AND token.kind IN ('enemigo', 'aliado')`
     )
     .all(mapId, attackerToken.floor_id);
   for (const row of markers) {
@@ -670,6 +701,36 @@ function elevationAtToken(token) {
   }
 }
 
+// Ayudar (Fase 4c): ¿quien ayudó al atacante está a 5 pies o menos del
+// objetivo? Devuelve su nombre (el motivo de la ventaja) o null.
+function helperAdjacentTo(attackerCombatant, resolved) {
+  if (!attackerCombatant?.help_from_id || !resolved?.token) return null;
+  const helper = db.prepare('SELECT * FROM combatants WHERE id = ?').get(attackerCombatant.help_from_id);
+  if (!helper) return null;
+  const mapId = getActiveMapId(helper.campaign_id);
+  if (!mapId) return null;
+  const token = helper.character_id
+    ? db
+        .prepare(
+          `SELECT t.x, t.y, r.floor_id FROM map_character_tokens t JOIN map_rooms r ON r.id = t.room_id
+           WHERE t.map_id = ? AND t.character_id = ?`
+        )
+        .get(mapId, helper.character_id)
+    : db
+        .prepare('SELECT t.x, t.y, r.floor_id FROM map_tokens t JOIN map_rooms r ON r.id = t.room_id WHERE t.id = ?')
+        .get(helper.map_token_id);
+  if (!token) return null;
+  if (resolved.token.floor_id != null && token.floor_id !== resolved.token.floor_id) return null;
+  const distance = Math.max(Math.abs(token.x - resolved.token.x), Math.abs(token.y - resolved.token.y));
+  return distance <= 1 ? helper.name : null;
+}
+
+// La ayuda se gasta con el ataque al que dio ventaja (SRD: «el siguiente»).
+function consumeHelpIfUsed(attackerCombatant, effects) {
+  if (!attackerCombatant?.id || effects?.advantage !== 'adv') return;
+  if (effects.advantageReasons.some((reason) => reason.startsWith('te ayuda'))) consumeHelp(attackerCombatant.id);
+}
+
 function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage, armorPenalty = false }) {
   const attackerConditions = parseConditions(attackerCombatant?.conditions);
   const targetConditions = parseConditions(resolved.combatant?.conditions);
@@ -693,6 +754,7 @@ function attackEffectsFor(attackerCombatant, resolved, { melee, manualAdvantage,
     ranged: !melee,
     longRange: Boolean(resolved.longRange),
     manualAdvantage,
+    helpedBy: helperAdjacentTo(attackerCombatant, resolved),
   });
 }
 
@@ -825,6 +887,12 @@ function targetDamageProfile(resolved) {
 // calculada y deja el botón en el tracker, porque quien concentra puede tener
 // rasgos que la modifiquen y eso vive en texto libre de la ficha. Sin este
 // aviso la regla simplemente se olvidaba.
+//
+// Desde la Fase 4c, si quien concentra es un PJ, su jugador recibe la
+// salvación como tirada pendiente (pulsa «Tirar» o se tira sola a los ocho
+// segundos). El botón del tracker sigue existiendo para el DM y los PNJ.
+let concentrationRequester = null;
+
 function promptConcentrationCheck(campaignId, combatant, damage) {
   if (!combatant?.concentration_spell) return '';
   const dc = concentrationDC(damage);
@@ -832,6 +900,7 @@ function promptConcentrationCheck(campaignId, combatant, damage) {
     campaignId,
     `${combatant.name} concentra en ${combatant.concentration_spell} y recibe ${damage} de daño: salvación de Constitución CD ${dc}.`
   );
+  if (combatant.kind === 'pj' && combatant.character_id) concentrationRequester?.(campaignId, combatant, dc);
   return ` Debe salvar concentración (CD ${dc}).`;
 }
 
@@ -1063,44 +1132,6 @@ function validateAttackMode(roll, effects) {
   return { ok: true };
 }
 
-// Veredicto que viaja con cada tirada resuelta (Fase 4b). La mesa revela la
-// tirada por pasos —total, contra qué, veredicto— y cada pantalla necesita
-// saber el «contra qué» sin esperar a la línea de sistema. Solo lleva lo que
-// ya se narra en el chat tras resolver: el objetivo, la CA o CD y el resultado.
-// El `outcome` lo escribe SIEMPRE el servidor: el que mande un cliente se tira.
-function rollWithOutcome(roll, outcome = null) {
-  // eslint-disable-next-line no-unused-vars
-  const { outcome: _clientOutcome, ...clean } = roll ?? {};
-  return outcome ? { ...clean, outcome } : clean;
-}
-
-function attackOutcome({ hit, crit, fumble, targetName, ac, effects = null }) {
-  // Por qué se tiraron dos d20: las condiciones que lo causan ya son públicas
-  // en la mesa (derribado, esquivando…), así que viajan con la tirada.
-  const motivos =
-    effects?.advantage === 'adv'
-      ? effects.advantageReasons ?? []
-      : effects?.advantage === 'dis'
-        ? effects.disadvantageReasons ?? []
-        : [];
-  return {
-    tipo: 'ataque',
-    objetivo: targetName ?? null,
-    contra: Number.isFinite(Number(ac)) ? { etiqueta: 'CA', valor: Number(ac) } : null,
-    resultado: crit ? 'critico' : hit ? 'impacta' : fumble ? 'pifia' : 'falla',
-    ...(motivos.length ? { motivos } : {}),
-  };
-}
-
-function saveOutcome({ saved, dc, targetName }) {
-  return {
-    tipo: 'salvacion',
-    objetivo: targetName ?? null,
-    contra: Number.isFinite(Number(dc)) ? { etiqueta: 'CD', valor: Number(dc) } : null,
-    resultado: saved ? 'supera' : 'no-supera',
-  };
-}
-
 export function setupSockets(io) {
   // Una sola jugada pendiente por campaña aunque haya varios sockets unidos.
   // El temporizador corto deja que la interfaz pinte el turno y permite al DM
@@ -1219,6 +1250,213 @@ export function setupSockets(io) {
     broadcastMessage(campaignId, message, { senderId, dmUserId });
   });
 
+  // --- Tiradas pendientes (Fase 4c) -------------------------------------
+  // El aviso de una tirada pendiente solo llega a quien tiene que tirar y al
+  // DM (que ve el panel de pendientes); el resultado, en cambio, se publica
+  // como una tirada más y lo ve toda la mesa.
+  function campaignDmId(campaignId) {
+    return db.prepare('SELECT dm_user_id FROM campaigns WHERE id = ?').get(campaignId)?.dm_user_id ?? null;
+  }
+
+  function emitToUsers(campaignId, userIds, event, payload) {
+    const wanted = new Set(userIds.filter((id) => id != null).map(Number));
+    for (const sid of io.sockets.adapter.rooms.get(roomName(campaignId)) ?? []) {
+      const memberSocket = io.sockets.sockets.get(sid);
+      if (memberSocket && wanted.has(Number(memberSocket.data.user.id))) memberSocket.emit(event, payload);
+    }
+  }
+
+  bindRollPoster((campaignId, { roll, hidden, userId }) => {
+    const dmUserId = campaignDmId(campaignId);
+    const message = insertMessage({ campaignId, userId: userId ?? null, type: 'roll', body: JSON.stringify(roll), hidden });
+    if (hidden) broadcastMessage(campaignId, message, { senderId: userId ?? dmUserId, dmUserId });
+    else io.to(roomName(campaignId)).emit('chat:new', message);
+  });
+
+  pendingRolls.configurar({
+    creada: (pending) =>
+      emitToUsers(pending.campaignId, [pending.ownerUserId, campaignDmId(pending.campaignId)], 'tirada:pendiente', pending),
+    // El jugador sabe que su tirada salió; el DM además ve el total y si superó
+    // la CD (aunque esté oculta): es su panel de pendientes.
+    resuelta: (pending, { motivo, total, exito }) => {
+      const dmUserId = campaignDmId(pending.campaignId);
+      emitToUsers(pending.campaignId, [dmUserId], 'tirada:resuelta', { ...pending, motivo, total, exito });
+      if (pending.ownerUserId !== dmUserId) {
+        emitToUsers(pending.campaignId, [pending.ownerUserId], 'tirada:resuelta', { id: pending.id, motivo });
+      }
+    },
+    // No se espera a quien prefiere tirar solo ni a quien no está en la mesa:
+    // esperar ocho segundos a un jugador desconectado solo frena a los demás.
+    debeTirarSola: (pending) => {
+      const owner = db.prepare('SELECT auto_rolls FROM users WHERE id = ?').get(pending.ownerUserId);
+      if (owner?.auto_rolls) return true;
+      return !onlineMembers(pending.campaignId).some((member) => Number(member.id) === Number(pending.ownerUserId));
+    },
+  });
+
+  // Pide la tirada al dueño del PJ si lo tiene (y tira al instante si no):
+  // devuelve la promesa del servicio. `publicar` recibe la tirada ya hecha.
+  function requestCharacterRoll({ campaignId, character, tipo, etiqueta, build, publish, evaluar = null, cd = null, revelarCd = false, origen = null, grupoId = null, caracteristica = null, habilidad = null }) {
+    return pendingRolls.solicitar({
+      campaignId,
+      characterId: character?.id ?? null,
+      // Solo se espera al dueño de un PJ; las fichas del DM (jefes, PNJ) tiran solas
+      ownerUserId: character?.kind === 'pj' ? character.user_id ?? null : null,
+      tipo,
+      etiqueta,
+      nombre: character?.name ?? null,
+      caracteristica,
+      habilidad,
+      cd,
+      revelarCd,
+      origen,
+      grupoId,
+      tirar: build,
+      alTirar: publish,
+      evaluar,
+    });
+  }
+
+  // Salvación de concentración: la tirada (bonificador de la ficha si es un
+  // PJ; un PNJ del DM tira a pelo y el DM ajusta) y su resolución, compartidas
+  // por el botón del tracker y la pendiente del jugador.
+  function buildConcentrationRoll(row, character) {
+    return buildConcentrationSaveRoll({
+      actorName: row.name,
+      bonus: character ? concentrationSaveBonus(character) : 0,
+      spell: row.concentration_spell,
+    });
+  }
+
+  function resolveConcentrationRoll(campaignId, row, roll, targetDc, authorId) {
+    const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
+    const rollNote = insertMessage({
+      campaignId,
+      userId: authorId,
+      type: 'roll',
+      body: JSON.stringify(
+        rollWithOutcome(roll, saveOutcome({ saved: outcome.held, dc: targetDc, targetName: row.name, tipo: 'concentracion' }))
+      ),
+    });
+    io.to(roomName(campaignId)).emit('chat:new', rollNote);
+    const spell = row.concentration_spell;
+    const current = db.prepare('SELECT concentration_spell FROM combatants WHERE id = ?').get(row.id);
+    if (!outcome.held && current?.concentration_spell === spell) {
+      db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(row.id);
+    }
+    postSystemMessage(
+      campaignId,
+      outcome.held
+        ? `${row.name} aguanta la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+        : `${row.name} pierde la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
+    );
+    broadcastCombat(campaignId);
+    return outcome;
+  }
+
+  concentrationRequester = (campaignId, combatant, dc) => {
+    const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(combatant.character_id);
+    if (!character) return;
+    // Una pendiente por cada golpe: el SRD pide una salvación por cada fuente
+    // de daño. Si la primera falla, las siguientes ya no tienen nada que salvar.
+    requestCharacterRoll({
+      campaignId,
+      character,
+      tipo: 'concentracion',
+      etiqueta: `Concentración en ${combatant.concentration_spell}`,
+      caracteristica: 'con',
+      cd: dc,
+      revelarCd: true,
+      origen: 'Has recibido daño mientras concentras',
+      build: () => {
+        const row = db.prepare('SELECT * FROM combatants WHERE id = ?').get(combatant.id) ?? combatant;
+        return buildConcentrationRoll(row, character);
+      },
+      publish: (roll) => {
+        const row = db.prepare('SELECT * FROM combatants WHERE id = ?').get(combatant.id);
+        // Si entretanto cayó inconsciente o dejó de concentrar, ya no hay nada que salvar
+        if (!row?.concentration_spell) return;
+        resolveConcentrationRoll(campaignId, row, roll, dc, character.user_id);
+      },
+    });
+  };
+
+  // Ritual de iniciativa (Fase 4c): al empezar el combate cada jugador tira la
+  // de su PJ. La tira de iniciativa se reordena según llegan los resultados y
+  // el primer turno arranca cuando han llegado todas (u ocho segundos).
+  function initiativeRollBody(name, detail) {
+    const sign = detail.modifier >= 0 ? '+' : '−';
+    return {
+      kind: 'check',
+      label: 'Iniciativa',
+      actorName: name,
+      formula: '1d20 ' + sign + ' ' + Math.abs(detail.modifier),
+      groups: [{ die: 'd20', sides: 20, results: [{ rolls: [detail.d20], kept: detail.d20 }] }],
+      modifier: detail.modifier,
+      advantage: 'none',
+      total: detail.total,
+      crit: false,
+      fumble: false,
+    };
+  }
+
+  // `onReady` arranca la IA enemiga si le toca: su programador vive dentro de
+  // cada conexión, así que lo pasa quien llama.
+  async function runInitiativeRitual(campaignId, deferred, onReady) {
+    const requests = deferred.map((combatant) => {
+        const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(combatant.character_id);
+        let detail = null;
+        return requestCharacterRoll({
+          campaignId,
+          character,
+          tipo: 'iniciativa',
+          etiqueta: 'Iniciativa',
+          caracteristica: 'dex',
+          origen: '¡Comienza el combate!',
+          build: () => {
+            detail = rollInitiativeDetailed(combatant);
+            return initiativeRollBody(combatant.name, detail);
+          },
+          publish: (roll) => {
+            if (!db.prepare('SELECT id FROM combatants WHERE id = ?').get(combatant.id)) return;
+            storeRolledInitiative(combatant.id, detail);
+            const message = insertMessage({
+              campaignId,
+              userId: character?.user_id ?? null,
+              type: 'roll',
+              body: JSON.stringify(roll),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', message);
+            broadcastCombat(campaignId);
+          },
+        });
+    });
+    // Ya hay pendientes: la tira de iniciativa enseña quién falta por tirar
+    broadcastCombat(campaignId);
+    await Promise.all(requests);
+    const table = db
+      .prepare('SELECT combat_active, combat_turn_id FROM game_tables WHERE campaign_id = ?')
+      .get(campaignId);
+    // Si el DM cerró el combate mientras tanto, o ya arrancó a mano, nada más
+    if (!table?.combat_active || table.combat_turn_id) return;
+    ensureTurnStarted(campaignId);
+    broadcastCombat(campaignId);
+    onReady?.();
+  }
+
+  // Lo asíncrono nunca puede tumbar el servidor: una promesa rechazada sin
+  // capturar mata el proceso de Node, y con él la mesa de todos.
+  function startInitiativeRitual(campaignId, deferred, onReady) {
+    runInitiativeRitual(campaignId, deferred, onReady).catch((error) => {
+      console.error('[iniciativa] el ritual falló; se arranca el turno igualmente:', error);
+      ensureTurnStarted(campaignId);
+      broadcastCombat(campaignId);
+    });
+  }
+
+  // Los PJ con dueño tiran su iniciativa en el ritual; los demás, el servidor.
+  const deferPjInitiative = (combatant) => combatant.kind === 'pj' && Boolean(combatant.character_id);
+
   io.on('connection', (socket) => {
     const user = socket.data.user;
 
@@ -1244,6 +1482,9 @@ export function setupSockets(io) {
         }),
         members: onlineMembers(campaignId),
         combat: combatStateFor(campaignId, { isDm: membership.role === 'dm', userId: user.id }),
+        // Tiradas que le esperan (las suyas; el DM, todas): al recargar la
+        // página el aviso de «¡Salvación de DES!» no se pierde.
+        pendingRolls: pendingRolls.listar(campaignId, { userId: user.id, isDm: membership.role === 'dm' }),
       });
       scheduleEnemyAiTurn(campaignId);
     });
@@ -1739,13 +1980,17 @@ export function setupSockets(io) {
 
       // Arranque fresco: resetea los recursos de todos y tira iniciativa según
       // lo que haya elegido el DM (por todos, o solo por quien no tenga)
-      const { rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false });
+      const { rolls, deferred } = activateTurnMode(campaignId, {
+        rerollAll: rerollAll !== false,
+        deferPj: deferPjInitiative,
+      });
       // Primero el estado (para que el cartel ya tenga el orden), luego el
       // aviso: cartel a pantalla + mensaje de chat, igual que el automático
       broadcastCombat(campaignId);
       notifyCombatStarted(campaignId);
       narrateInitiativeRolls(campaignId, rolls);
-      scheduleEnemyAiTurn(campaignId);
+      if (deferred.length) startInitiativeRitual(campaignId, deferred, () => scheduleEnemyAiTurn(campaignId));
+      else scheduleEnemyAiTurn(campaignId);
       cb?.({ ok: true });
     });
 
@@ -2297,7 +2542,7 @@ export function setupSockets(io) {
     // Acción especial del turno que gasta la acción: Correr (dobla el
     // movimiento), Esquivar (ya altera ataques) o Destrabarse. La puede
     // lanzar el dueño del PJ activo o el DM (controla enemigos/ausentes).
-    socket.on('combat:special-action', ({ campaignId, combatantId, kind }, cb) => {
+    socket.on('combat:special-action', ({ campaignId, combatantId, kind, targetId = null }, cb) => {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
 
@@ -2311,10 +2556,17 @@ export function setupSockets(io) {
         if (!owns) return cb?.({ error: 'Ese combatiente no es tuyo' });
       }
 
-      const result = trySpecialAction(campaignId, row.id, kind);
+      const result = trySpecialAction(campaignId, row.id, kind, { targetId });
       if (!result.ok) return cb?.(result);
 
-      const verb = kind === 'correr' ? 'corre' : kind === 'esquivar' ? 'se prepara para esquivar' : 'se destraba';
+      const verb =
+        kind === 'correr'
+          ? 'corre'
+          : kind === 'esquivar'
+            ? 'se prepara para esquivar'
+            : kind === 'ayudar'
+              ? `ayuda a ${result.target.name}`
+              : 'se destraba';
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: `${row.name} ${verb}.` });
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
@@ -2374,37 +2626,20 @@ export function setupSockets(io) {
       }
 
       const targetDc = Number.isInteger(dc) && dc >= 10 && dc <= 40 ? dc : 10;
-      // El bonificador sale de la ficha si es un PJ; un PNJ del DM no tiene
-      // ficha 5e completa aquí, así que tira a pelo y el DM ajusta si toca.
+      // Si el jugador ya tiene la salvación pendiente, el botón la adelanta en
+      // vez de tirar otra distinta (Fase 4c).
+      const pendingSave = row.character_id
+        ? pendingRolls.buscar(campaignId, { characterId: row.character_id, tipo: 'concentracion' })
+        : null;
+      if (pendingSave) {
+        const resolvedPending = pendingRolls.resolver(pendingSave.id, { userId: user.id, isDm: membership.role === 'dm' });
+        return cb?.(resolvedPending.error ? resolvedPending : { ok: true, pending: true });
+      }
       const character = row.character_id
         ? db.prepare('SELECT * FROM characters WHERE id = ?').get(row.character_id)
         : null;
-      const roll = buildConcentrationSaveRoll({
-        actorName: row.name,
-        bonus: character ? concentrationSaveBonus(character) : 0,
-        spell: row.concentration_spell,
-      });
-      const outcome = resolveConcentrationSave({ total: roll.total, natural: roll.natural, dc: targetDc });
-
-      const rollNote = insertMessage({
-        campaignId,
-        userId: user.id,
-        type: 'roll',
-        body: JSON.stringify(rollWithOutcome(roll, saveOutcome({ saved: outcome.held, dc: targetDc, targetName: row.name }))),
-      });
-      io.to(roomName(campaignId)).emit('chat:new', rollNote);
-
-      const spell = row.concentration_spell;
-      if (!outcome.held) {
-        db.prepare('UPDATE combatants SET concentration_spell = NULL WHERE id = ?').run(row.id);
-      }
-      postSystemMessage(
-        campaignId,
-        outcome.held
-          ? `${row.name} aguanta la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
-          : `${row.name} pierde la concentración en ${spell} (${roll.total} contra CD ${targetDc}).`
-      );
-      broadcastCombat(campaignId);
+      const roll = buildConcentrationRoll(row, character);
+      const outcome = resolveConcentrationRoll(campaignId, row, roll, targetDc, user.id);
       cb?.({ ok: true, held: outcome.held, total: roll.total, dc: targetDc });
     });
 
@@ -2535,11 +2770,16 @@ export function setupSockets(io) {
 
       let body;
       let rolls = [];
+      let deferred = [];
       if (turningOn) {
-        ({ rolls } = activateTurnMode(campaignId, { rerollAll: rerollAll !== false }));
+        ({ rolls, deferred } = activateTurnMode(campaignId, {
+          rerollAll: rerollAll !== false,
+          deferPj: deferPjInitiative,
+        }));
         body = 'Modo por turnos activado: movimiento y acciones solo en tu turno.';
       } else {
         deactivateTurnMode(campaignId);
+        pendingRolls.cancelar(campaignId, { tipos: ['iniciativa'] });
         body = 'Modo libre: movimiento y acciones sin restricción de turno.';
       }
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body });
@@ -2548,7 +2788,10 @@ export function setupSockets(io) {
       // Cartel de aviso tras difundir el estado, para que ya tenga el orden
       if (turningOn) io.to(roomName(campaignId)).emit('combat:started');
       narrateInitiativeRolls(campaignId, rolls);
-      if (turningOn) scheduleEnemyAiTurn(campaignId);
+      if (turningOn && deferred.length) {
+        startInitiativeRitual(campaignId, deferred, () => scheduleEnemyAiTurn(campaignId));
+      }
+      else if (turningOn) scheduleEnemyAiTurn(campaignId);
       else cancelEnemyAiTurn(campaignId);
       cb?.({ ok: true, active: turningOn });
     });
@@ -2606,6 +2849,8 @@ export function setupSockets(io) {
         'UPDATE game_tables SET combat_active = 0, combat_round = 1, combat_turn_id = NULL WHERE campaign_id = ?'
       ).run(campaignId);
       cancelEnemyAiTurn(campaignId);
+      // Sin combate, una iniciativa o una concentración pendientes ya no significan nada
+      pendingRolls.cancelar(campaignId, { tipos: ['iniciativa', 'concentracion'] });
 
       const note = insertMessage({ campaignId, userId: user.id, type: 'system', body: 'El combate ha terminado' });
       io.to(roomName(campaignId)).emit('chat:new', note);
@@ -2720,6 +2965,7 @@ export function setupSockets(io) {
         label: `Ataque de oportunidad: ${option.name}`,
         actorName: attacker.name,
       });
+      consumeHelpIfUsed(attacker, effects);
       const naturalCrit = attackRoll.crit;
       const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= resolved.ac);
       const critical = hit && (naturalCrit || effects.autoCrit);
@@ -2833,7 +3079,17 @@ export function setupSockets(io) {
     // Conjuros lanzados desde el tablero: el cliente solo elige conjuro,
     // centro/dirección y espacio. Alcance, visión, objetivos de la plantilla,
     // CA, salvaciones y daño salen de la ficha y del SRD en el servidor.
-    socket.on('combate:lanzar-conjuro', ({ campaignId, characterId, spellIndex, aim, target, slotLevel }, cb) => {
+    // Asíncrono desde la Fase 4c: las salvaciones de los PJ afectados esperan a
+    // que cada jugador pulse «Tirar» (u ocho segundos). El conjuro se resuelve
+    // UNA vez, con todas las salvaciones dentro.
+    socket.on('combate:lanzar-conjuro', (payload, cb) => {
+      castBoardSpell(payload ?? {}, cb).catch((error) => {
+        console.error('[conjuros] error al resolver un conjuro:', error);
+        cb?.({ error: 'No se pudo resolver el conjuro' });
+      });
+    });
+
+    async function castBoardSpell({ campaignId, characterId, spellIndex, aim, target, slotLevel }, cb) {
       const membership = getMembership(campaignId, user.id);
       if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
       const character = db
@@ -2984,6 +3240,7 @@ export function setupSockets(io) {
           label: `${data.name} — ataque de conjuro`,
           actorName: character.name,
         });
+        consumeHelpIfUsed(attackerCombatant, attackEffects);
         const naturalCrit = attackRoll.crit;
         const hit = naturalCrit || (!attackRoll.fumble && attackRoll.total >= targetForAttack.ac);
         spellAttackCritical = hit && (naturalCrit || attackEffects.autoCrit);
@@ -3010,6 +3267,7 @@ export function setupSockets(io) {
           weapon: { geometry: { ranged: true }, name: data.name, srdIndex: null },
         });
       } else {
+        const pendingSaves = [];
         for (const resolved of targets) {
           const saveAbility = data.dc?.dc_type?.index ?? null;
           if (!saveAbility) {
@@ -3027,31 +3285,52 @@ export function setupSockets(io) {
           const automaticFailure =
             ['str', 'dex'].includes(saveAbility) &&
             conditions.some((condition) => ['paralizado', 'aturdido', 'inconsciente'].includes(condition));
-          const saveRoll = buildServerD20Roll({
-            bonus: savingThrowBonus({ ...resolved, combatant: targetCombatant }, saveAbility),
-            advantage: savingThrowAdvantage(resolved, targetCombatant, saveAbility),
-            label: `Salvación de ${saveAbility.toUpperCase()} contra ${data.name}`,
-            actorName: resolved.name,
-          });
-          const saved = !automaticFailure && saveRoll.total >= profile.saveDc;
-          const sharedSave = rollWithOutcome(
-            { ...saveRoll, kind: 'save', crit: false, fumble: false },
-            saveOutcome({ saved, dc: profile.saveDc, targetName: resolved.name })
-          );
-          const saveMessage = insertMessage({
-            campaignId,
-            userId: user.id,
-            type: 'roll',
-            body: JSON.stringify(sharedSave),
-          });
-          io.to(roomName(campaignId)).emit('chat:new', saveMessage);
-          outcomes.push({
+          const saveBonus = savingThrowBonus({ ...resolved, combatant: targetCombatant }, saveAbility);
+          const saveAdvantage = savingThrowAdvantage(resolved, targetCombatant, saveAbility);
+          const saveLabel = `Salvación de ${saveAbility.toUpperCase()} contra ${data.name}`;
+          const entry = {
             target: { ...resolved, combatant: targetCombatant },
             hit: true,
-            saved,
+            saved: false,
             critical: false,
-          });
+          };
+          outcomes.push(entry);
+          const buildSave = () =>
+            buildServerD20Roll({ bonus: saveBonus, advantage: saveAdvantage, label: saveLabel, actorName: resolved.name });
+          // La salvación de un PJ la firma su jugador: es él quien ha pulsado
+          const saveAuthor = resolved.kind === 'personaje' ? resolved.character.user_id ?? user.id : user.id;
+          const publishSave = (saveRoll) => {
+            entry.saved = !automaticFailure && saveRoll.total >= profile.saveDc;
+            const sharedSave = rollWithOutcome(
+              { ...saveRoll, kind: 'save', crit: false, fumble: false },
+              saveOutcome({ saved: entry.saved, dc: profile.saveDc, targetName: resolved.name })
+            );
+            const saveMessage = insertMessage({
+              campaignId,
+              userId: saveAuthor,
+              type: 'roll',
+              body: JSON.stringify(sharedSave),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', saveMessage);
+          };
+          if (resolved.kind === 'personaje') {
+            pendingSaves.push(
+              requestCharacterRoll({
+                campaignId,
+                character: resolved.character,
+                tipo: 'salvacion',
+                etiqueta: saveLabel,
+                caracteristica: saveAbility,
+                origen: `${data.name} de ${character.name}`,
+                build: buildSave,
+                publish: publishSave,
+              })
+            );
+          } else {
+            publishSave(buildSave());
+          }
         }
+        if (pendingSaves.length) await Promise.all(pendingSaves);
       }
 
       const hasDamage = Boolean(spellDamageNotation(data, character.level, requestedSlot));
@@ -3127,7 +3406,7 @@ export function setupSockets(io) {
       notifyCampaignMap(campaignId);
       broadcastCombat(campaignId);
       cb?.({ ok: true, outcomes: publicOutcomes });
-    });
+    }
 
     // --- Combate en el tablero: atacar y aplicar daño -----------------
 
@@ -3163,6 +3442,8 @@ export function setupSockets(io) {
       // validado el objetivo, para no penalizar un intento inválido
       const actionSpend = trySpendAction(campaignId, checked.character.id);
       if (!actionSpend.ok) return cb?.({ error: actionSpend.error });
+      // La ayuda recibida se gasta con este ataque si le dio ventaja
+      consumeHelpIfUsed(attackerCombatant, effects);
 
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
@@ -3328,6 +3609,7 @@ export function setupSockets(io) {
         multiattackResolved = spend.multiattackResolved;
       }
 
+      consumeHelpIfUsed(attackerCombatant, effects);
       const naturalCrit = Boolean(roll.crit);
       const hit = naturalCrit || (!roll.fumble && Number(roll.total) >= resolved.ac);
       const crit = hit && (naturalCrit || effects.autoCrit);
@@ -3503,6 +3785,152 @@ export function setupSockets(io) {
       io.to(roomName(campaignId)).emit('chat:new', note);
       broadcastCombat(campaignId);
       cb?.({ ok: true, remainingQty: item.qty <= 1 ? 0 : item.qty - 1 });
+    });
+
+    // --- Tiradas pendientes y tiradas pedidas por el DM (Fase 4c) ---------
+
+    // El dueño pulsa «Tirar» (o el DM adelanta una ajena: «Tirar ya»). El
+    // servidor tira en ese instante; el cliente nunca manda el número.
+    socket.on('tirada:resolver', ({ campaignId, id }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (!membership) return cb?.({ error: 'No perteneces a esta campaña' });
+      const pending = pendingRolls.listar(campaignId, { isDm: true }).find((item) => item.id === Number(id));
+      if (!pending) return cb?.({ error: 'Esa tirada ya no está pendiente' });
+      cb?.(pendingRolls.resolver(id, { userId: user.id, isDm: membership.role === 'dm' }));
+    });
+
+    // «Tirar ya» por todas (o por varias) las pendientes de la mesa: solo el DM.
+    socket.on('tirada:forzar', ({ campaignId, ids = null }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede tirar por los demás' });
+      const list = Array.isArray(ids) ? ids.map(Number).filter(Number.isInteger) : null;
+      cb?.({ ok: true, count: pendingRolls.forzar(campaignId, { ids: list }) });
+    });
+
+    // El DM pide una tirada: prueba de característica, de habilidad o
+    // salvación, a unos PJ o a todo el grupo, con CD opcional (oculta salvo
+    // que la revele) y, si es de grupo, con el resultado colectivo al final.
+    socket.on('tirada:pedir', ({
+      campaignId,
+      tipo,
+      caracteristica = null,
+      habilidad = null,
+      characterIds = [],
+      cd = null,
+      revelarCd = false,
+      grupal = false,
+    }, cb) => {
+      const membership = getMembership(campaignId, user.id);
+      if (membership?.role !== 'dm') return cb?.({ error: 'Solo el DM puede pedir tiradas' });
+      if (!['prueba', 'salvacion'].includes(tipo)) return cb?.({ error: 'Tipo de tirada no válido' });
+      const skill = tipo === 'prueba' && habilidad && CHECK_SKILLS[habilidad] ? habilidad : null;
+      if (habilidad && !skill) return cb?.({ error: 'Habilidad no válida' });
+      const ability = abilityForCheck({ caracteristica, habilidad: skill });
+      if (!ability || !ABILITY_KEYS.includes(ability)) return cb?.({ error: 'Elige una característica o una habilidad' });
+      const dc = cd == null || cd === '' ? null : Number(cd);
+      if (dc != null && (!Number.isInteger(dc) || dc < 1 || dc > 40)) {
+        return cb?.({ error: 'La CD debe estar entre 1 y 40' });
+      }
+      if (grupal && dc == null) return cb?.({ error: 'Una tirada de grupo necesita una CD' });
+
+      const wanted = Array.isArray(characterIds) ? characterIds.map(Number).filter(Number.isInteger) : [];
+      const characters = db
+        .prepare("SELECT * FROM characters WHERE campaign_id = ? AND kind = 'pj' ORDER BY name")
+        .all(campaignId)
+        .filter((character) => !wanted.length || wanted.includes(character.id));
+      if (!characters.length) return cb?.({ error: 'No hay personajes a los que pedir la tirada' });
+
+      const label = checkLabel({ tipo, caracteristica: ability, habilidad: skill });
+      const grupoId = `pedida-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const everyone = !wanted.length;
+      postSystemMessage(
+        campaignId,
+        `El DM pide ${grupal ? 'una tirada de grupo de' : 'una tirada de'} ${label}${
+          everyone ? ' a todo el grupo' : ` a ${characters.map((character) => character.name).join(', ')}`
+        }${dc != null && revelarCd ? ` (CD ${dc})` : ''}.`
+      );
+
+      const results = [];
+      const requests = characters.map((character) => {
+        const combatant = db
+          .prepare("SELECT * FROM combatants WHERE campaign_id = ? AND kind = 'pj' AND character_id = ?")
+          .get(campaignId, character.id);
+        return requestCharacterRoll({
+          campaignId,
+          character,
+          tipo: tipo === 'salvacion' ? 'salvacion' : 'prueba',
+          etiqueta: label,
+          caracteristica: ability,
+          habilidad: skill,
+          cd: dc,
+          revelarCd,
+          origen: grupal ? 'Tirada de grupo que pide el DM' : 'El DM pide una tirada',
+          grupoId,
+          build: () => {
+            const bonus =
+              tipo === 'salvacion'
+                ? characterSaveBonus(character, ability)
+                : skill
+                  ? skillCheckBonus(character, skill)
+                  : abilityCheckBonus(character, ability);
+            // Ayudar (SRD): ventaja en la siguiente prueba de característica
+            // del ayudado. Se consume aquí, al tirarla.
+            const current = combatant
+              ? db.prepare('SELECT help_from_id FROM combatants WHERE id = ?').get(combatant.id)
+              : null;
+            const helped = tipo === 'prueba' && Boolean(current?.help_from_id);
+            if (helped) db.prepare('UPDATE combatants SET help_from_id = NULL WHERE id = ?').run(combatant.id);
+            const disadvantage = checkDisadvantage(character, ability);
+            const advantage = helped && !disadvantage ? 'adv' : disadvantage && !helped ? 'dis' : 'none';
+            return buildServerD20Roll({ bonus, advantage, label, actorName: character.name });
+          },
+          evaluar: (roll) => (dc == null ? null : roll.total >= dc),
+          publish: (roll) => {
+            const success = dc == null ? null : roll.total >= dc;
+            results.push({ name: character.name, total: roll.total, success });
+            const outcome = checkOutcome({
+              success,
+              dc,
+              reveal: revelarCd,
+              targetName: character.name,
+              tipo: tipo === 'salvacion' ? 'salvacion' : 'prueba',
+            });
+            const message = insertMessage({
+              campaignId,
+              userId: character.user_id ?? null,
+              type: 'roll',
+              body: JSON.stringify(rollWithOutcome({ ...roll, kind: 'check' }, outcome)),
+            });
+            io.to(roomName(campaignId)).emit('chat:new', message);
+          },
+        });
+      });
+
+      // El resultado colectivo, cuando han tirado todos (sin bloquear la respuesta)
+      Promise.all(requests).then(() => {
+        if (!results.length) return;
+        if (grupal) {
+          const successes = results.filter((result) => result.success).length;
+          const passed = groupCheckSucceeds(successes, results.length);
+          postSystemMessage(
+            campaignId,
+            `Tirada de grupo de ${label}: el grupo ${passed ? 'la supera' : 'no la supera'} (${successes} de ${results.length}${
+              revelarCd ? `, CD ${dc}` : ''
+            }).`
+          );
+        } else if (dc != null && !revelarCd) {
+          // Con la CD oculta, el reparto de éxitos es del DM: nota privada
+          postSystemMessage(
+            campaignId,
+            `Resultados de ${label} (CD ${dc}): ${results
+              .map((result) => `${result.name} ${result.total} ${result.success ? '✓' : '✗'}`)
+              .join(', ')}.`,
+            { hidden: true }
+          );
+        }
+      });
+
+      cb?.({ ok: true, grupoId, count: characters.length });
     });
 
     socket.on('disconnecting', () => {
