@@ -62,7 +62,7 @@ function PresetCard({ preset, onCreate, onEditImages, busy, disabled, characterL
             title="Solo el administrador de la instalación ve este botón"
             className="mt-2 rounded-sm border border-ink/25 px-4 py-1.5 font-display text-sm text-ink/75 hover:border-ochre hover:text-ochre"
           >
-            Imágenes de enemigos y objetos
+            Imágenes de enemigos, objetos y trampas
           </button>
         )}
       </div>

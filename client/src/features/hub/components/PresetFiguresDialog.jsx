@@ -8,12 +8,12 @@ import {
 } from '../lib/presetFigures.js';
 
 // Panel del administrador para vestir las figuras de un escenario de fábrica:
-// una imagen por enemigo u objeto (los cuatro «Bandido arquero» comparten la
-// suya). La ve cualquiera que juegue el escenario, también en las partidas ya
-// montadas, que repintan su tablero al momento.
+// una imagen por enemigo, objeto o trampa (los cuatro «Bandido arquero»
+// comparten la suya). La ve cualquiera que juegue el escenario, también en las
+// partidas ya montadas, que repintan su tablero al momento.
 
 // Los mismos colores que el disco del marcador sin imagen en el tablero
-const DISC_COLORS = { enemigo: '#8c2f2f', objeto: '#b9862f' };
+const DISC_COLORS = { enemigo: '#8c2f2f', objeto: '#b9862f', trampa: '#7a4b9c' };
 
 function FigureRow({ figure, busy, onUpload, onRemove }) {
   const inputRef = useRef(null);
@@ -146,8 +146,9 @@ export default function PresetFiguresDialog({ preset, onClose }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <p className="text-sm leading-relaxed text-ink/65">
             Cada figura lleva su imagen en el marcador del tablero, la barra de iniciativa y el HUD. Las copias de
-            una misma figura comparten la suya, y las partidas ya montadas se actualizan al momento. Sin imagen se
-            sigue viendo el disco de color de siempre.
+            una misma figura comparten la suya, y las partidas ya montadas se actualizan al momento. Una trampa
+            oculta solo enseña su imagen cuando la descubren. Sin imagen se sigue viendo el disco de color de
+            siempre.
           </p>
 
           {error && (

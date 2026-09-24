@@ -346,7 +346,8 @@ campaignsRouter.get('/escaramuzas/predefinidas', (req, res) => {
   });
 });
 
-// Imágenes de las figuras (enemigos y objetos) de un escenario de fábrica.
+// Imágenes de las figuras (enemigos, objetos y trampas) de un escenario de
+// fábrica.
 // Son de la instalación entera, así que solo las toca su administrador; el
 // listado también es solo suyo, porque enseña de antemano quién espera en
 // cada sala. Se comprueba antes de leer el cuerpo, para no recibir la imagen

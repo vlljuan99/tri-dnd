@@ -1,6 +1,7 @@
 import { api } from '../../../api.js';
 
-// Imágenes de las figuras (enemigos y objetos) de los escenarios de fábrica.
+// Imágenes de las figuras (enemigos, objetos y trampas) de los escenarios de
+// fábrica.
 // Solo las cambia el administrador de la instalación; la subida sigue el
 // patrón del resto de la app: binario crudo con su content-type, no multipart.
 
@@ -13,6 +14,7 @@ export const FIGURE_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp';
 export const FIGURE_GROUPS = [
   { kind: 'enemigo', label: 'Enemigos' },
   { kind: 'objeto', label: 'Objetos' },
+  { kind: 'trampa', label: 'Trampas' },
 ];
 
 /** Reparte las figuras por tipo, en el orden de `FIGURE_GROUPS` y sin grupos vacíos. */

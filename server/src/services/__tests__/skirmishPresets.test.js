@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   FIGURE_IMAGE_KINDS,
   SKIRMISH_PRESETS,
+  figureKeyOf,
   getSkirmishPreset,
   listSkirmishFigures,
   listSkirmishPresets,
@@ -178,9 +179,77 @@ test('cada escenario lista sus enemigos y objetos una vez por figura', () => {
     count: 1,
     rooms: ['El paso'],
   });
-  // Las trampas no son figuras con imagen.
+  // Las trampas también llevan imagen (la ve el jugador al descubrirlas).
+  assert.equal(byKey.get('trampa-red-de-cuerda-tendida')?.kind, 'trampa');
   assert.ok(paso.every((figure) => FIGURE_IMAGE_KINDS.includes(figure.kind)));
   assert.equal(listSkirmishFigures('no-existe'), null);
+});
+
+test('una figura renombrada en el catálogo conserva su clave si la fija con «figure»', () => {
+  assert.equal(figureKeyOf({ kind: 'enemigo', name: 'Bandido arquero' }), 'enemigo-bandido-arquero');
+  assert.equal(
+    figureKeyOf({ kind: 'enemigo', name: 'Arquero del paso', figure: 'bandido-arquero' }),
+    'enemigo-bandido-arquero'
+  );
+  // Sin tipo, un marcador es un enemigo, como en el editor
+  assert.equal(figureKeyOf({ name: 'Lobo' }), 'enemigo-lobo');
+  // Los aliados no son figuras del escenario con imagen
+  assert.equal(figureKeyOf({ kind: 'aliado', name: 'Guía' }), null);
+});
+
+test('cada marcador con figura lleva su clave en el snapshot que se instancia', () => {
+  for (const preset of SKIRMISH_PRESETS) {
+    for (const floor of preset.map.floors) {
+      for (const room of floor.rooms) {
+        for (const token of room.tokens ?? []) {
+          assert.equal(token.figureKey ?? null, figureKeyOf(token), `${preset.id}/${token.name}`);
+        }
+      }
+    }
+  }
+});
+
+// Las imágenes subidas en producción se guardan por clave de figura. Si una de
+// estas desaparece, la figura pierde su imagen en silencio: al renombrar una
+// figura del catálogo, fija su clave antigua con `figure` (ver
+// skirmishPresets.js). Al añadir figuras nuevas, añádelas aquí también.
+const KNOWN_FIGURE_KEYS = {
+  'paso-del-cuervo': [
+    'enemigo-bandido-arquero',
+    'enemigo-bandido',
+    'enemigo-lobo',
+    'enemigo-yerna-la-tuerta',
+    'trampa-red-de-cuerda-tendida',
+    'objeto-carro-volcado',
+  ],
+  'cripta-anegada': [
+    'trampa-losa-de-presion',
+    'enemigo-esqueleto',
+    'objeto-sarcofago-reventado',
+    'enemigo-ghoul',
+    'enemigo-el-duodecimo-silente',
+    'objeto-arcon-del-sagrario',
+  ],
+  'puente-igneo': [
+    'enemigo-mefito-de-magma',
+    'enemigo-azer-guardian',
+    'enemigo-vhorra-la-escoria-roja',
+    'trampa-valvula-de-colada',
+    'objeto-yunque-del-capataz',
+    'objeto-alacena-del-capataz',
+  ],
+};
+
+test('ninguna figura conocida pierde su clave (y con ella su imagen)', () => {
+  for (const [presetId, keys] of Object.entries(KNOWN_FIGURE_KEYS)) {
+    const current = new Set(listSkirmishFigures(presetId).map((figure) => figure.key));
+    for (const key of keys) {
+      assert.ok(
+        current.has(key),
+        `${presetId}: la figura «${key}» ya no existe. Si la has renombrado, añade figure: '${key.replace(/^[a-z]+-/, '')}' a sus marcadores para que conserve su imagen`
+      );
+    }
+  }
 });
 
 test('dos figuras distintas de un escenario nunca comparten clave', () => {
@@ -190,7 +259,7 @@ test('dos figuras distintas de un escenario nunca comparten clave', () => {
       for (const room of floor.rooms) {
         for (const token of room.tokens ?? []) {
           const kind = token.kind ?? 'enemigo';
-          if (FIGURE_IMAGE_KINDS.includes(kind)) names.add(`${kind}|${token.trueName ?? token.name}`);
+          if (FIGURE_IMAGE_KINDS.includes(kind)) names.add(`${kind}|${token.figure ?? token.name}`);
         }
       }
     }

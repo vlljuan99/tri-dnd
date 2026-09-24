@@ -4,13 +4,16 @@ import { db } from '../db.js';
 import { SKIRMISH_UPLOADS_DIR } from '../config.js';
 import { FIGURE_IMAGE_KINDS, listSkirmishFigures, skirmishFigureKey } from './skirmishPresets.js';
 
-// Imágenes de las figuras (enemigos y objetos) de los escenarios de fábrica.
+// Imágenes de las figuras (enemigos, objetos y trampas) de los escenarios de
+// fábrica.
 // Son de la instalación entera, como los sonidos por defecto: las pone su
 // administrador y las ve cualquiera que juegue ese escenario, también en las
 // partidas que ya estaban montadas antes de subirlas.
 //
 // Solo son aspecto: el marcador se juega igual con imagen o sin ella, y sin
-// imagen el tablero sigue pintando el disco de color de siempre.
+// imagen el tablero sigue pintando el disco de color de siempre. Tampoco
+// adelantan nada: una trampa oculta no llega al jugador, con imagen o sin
+// ella, hasta que se descubre.
 
 // Formatos que el tablero 3D carga como textura en cualquier navegador. SVG
 // queda fuera a propósito: se sirve como estático y podría llevar scripts.
@@ -61,7 +64,11 @@ export function applySkirmishFigureImages(presetId, tokens) {
   if (!images.size) return tokens;
   for (const token of tokens) {
     if (!FIGURE_IMAGE_KINDS.includes(token.kind)) continue;
-    const url = images.get(skirmishFigureKey(token.kind, token.true_name ?? token.name));
+    // La clave guardada al montar la partida; los marcadores anteriores a la
+    // v79 no la tienen y se reconocen por su nombre real, que es el que traía
+    // el catálogo cuando se montaron.
+    const key = token.figure_key ?? skirmishFigureKey(token.kind, token.true_name ?? token.name);
+    const url = images.get(key);
     if (url) token.figure_avatar_path = url;
   }
   return tokens;

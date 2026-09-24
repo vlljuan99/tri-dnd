@@ -1538,6 +1538,15 @@ export const migrations = [
     PRIMARY KEY (preset_id, figure_key)
   );
   `,
+
+  // v79 — Cada marcador de un escenario de fábrica guarda la clave de su
+  // figura al montarse, para que la imagen no dependa de su nombre: ni un
+  // cambio de nombre en partida ni uno en el catálogo (fijando `figure`) le
+  // quitan la imagen. Los marcadores anteriores quedan en NULL y se
+  // reconocen por el nombre con el que se montaron (services/skirmishImages.js).
+  `
+  ALTER TABLE map_tokens ADD COLUMN figure_key TEXT;
+  `,
 ];
 
 export function runMigrations() {

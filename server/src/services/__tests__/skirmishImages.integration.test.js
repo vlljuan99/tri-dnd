@@ -1,6 +1,7 @@
-// Imágenes de las figuras de los escenarios de fábrica, contra el servidor
-// real: solo el administrador de la instalación las cambia, y se ven en el
-// tablero de las partidas de ese escenario, también en las ya montadas.
+// Imágenes de las figuras (enemigos, objetos y trampas) de los escenarios de
+// fábrica, contra el servidor real: solo el administrador de la instalación
+// las cambia, se ven en el tablero de las partidas de ese escenario, también
+// en las ya montadas, y una trampa oculta no llega al jugador ni con imagen.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,7 +42,7 @@ test('el administrador pone imagen a las figuras de un escenario de fábrica', {
   const server = await startTestServer();
   try {
     const { baseUrl } = server;
-    assert.equal(server.health.database.migration, 78);
+    assert.equal(server.health.database.migration, 79);
     const admin = await registerUser(baseUrl, { username: 'fundadora', displayName: 'Fundadora' });
     const amigo = await registerUser(baseUrl, { username: 'amigo', displayName: 'Amigo' });
 
@@ -128,6 +129,58 @@ test('el administrador pone imagen a las figuras de un escenario de fábrica', {
       after.tokens.filter((token) => token.name === 'Lobo').every((token) => token.avatarUrl === null),
       'una figura sin imagen no hereda la de otra'
     );
+
+    // Cada marcador guardó su figura al montarse: la imagen no depende del
+    // nombre, así que renombrarlo en partida no se la quita. Un marcador
+    // anterior a la v79 (sin figura guardada) se reconoce por su nombre.
+    const tokensDb = new Database(path.join(server.dataDir, 'tri-dnd.db'));
+    try {
+      const stored = tokensDb
+        .prepare(
+          `SELECT token.name, token.figure_key FROM map_tokens token
+             JOIN map_rooms room ON room.id = token.room_id
+             JOIN map_floors floor ON floor.id = room.floor_id
+             JOIN maps map ON map.id = floor.map_id
+            WHERE map.campaign_id = ?`
+        )
+        .all(campaignId);
+      assert.equal(stored.find((row) => row.name === 'Carro volcado')?.figure_key, 'objeto-carro-volcado');
+      assert.equal(stored.find((row) => row.name === 'Red de cuerda tendida')?.figure_key, 'trampa-red-de-cuerda-tendida');
+      assert.ok(stored.filter((row) => row.name === 'Bandido arquero').every((row) => row.figure_key === 'enemigo-bandido-arquero'));
+      tokensDb.prepare("UPDATE map_tokens SET name = 'Carreta rota' WHERE name = 'Carro volcado'").run();
+      tokensDb.prepare("UPDATE map_tokens SET figure_key = NULL WHERE name = 'Bandido arquero'").run();
+    } finally {
+      tokensDb.close();
+    }
+    const renamed = (await apiFetch(baseUrl, admin, 'GET', mapaActivo)).body.map;
+    assert.equal(tokenNamed(renamed, 'Carreta rota')?.avatarUrl, carro.imageUrl, 'renombrado conserva su imagen');
+    assert.ok(
+      renamed.tokens.filter((token) => token.name === 'Bandido arquero').every((token) => token.avatarUrl === archerUrl),
+      'un marcador sin figura guardada se reconoce por su nombre'
+    );
+    const restoreDb = new Database(path.join(server.dataDir, 'tri-dnd.db'));
+    try {
+      restoreDb.prepare("UPDATE map_tokens SET name = 'Carro volcado' WHERE name = 'Carreta rota'").run();
+    } finally {
+      restoreDb.close();
+    }
+
+    // Las trampas también llevan imagen, pero una oculta no llega al jugador
+    // ni con ella: solo la ve al descubrirla.
+    const trap = await upload(baseUrl, admin, 'trampa-red-de-cuerda-tendida');
+    assert.equal(trap.status, 200, JSON.stringify(trap.body));
+    const trapUrl = trap.body.figuras.find((figure) => figure.key === 'trampa-red-de-cuerda-tendida').imageUrl;
+    const hiddenTrap = (await apiFetch(baseUrl, admin, 'GET', mapaActivo)).body.map;
+    assert.equal(tokenNamed(hiddenTrap, 'Red de cuerda tendida'), undefined, 'la trampa oculta no viaja');
+    assert.ok(!JSON.stringify(hiddenTrap).includes(trapUrl), 'ni su imagen delata dónde está');
+    const revealDb = new Database(path.join(server.dataDir, 'tri-dnd.db'));
+    try {
+      revealDb.prepare("UPDATE map_tokens SET hidden = 0 WHERE name = 'Red de cuerda tendida'").run();
+    } finally {
+      revealDb.close();
+    }
+    const foundTrap = (await apiFetch(baseUrl, admin, 'GET', mapaActivo)).body.map;
+    assert.equal(tokenNamed(foundTrap, 'Red de cuerda tendida')?.avatarUrl, trapUrl);
 
     // Cambiar la imagen borra el fichero anterior; quitarla vuelve al disco
     const replaced = await upload(baseUrl, admin, 'objeto-carro-volcado', { type: 'image/jpeg' });
