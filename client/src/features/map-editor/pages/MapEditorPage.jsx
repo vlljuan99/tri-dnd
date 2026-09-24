@@ -961,6 +961,18 @@ export default function MapEditorPage() {
                         title="Color de las paredes de este mapa"
                       />
                     </label>
+                    <label className="flex items-center gap-1.5 text-xs text-bone/60">
+                      Aspecto
+                      <select
+                        value={map.terrainStyle ?? 'construido'}
+                        onChange={(e) => editor.patchMap(map.id, { terrainStyle: e.target.value }).catch(() => {})}
+                        className="rounded-sm border border-gold/20 bg-night-950 px-2 py-1 text-xs text-bone focus:border-gold focus:outline-none"
+                        title="Cómo se ven paredes, obstáculos y desniveles en el tablero (no cambia las reglas)"
+                      >
+                        <option value="construido">Construido</option>
+                        <option value="natural">Natural</option>
+                      </select>
+                    </label>
                     <span className="text-xs italic text-bone/50">
                       pulsa cerca de un borde y arrastra para pintar paredes; empieza sobre una pared para borrarlas. Un clic pinta una sola
                     </span>

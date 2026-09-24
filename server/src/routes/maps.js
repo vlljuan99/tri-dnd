@@ -210,7 +210,7 @@ mapsRouter.patch('/:mapId', (req, res) => {
 
   const {
     name, gridSize, visionMode, visionRadius, wallColor, wallLightEvery, fluidEffects,
-    weather, timeOfDay, weatherIntensity,
+    weather, timeOfDay, weatherIntensity, terrainStyle,
   } = req.body ?? {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'El mapa necesita un nombre' });
@@ -232,6 +232,10 @@ mapsRouter.patch('/:mapId', (req, res) => {
   if (wallLightEvery !== undefined && !(Number.isInteger(wallLightEvery) && wallLightEvery >= 0 && wallLightEvery <= 20)) {
     return res.status(400).json({ error: 'Frecuencia de luces de pared no válida' });
   }
+  // Aspecto de muros, obstáculos y desniveles: cosmético, sin efecto en reglas
+  if (terrainStyle !== undefined && !['construido', 'natural'].includes(terrainStyle)) {
+    return res.status(400).json({ error: 'Estilo de terreno no válido' });
+  }
   if (weather !== undefined && !['despejado', 'lluvia', 'nieve', 'niebla'].includes(weather)) {
     return res.status(400).json({ error: 'Clima no válido' });
   }
@@ -252,7 +256,7 @@ mapsRouter.patch('/:mapId', (req, res) => {
        wall_color = COALESCE(?, wall_color), wall_light_every = COALESCE(?, wall_light_every),
        fluid_effects = COALESCE(?, fluid_effects), weather = COALESCE(?, weather),
        time_of_day = COALESCE(?, time_of_day), weather_intensity = COALESCE(?, weather_intensity),
-       updated_at = datetime('now') WHERE id = ?`
+       terrain_style = COALESCE(?, terrain_style), updated_at = datetime('now') WHERE id = ?`
   ).run(
     name !== undefined ? name.trim().slice(0, 80) : null,
     gridSize ?? null,
@@ -264,6 +268,7 @@ mapsRouter.patch('/:mapId', (req, res) => {
     weather ?? null,
     timeOfDay ?? null,
     weatherIntensity ?? null,
+    terrainStyle ?? null,
     map.id
   );
   notifyIfActive(map.campaign_id, map.id);

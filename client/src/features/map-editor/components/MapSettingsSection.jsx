@@ -344,9 +344,22 @@ export default function MapSettingsSection({ map, busy, onRename, onPatch, onAct
                   <span className="font-mono text-xs text-bone/55">{map.wallColor ?? '#9b8555'}</span>
                 </div>
               </div>
+              <div className="sm:col-span-2">
+                <label className={labelClass} htmlFor="map-settings-terrain-style">Aspecto de muros y relieve</label>
+                <select
+                  id="map-settings-terrain-style"
+                  value={map.terrainStyle ?? 'construido'}
+                  onChange={(event) => onPatch(map.id, { terrainStyle: event.target.value })}
+                  className={`${inputClass} mt-1`}
+                >
+                  <option value="construido">Construido: sillería, columnas y muros de contención</option>
+                  <option value="natural">Natural: piedra seca, peñascos y riscos</option>
+                </select>
+              </div>
             </div>
             <p className="mt-3 text-[0.7rem] text-bone/40">
               El pincel «Luces» permite añadir braseros o velas concretos sin cambiar estas antorchas automáticas.
+              El aspecto solo cambia cómo se ven paredes, obstáculos y desniveles: bloquean igual en los dos.
             </p>
           </section>
 
