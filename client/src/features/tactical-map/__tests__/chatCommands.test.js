@@ -31,3 +31,11 @@ test('/n convierte el mensaje en narración del DM (Fase 4d)', async () => {
   assert.equal(narrationCommand('hola /n'), null);
   assert.equal(narrationCommand('/nada'), null, 'solo el comando exacto');
 });
+
+test('/s prepara un susurro; el destinatario lo resuelve el servidor', async () => {
+  const { whisperCommand } = await import('../../../lib/chatCommands.js');
+  assert.deepEqual(whisperCommand('/s Aria El posadero miente.'), { text: 'Aria El posadero miente.' });
+  assert.ok(whisperCommand('/s').error);
+  assert.equal(whisperCommand('/susurro hola'), null);
+  assert.equal(whisperCommand('hola'), null);
+});

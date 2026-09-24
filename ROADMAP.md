@@ -297,6 +297,11 @@ Se solapa a propósito con la Fase 13 (dirección visual, música ambiental con 
   - **Aviso al terminar turno con recursos sin gastar** (Fase 5, `domain/endTurnWarning.js`): «Te quedan la acción adicional y 15 pies. ¿Terminar turno?», con «no volver a preguntar»
   - **Objetivos a tu alcance** (Fase 5): con un arma empuñada, los aros de alcance ya existían; ahora además se apaga lo que no alcanzas
 
+- [x] **Añadidos del 23-sep-2026 a la Fase 4** (registro de juego; el resto de la fase sigue pendiente, migración v76)
+  - **Reacciones a las tiradas**: 🔥 😱 😂 👏 💀 bajo cada tirada del registro, una por persona (`roll_reactions`). Solo se reacciona a lo que se ve: sobre una tirada oculta del DM no puede reaccionar ni enterarse un jugador (prueba de integración)
+  - **Susurros**: `/s Aria El posadero miente` (vale el nombre del jugador o el de su PJ; gana el más largo). Mensaje oculto con destinatario (`chat_messages.recipient_user_id`), mismo filtrado en servidor que las tiradas ocultas: lo reciben autor, destinatario y DM, también al volver a entrar. Al destinatario le aparece además como nota sobre el tablero
+  - **Resumen de combate** (`services/combatLedger.js`): al terminar (a mano o sin enemigos), una tarjeta con rondas, daño, críticos y pifias de cada PJ, golpes finales y caídos. Se alimenta de las tiradas públicas del combate; las ocultas del DM no cuentan y los números de los enemigos solo los recibe el DM. Vive en memoria mientras dura el combate
+
 - [x] **Capa de sonido** (`client/src/lib/sfx/`, migración v68) — el proyecto era **completamente mudo**: ni `AudioContext`, ni un fichero, ni dependencia. Ahora hay 15 efectos sintetizados con WebAudio (sin binarios en el repo y sin licencias) y una página para sustituir cualquiera por una grabación propia
   - **Catálogo como dato puro** (`catalog.js`): qué suena, cómo se llama para el usuario y con qué receta se sintetiza. Sin tocar la Web Audio API, para que lo puedan leer el sintetizador, la página de configuración y las pruebas del servidor
   - **Nunca rompe la app y nunca suena antes de tiempo**: todo va envuelto, y el audio espera al primer gesto del usuario porque los navegadores no dejan arrancar un `AudioContext` sin él

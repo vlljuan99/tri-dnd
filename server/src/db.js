@@ -1481,6 +1481,25 @@ export const migrations = [
   ALTER TABLE map_tokens ADD COLUMN boss_intro_shown INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE chat_messages ADD COLUMN style TEXT;
   `,
+
+  // v76 — Añadidos del 23-sep-2026 a la Fase 4 (registro de juego).
+  //
+  // `roll_reactions`: una reacción por usuario y tirada, de un conjunto
+  // cerrado de emojis. Se borra con el mensaje.
+  //
+  // `chat_messages.recipient_user_id`: susurros. Un susurro es un mensaje
+  // oculto (hidden = 1) con destinatario: lo reciben el autor, el destinatario
+  // y el DM, con el mismo filtrado en servidor que las tiradas ocultas.
+  `
+  CREATE TABLE roll_reactions (
+    message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (message_id, user_id)
+  );
+  ALTER TABLE chat_messages ADD COLUMN recipient_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+  `,
 ];
 
 export function runMigrations() {

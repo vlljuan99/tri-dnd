@@ -45,6 +45,8 @@ import TrapAlert from './TrapAlert.jsx';
 import Subtitles from './Subtitles.jsx';
 import FinisherPrompt from './FinisherPrompt.jsx';
 import BossIntro from './BossIntro.jsx';
+import WhisperNote from './WhisperNote.jsx';
+import CombatSummary from './CombatSummary.jsx';
 import { endTurnWarning, unspentTurnResources } from '../domain/endTurnWarning.js';
 import { vibrar } from '../../../lib/haptics.js';
 import { avisarTurno } from '../../../lib/attention.js';
@@ -1106,6 +1108,9 @@ export default function TacticalMap({
       <Subtitles />
       <FinisherPrompt />
       <BossIntro />
+      {/* Fase 4 (añadido): susurro recibido y resumen del combate */}
+      <WhisperNote />
+      <CombatSummary />
       {/* Fase 4c: tu turno a las puertas de la muerte, con toda la tensión */}
       {hudCombatant?.dying &&
         !hudCombatant.deathSaveRolled &&

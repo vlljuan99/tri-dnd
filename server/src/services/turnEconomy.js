@@ -794,6 +794,13 @@ export function tryUseReaction(campaignId, combatantId) {
 // Si ya no queda ningún combatiente de tipo enemigo, se acabó el encuentro:
 // vuelve a movimiento libre sola. Devuelve true si acaba de desactivarse
 // (para que quien llame decida si avisar por el chat).
+// Aviso de «se acabó el encuentro» (Fase 4, añadido): sockets.js publica el
+// resumen de combate. Se engancha como los demás avisos de este módulo.
+let combatEndedNotifier = null;
+export function bindCombatEndedNotifier(fn) {
+  combatEndedNotifier = typeof fn === 'function' ? fn : null;
+}
+
 export function endCombatIfNoEnemiesLeft(campaignId) {
   const remaining = db
     .prepare("SELECT COUNT(*) AS n FROM combatants WHERE campaign_id = ? AND kind = 'enemigo' AND (hp_current IS NULL OR hp_current > 0)")
@@ -804,5 +811,6 @@ export function endCombatIfNoEnemiesLeft(campaignId) {
   if (!table?.combat_active) return false;
 
   deactivateTurnMode(campaignId);
+  combatEndedNotifier?.(campaignId);
   return true;
 }

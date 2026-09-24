@@ -4,6 +4,53 @@ import { textoContra, textoDelMargen, veredictoDe } from '../features/dice-tray/
 
 const ADVANTAGE_LABEL = { adv: 'ventaja', dis: 'desventaja' };
 const VEREDICTO_COLOR = { exito: 'text-gold', fallo: 'text-bone/55', critico: 'text-gold', pifia: 'text-blood' };
+// Reacciones a las tiradas (Fase 4, añadido): el mismo conjunto que acepta el servidor
+export const REACCIONES = ['🔥', '😱', '😂', '👏', '💀'];
+
+function Reacciones({ reactions = {}, selfId, onReact }) {
+  const mine = Object.entries(reactions).find(([, users]) => users.includes(selfId))?.[0] ?? null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      {REACCIONES.map((emoji) => {
+        const count = reactions[emoji]?.length ?? 0;
+        const chosen = mine === emoji;
+        if (!count && !chosen) return null;
+        return (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onReact(chosen ? null : emoji)}
+            aria-pressed={chosen}
+            className={`rounded-full border px-1.5 text-xs ${chosen ? 'border-gold/60 bg-gold/15' : 'border-bone/15 hover:border-bone/35'}`}
+          >
+            {emoji} <span className="font-mono text-[0.65rem] text-bone/70">{count}</span>
+          </button>
+        );
+      })}
+      <details className="relative">
+        <summary className="list-none cursor-pointer rounded-full border border-bone/15 px-1.5 text-xs text-bone/50 hover:text-bone" aria-label="Reaccionar">
+          +
+        </summary>
+        <div className="absolute bottom-full left-0 z-10 mb-1 flex gap-1 rounded-sm border border-bone/20 bg-night-900 p-1 shadow-xl">
+          {REACCIONES.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={(event) => {
+                onReact(emoji);
+                event.currentTarget.closest('details')?.removeAttribute('open');
+              }}
+              className="rounded-sm px-1 text-base hover:bg-bone/10"
+              aria-label={`Reaccionar con ${emoji}`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
 
 /**
  * Pinta el resultado de una tirada (overlay, historial y chat de la mesa).
@@ -12,7 +59,7 @@ const VEREDICTO_COLOR = { exito: 'text-gold', fallo: 'text-bone/55', critico: 't
  * destaca en grande; el nombre del jugador que la disparó queda pequeño y
  * en un tono distinto, para no confundir "quién tira" con "por quién tira".
  */
-export default function RollCard({ roll, authorName, compact = false }) {
+export default function RollCard({ roll, authorName, compact = false, reactions = null, selfId = null, onReact = null }) {
   const totalColor = roll.crit
     ? 'text-gold'
     : roll.fumble
@@ -107,6 +154,8 @@ export default function RollCard({ roll, authorName, compact = false }) {
           {textoDelMargen(roll) && <span> {textoDelMargen(roll)}</span>}
         </p>
       )}
+
+      {!compact && onReact && <Reacciones reactions={reactions ?? {}} selfId={selfId} onReact={onReact} />}
     </div>
   );
 }

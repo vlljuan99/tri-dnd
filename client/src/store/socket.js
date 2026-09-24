@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { toastInfo } from './toast.js';
 import { conditionLabel } from '../features/tactical-map/domain/conditions.js';
 import { useReveal } from './reveal.js';
+import { useAuth } from './auth.js';
 
 // Conexión única de Socket.io por pestaña. Se une a la sala de una campaña
 // (mesa de juego o ficha vinculada) y mantiene chat, presencia y estado en vivo.
@@ -79,6 +80,10 @@ export const useRoom = create((set, get) => ({
   subtitle: null,
   finisherRequest: null,
   bossIntro: null,
+  // Fase 4 (añadido): el susurro que te acaba de llegar (nota secreta sobre
+  // el tablero) y la tarjeta de resumen al acabar un combate
+  whisperNote: null,
+  combatSummary: null,
 
   ensureSocket() {
     if (socket) return socket;
@@ -112,6 +117,10 @@ export const useRoom = create((set, get) => ({
       afterDice(get().campaignId, () => {
         set((s) => ({
           messages: [...s.messages.slice(-199), message],
+          // Un susurro para ti se lee además como nota secreta sobre el tablero
+          ...(message.recipient && Number(message.recipient.id) === Number(useAuth.getState().user?.id)
+            ? { whisperNote: { id: message.id, text: message.body, from: message.author?.name ?? '—' } }
+            : {}),
           // La narración y el golpe final también se leen sobre el tablero
           ...(message.style === 'narracion' || message.style === 'golpe-final'
             ? {
@@ -216,6 +225,16 @@ export const useRoom = create((set, get) => ({
       if (Number(request?.campaignId) !== Number(get().campaignId)) return;
       afterDice(get().campaignId, () => set({ finisherRequest: { ...request, at: Date.now() } }));
     });
+    // Reacciones a las tiradas (Fase 4, añadido): el recuento viaja entero
+    socket.on('reaccion:actualizada', ({ messageId, reactions }) => {
+      set((s) => ({
+        messages: s.messages.map((message) => (message.id === messageId ? { ...message, reactions } : message)),
+      }));
+    });
+    // Resumen de combate (Fase 4, añadido): cuando se revela el último golpe
+    socket.on('combate:resumen', (summary) => {
+      afterDice(get().campaignId, () => set({ combatSummary: { ...summary, key: Date.now() } }));
+    });
     socket.on('jefe:presentacion', (boss) => {
       afterDice(get().campaignId, () => set({ bossIntro: { ...boss, key: Date.now() } }));
     });
@@ -263,7 +282,7 @@ export const useRoom = create((set, get) => ({
     set({
       campaignId, messages: [], online: [], joinError: null, removedCampaignId: null,
       worldTravel: null, spellAims: [], spellFx: [], pendingRolls: [], pendingResults: [], trapAlert: null,
-      subtitle: null, finisherRequest: null, bossIntro: null,
+      subtitle: null, finisherRequest: null, bossIntro: null, whisperNote: null, combatSummary: null,
     });
     s.emit('room:join', { campaignId }, (resp) => {
       if (resp?.error) {
@@ -303,14 +322,35 @@ export const useRoom = create((set, get) => ({
       subtitle: null,
       finisherRequest: null,
       bossIntro: null,
+      whisperNote: null,
+      combatSummary: null,
     });
   },
 
-  /** `style: 'narracion'` (solo DM, Fase 4d) sale como subtítulo en la mesa. */
-  sendChat(text, references = [], { style = null } = {}) {
+  /**
+   * `style: 'narracion'` (solo DM, Fase 4d) sale como subtítulo en la mesa.
+   * `whisper: true` (Fase 4, añadido): el texto empieza por el nombre del
+   * destinatario, que resuelve el servidor.
+   */
+  sendChat(text, references = [], { style = null, whisper = false } = {}) {
     const { campaignId } = get();
     if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
-    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references, style }, resolve));
+    return new Promise((resolve) => socket.emit('chat:send', { campaignId, text, references, style, whisper }, resolve));
+  },
+
+  /** Reacciona a una tirada (o quita tu reacción con `null`). */
+  reactToMessage(messageId, emoji) {
+    const { campaignId } = get();
+    if (!socket || !campaignId) return Promise.resolve({ error: 'Sin conexión con la mesa' });
+    return new Promise((resolve) => socket.emit('reaccion:poner', { campaignId, messageId, emoji }, resolve));
+  },
+
+  clearWhisperNote() {
+    set({ whisperNote: null });
+  },
+
+  clearCombatSummary() {
+    set({ combatSummary: null });
   },
 
   // --- El DM como narrador (Fase 4d) ---------------------------------

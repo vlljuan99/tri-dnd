@@ -50,3 +50,16 @@ export function narrationCommand(text) {
   if (!body) return { error: 'Escribe qué narras: /n El viento aúlla en el desfiladero.' };
   return { text: body };
 }
+
+/**
+ * Susurro (Fase 4, añadido): «/s Aria El posadero miente». El servidor decide
+ * a quién va (el nombre más largo de un miembro o de su PJ que encabece el
+ * texto): aquí solo se reconoce el comando.
+ */
+export function whisperCommand(text) {
+  const match = /^\/s(?:\s+([\s\S]*))?$/i.exec(String(text ?? '').trim());
+  if (!match) return null;
+  const body = (match[1] ?? '').trim();
+  if (!body) return { error: 'Escribe a quién y qué: /s Aria El posadero miente.' };
+  return { text: body };
+}
