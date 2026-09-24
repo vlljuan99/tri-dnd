@@ -5,12 +5,12 @@ import { formatModifier } from '../../../lib/dnd.js';
 import { rollAttack, rollDamage } from '../../../lib/dice.js';
 import { useRoom } from '../../../store/socket.js';
 import { tirarYEnviar } from '../../../store/reveal.js';
-import { textoDelMargen } from '../../dice-tray/lib/reveal.js';
-import { D20Chips } from './AttackPanel.jsx';
+import { AttackVerdict, D20Chips } from './AttackPanel.jsx';
 import { parseDamageDice, extractDamageFromDesc, DAMAGE_TYPE_ES } from '../../../components/MonsterStatBlock.jsx';
 import { resolveAttackEffects } from '../domain/combatRules.js';
 import { buildMultiattackPlans, planCountLabel, planSummary } from '../domain/monsterActions.js';
 import { monsterAttackGeometry, rangeValidation } from '../domain/combatGeometry.js';
+import { awaitingDamage, canStartAttack, hasAttackLeft, visibleAttackRows } from '../domain/attackFlow.js';
 
 // Del texto de la acción del SRD ("Melee Weapon Attack:"/"Ranged Weapon
 // Attack:") se deduce si exige adyacencia; sin pista clara se asume cuerpo a
@@ -99,6 +99,7 @@ export default function MonsterAttackPanel({
 }) {
   const attackMarker = useRoom((s) => s.attackMarker);
   const dealDamageMarker = useRoom((s) => s.dealDamageMarker);
+  const combatActive = useRoom((s) => Boolean(s.combat?.active));
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
@@ -143,10 +144,15 @@ export default function MonsterAttackPanel({
 
   const overrides = attacker.overrides ?? {};
   const monsterRows = data ? buildRowsFromMonster(data, overrides) : [];
-  const rows =
+  const allRows =
     monsterRows.length > 0
       ? monsterRows
       : [{ id: 'manual', actionName: 'Ataque manual', name: 'Ataque manual', manual: true, melee: manualMelee }];
+  // Mientras dura un golpe solo se ve esa acción; con el Multiataque a medias
+  // vuelven todas para elegir el siguiente.
+  const attackLeft = hasAttackLeft({ combatActive, combatant: attackerCombatant, multiattackState });
+  const rows = visibleAttackRows(allRows, { feedback, attackLeft });
+  const showAttackControls = canStartAttack({ feedback, attackLeft });
   const multiattackPlans = data ? buildMultiattackPlans(data) : [];
   const activePlanId = multiattackState?.planId ?? '';
   const effectivePlanId = activePlanId || selectedPlanId;
@@ -277,6 +283,8 @@ export default function MonsterAttackPanel({
       weaponId: row.id,
       hit: resp.hit,
       crit: resp.crit,
+      // Una acción sin dados de daño conocidos se queda en el impacto
+      canDamage: Boolean(row.manual || row.damageOptions.length > 0),
       ac: resp.ac,
       roll: resp.outcome ? { ...roll, outcome: resp.outcome } : roll,
       effects: resp.effects ?? effects,
@@ -284,7 +292,7 @@ export default function MonsterAttackPanel({
   }
 
   async function damage(row) {
-    if (busy || feedback?.type !== 'attack' || !feedback.hit) return;
+    if (busy || !awaitingDamage(feedback)) return;
     setBusy(true);
     setError('');
     let roll;
@@ -339,6 +347,11 @@ export default function MonsterAttackPanel({
     setBusy(false);
     if (resp?.error) {
       setError(resp.error);
+      return;
+    }
+    // Sin más golpes del Multiataque (ni acción libre), el daño cierra el panel
+    if (!attackLeft) {
+      onClose?.({ attackFinished: true });
       return;
     }
     setFeedback({
@@ -466,7 +479,7 @@ export default function MonsterAttackPanel({
                   <span className="font-mono text-xs text-bone/60">{formatModifier(row.attackBonus)}</span>
                 )}
               </div>
-              {geometryBlocked && (
+              {geometryBlocked && showAttackControls && (
                 <p className="mt-1 text-[0.65rem] text-blood">
                   {!lineOfSight ? 'Sin línea de visión' : range.error}
                 </p>
@@ -540,39 +553,41 @@ export default function MonsterAttackPanel({
                 </div>
               )}
 
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <button
-                  onClick={() => attack(row, 'dis')}
-                  disabled={busy || unavailable || geometryBlocked}
-                  className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40"
-                >
-                  Desv.
-                </button>
-                <button
-                  onClick={() => attack(row, 'none')}
-                  disabled={busy || unavailable || geometryBlocked}
-                  className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
-                    automaticEffects.advantage === 'adv'
-                      ? 'border-moss bg-moss/15 text-bone/90'
+              {showAttackControls && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => attack(row, 'dis')}
+                    disabled={busy || unavailable || geometryBlocked}
+                    className="rounded-sm border border-blood/50 px-2 py-1 text-xs text-blood hover:bg-blood/10 disabled:opacity-40"
+                  >
+                    Desv.
+                  </button>
+                  <button
+                    onClick={() => attack(row, 'none')}
+                    disabled={busy || unavailable || geometryBlocked}
+                    className={`rounded-sm border px-3 py-1 text-xs disabled:opacity-40 ${
+                      automaticEffects.advantage === 'adv'
+                        ? 'border-moss bg-moss/15 text-bone/90'
+                        : automaticEffects.advantage === 'dis'
+                          ? 'border-blood/50 bg-blood/10 text-blood'
+                          : 'border-gold/50 text-gold hover:bg-gold/10'
+                    }`}
+                  >
+                    {automaticEffects.advantage === 'adv'
+                      ? 'Atacar (ventaja)'
                       : automaticEffects.advantage === 'dis'
-                        ? 'border-blood/50 bg-blood/10 text-blood'
-                        : 'border-gold/50 text-gold hover:bg-gold/10'
-                  }`}
-                >
-                  {automaticEffects.advantage === 'adv'
-                    ? 'Atacar (ventaja)'
-                    : automaticEffects.advantage === 'dis'
-                      ? 'Atacar (desventaja)'
-                      : 'Atacar'}
-                </button>
-                <button
-                  onClick={() => attack(row, 'adv')}
-                  disabled={busy || unavailable || geometryBlocked}
-                  className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40"
-                >
-                  Vent.
-                </button>
-              </div>
+                        ? 'Atacar (desventaja)'
+                        : 'Atacar'}
+                  </button>
+                  <button
+                    onClick={() => attack(row, 'adv')}
+                    disabled={busy || unavailable || geometryBlocked}
+                    className="rounded-sm border border-moss px-2 py-1 text-xs text-bone/90 hover:bg-moss/20 disabled:opacity-40"
+                  >
+                    Vent.
+                  </button>
+                </div>
+              )}
 
               <AnimatePresence mode="wait">
                 {fb?.type === 'attack' && (
@@ -598,22 +613,8 @@ export default function MonsterAttackPanel({
                       </span>
                       <span className="text-bone/50">contra CA {fb.ac}</span>
                     </div>
-                    {textoDelMargen(fb.roll) && (
-                      <p className="mt-1 text-[0.7rem] text-bone/55">
-                        {fb.hit ? 'Impacta' : 'Falla'} {textoDelMargen(fb.roll)}
-                      </p>
-                    )}
-                    <motion.p
-                      initial={{ scale: 0.6, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.1 }}
-                      className={`mt-1.5 font-display text-lg uppercase tracking-widest ${
-                        fb.hit ? 'text-gold' : 'text-bone/40'
-                      }`}
-                    >
-                      {fb.hit ? `¡Impacta${fb.crit ? ' — crítico!' : '!'}` : 'Falla'}
-                    </motion.p>
-                    {fb.hit && (row.manual || row.damageOptions.length > 0) && (
+                    <AttackVerdict hit={fb.hit} crit={fb.crit} roll={fb.roll} />
+                    {awaitingDamage(fb) && (
                       <button
                         onClick={() => damage(row)}
                         disabled={busy}
@@ -686,10 +687,6 @@ export default function MonsterAttackPanel({
           );
         })}
       </div>
-
-      <p className="mt-2 text-[0.65rem] text-bone/40">
-        Las tiradas se comparten con la mesa; el impacto y el daño los resuelve el servidor.
-      </p>
     </div>
   );
 }

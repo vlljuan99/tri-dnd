@@ -65,41 +65,94 @@ function ensureContext() {
   return ctx;
 }
 
+// Gestos que el navegador acepta para arrancar el audio. `pointerdown` solo
+// cuenta con ratón: con el dedo, Chrome y Safari exigen que se levante
+// (`pointerup`, `touchend`, `click`). Antes solo se escuchaba `pointerdown` y
+// el primer toque en el móvil daba el audio por desbloqueado sin que llegara
+// a arrancar: la mesa se quedaba muda para siempre.
+const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'];
+
 /**
  * Desbloquea el audio con el primer gesto del usuario. Es obligatorio: sin él
- * el navegador deja el AudioContext suspendido y no suena nada.
+ * el navegador deja el AudioContext suspendido y no suena nada. Sigue
+ * escuchando hasta que el contexto arranca de verdad.
  */
 export function bindUnlock() {
   if (unlockBound || typeof window === 'undefined') return;
   unlockBound = true;
-  const unlock = () => {
-    unlocked = true;
-    const context = ensureContext();
-    context?.resume?.().catch(() => {});
-    window.removeEventListener('pointerdown', unlock);
-    window.removeEventListener('keydown', unlock);
+  const detach = () => {
+    for (const type of UNLOCK_EVENTS) window.removeEventListener(type, unlock, true);
   };
-  window.addEventListener('pointerdown', unlock, { once: false });
-  window.addEventListener('keydown', unlock, { once: false });
+  const ready = () => {
+    detach();
+    preloadSamples();
+  };
+  function unlock() {
+    const context = ensureContext();
+    if (!context) {
+      detach();
+      return;
+    }
+    unlocked = true;
+    if (context.state === 'running') {
+      ready();
+      return;
+    }
+    // Safari solo arranca si algo suena dentro del gesto: basta una muestra
+    // de silencio.
+    try {
+      const silence = context.createBufferSource();
+      silence.buffer = context.createBuffer(1, 1, context.sampleRate);
+      silence.connect(context.destination);
+      silence.start();
+    } catch {
+      // Sin el truco de Safari, el resume de abajo basta en el resto
+    }
+    context
+      .resume?.()
+      .then(() => {
+        if (context.state === 'running') ready();
+      })
+      .catch(() => {});
+  }
+  for (const type of UNLOCK_EVENTS) window.addEventListener(type, unlock, { capture: true, passive: true });
 }
 
-async function loadSample(url) {
+function loadSample(url) {
   if (sampleCache.has(url)) return sampleCache.get(url);
   const promise = (async () => {
     const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) throw new Error(`No se pudo cargar el sonido ${url}`);
+    if (!response.ok) throw new Error(`No se pudo cargar el sonido ${url} (${response.status})`);
     const bytes = await response.arrayBuffer();
     return await ensureContext().decodeAudioData(bytes);
-  })().catch(() => null);
+  })().catch((error) => {
+    // Un fallo (red, formato que este navegador no descodifica) no se queda
+    // guardado: el siguiente golpe lo reintenta.
+    console.warn('[sonido]', error?.message ?? error);
+    if (sampleCache.get(url) === promise) sampleCache.delete(url);
+    return null;
+  });
   sampleCache.set(url, promise);
   return promise;
+}
+
+// Descarga y descodifica los sonidos subidos en cuanto hay audio: sin esto el
+// primer impacto esperaba a la red y sonaba tarde, ya pasado el golpe.
+function preloadSamples() {
+  if (!ctx) return;
+  for (const url of new Set(Object.values(overrides))) loadSample(url);
 }
 
 /** Sonidos personalizados vigentes: `{ clave: url }`. */
 export function setOverrides(next) {
   overrides = mergeOverrides(next);
-  // Si cambia un sample hay que olvidar el descodificado anterior.
-  sampleCache.clear();
+  // Cada subida estrena url (el fichero lleva marca de tiempo), así que lo ya
+  // descodificado sigue valiendo: solo se olvida lo que ya no se usa.
+  const vigentes = new Set(Object.values(overrides));
+  for (const url of sampleCache.keys()) {
+    if (!vigentes.has(url)) sampleCache.delete(url);
+  }
+  preloadSamples();
 }
 
 export function getOverrides() {
@@ -135,7 +188,12 @@ export function play(key, { rate, gain, force = false } = {}) {
 
     const context = ensureContext();
     if (!context) return false;
-    if (context.state === 'suspended') context.resume?.().catch(() => {});
+    if (context.state !== 'running') {
+      context.resume?.().catch(() => {});
+      // Con el audio parado, lo que se programe ahora sonaría todo de golpe al
+      // volver (o nunca): mejor callar este sonido.
+      if (!force) return false;
+    }
 
     const voice = context.createGain();
     voice.gain.value = volumen;
@@ -146,15 +204,19 @@ export function play(key, { rate, gain, force = false } = {}) {
 
     if (url) {
       loadSample(url).then((buffer) => {
-        if (!buffer) return;
         try {
+          // Un sample ilegible no deja la mesa sin sonido: suena la receta
+          if (!buffer) {
+            playRecipe(context, voice, sfxEvent(key)?.recipe, { rate: velocidad });
+            return;
+          }
           const source = context.createBufferSource();
           source.buffer = buffer;
           source.playbackRate.value = velocidad;
           source.connect(voice);
           source.start();
         } catch {
-          // Un sample ilegible no debe dejar la mesa sin sonido.
+          // Nunca rompe la app: como mucho, silencio
         }
       });
       return true;

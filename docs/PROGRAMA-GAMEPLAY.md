@@ -211,6 +211,9 @@ viva la subida de nivel de la Fase D), `pages/CharacterSheetPage.jsx`, `PlayerHu
    la página `/configuracion/sonidos` debe **decir por qué** no puedes subir sonidos cuando
    no eres administrador («Solo el administrador de la instalación (usuario X) puede
    cambiar los sonidos por defecto; tu volumen y silencio sí son tuyos»).
+   *Nota de implementación (24-sep-2026): impacto, crítico, fallo y curación ya suenan
+   desde `store/socket.js` al recibir `combat:visual` (`domain/attackFlow.js#sfxForCombatVisual`);
+   el resto de la lista sigue pendiente.*
 
 *Añadido el 23-sep-2026 (misma conversación que las fases 4b–4d):*
 
