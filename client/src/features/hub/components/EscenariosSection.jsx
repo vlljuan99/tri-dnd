@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { api } from '../../../api.js';
+import PresetFiguresDialog from './PresetFiguresDialog.jsx';
 
 // Los tres escenarios de fábrica son partidas sin DM y exigen elegir un PJ.
 // Las plantillas propias conservan el flujo de escaramuza dirigida de siempre.
-function PresetCard({ preset, onCreate, busy, disabled, characterLevel }) {
+function PresetCard({ preset, onCreate, onEditImages, busy, disabled, characterLevel }) {
   return (
     <li className="flex flex-col overflow-hidden rounded-md border border-ochre/30 bg-parchment-100/70 shadow-sm">
       {preset.previewUrl && (
@@ -54,6 +55,16 @@ function PresetCard({ preset, onCreate, busy, disabled, characterLevel }) {
         >
           {busy ? 'Montando la mesa…' : 'Jugar sin DM'}
         </button>
+        {onEditImages && (
+          <button
+            type="button"
+            onClick={() => onEditImages(preset)}
+            title="Solo el administrador de la instalación ve este botón"
+            className="mt-2 rounded-sm border border-ink/25 px-4 py-1.5 font-display text-sm text-ink/75 hover:border-ochre hover:text-ochre"
+          >
+            Imágenes de enemigos, objetos y trampas
+          </button>
+        )}
       </div>
     </li>
   );
@@ -70,6 +81,10 @@ export default function EscenariosSection() {
   const [templates, setTemplates] = useState(null);
   const [characters, setCharacters] = useState(null);
   const [characterId, setCharacterId] = useState('');
+  // Solo el administrador de la instalación viste las figuras de los escenarios
+  const [canEditImages, setCanEditImages] = useState(false);
+  const [editingPreset, setEditingPreset] = useState(null);
+  const closeImages = useCallback(() => setEditingPreset(null), []);
   const selectedCharacter = characters?.find((character) => character.id === Number(characterId));
 
   useEffect(() => {
@@ -82,6 +97,7 @@ export default function EscenariosSection() {
       .then(([presetResponse, templateResponse, characterResponse]) => {
         if (cancelled) return;
         setPresets(presetResponse.presets ?? []);
+        setCanEditImages(Boolean(presetResponse.puedeEditarImagenes));
         setTemplates(templateResponse.templates ?? []);
         const available = (characterResponse.characters ?? []).filter(
           (character) =>
@@ -154,6 +170,7 @@ export default function EscenariosSection() {
                 busy={creating}
                 disabled={!characterId}
                 characterLevel={selectedCharacter?.level}
+                onEditImages={canEditImages ? setEditingPreset : null}
                 onCreate={(chosen) =>
                   createCampaign('escaramuza', {
                     presetId: chosen.id,
@@ -209,6 +226,8 @@ export default function EscenariosSection() {
           </ul>
         )}
       </section>
+
+      {editingPreset && <PresetFiguresDialog preset={editingPreset} onClose={closeImages} />}
     </div>
   );
 }

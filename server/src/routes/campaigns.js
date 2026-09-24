@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, raw as expressRaw } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
@@ -34,6 +34,14 @@ import { resolveFluidMovement } from '../services/fluidEffects.js';
 import { resolveHazardMovement } from '../services/hazardZones.js';
 import { resolveSkirmishSource, seedSkirmishMap } from '../services/skirmishes.js';
 import { listSkirmishPresets } from '../services/skirmishPresets.js';
+import {
+  MAX_FIGURE_IMAGE_BYTES,
+  campaignsUsingPreset,
+  clearSkirmishFigureImage,
+  saveSkirmishFigureImage,
+  serializeSkirmishFigures,
+} from '../services/skirmishImages.js';
+import { isInstallationAdmin } from '../services/admin.js';
 import { getTemplateData, saveTemplate, serializeTemplate, snapshotMap } from '../services/templates.js';
 import { campaignBestiary } from '../services/bestiary.js';
 import { serializeEvent } from './events.js';
@@ -260,6 +268,7 @@ campaignsRouter.post('/', (req, res) => {
         name: source.mapData.name,
         enemyAi: source.enemyAi,
         soloPartySize: source.soloMode ? 1 : null,
+        presetId: source.presetId ?? null,
       });
       if (source.maxPlayers) {
         db.prepare('UPDATE campaigns SET max_players = ? WHERE id = ?').run(source.maxPlayers, id);
@@ -330,9 +339,79 @@ campaignsRouter.post('/join', (req, res) => {
 
 // Catálogo de escenarios de fábrica para el Hub. Va antes que `/:id` para que
 // Express no lo confunda con el detalle de una campaña.
-campaignsRouter.get('/escaramuzas/predefinidas', (_req, res) => {
-  res.json({ presets: listSkirmishPresets() });
+campaignsRouter.get('/escaramuzas/predefinidas', (req, res) => {
+  res.json({
+    presets: listSkirmishPresets(),
+    puedeEditarImagenes: isInstallationAdmin(req.user),
+  });
 });
+
+// Imágenes de las figuras (enemigos, objetos y trampas) de un escenario de
+// fábrica.
+// Son de la instalación entera, así que solo las toca su administrador; el
+// listado también es solo suyo, porque enseña de antemano quién espera en
+// cada sala. Se comprueba antes de leer el cuerpo, para no recibir la imagen
+// entera de quien no puede subirla.
+function requireInstallationAdmin(req, res, next) {
+  if (isInstallationAdmin(req.user)) return next();
+  res.status(403).json({ error: 'Solo el administrador puede cambiar las imágenes de los escenarios' });
+}
+
+// Las partidas en marcha de ese escenario repintan sus marcadores (misma señal
+// que cualquier otro cambio de mapa: nunca viajan datos por el socket).
+function notifyPresetCampaigns(presetId) {
+  for (const campaignId of campaignsUsingPreset(presetId)) notifyCampaignMap(campaignId);
+}
+
+// El nombre original solo se guarda para enseñarlo en el panel; uno mal
+// codificado no debe tumbar la subida.
+function originalFileName(header) {
+  if (typeof header !== 'string' || !header) return null;
+  try {
+    return decodeURIComponent(header).slice(0, 120);
+  } catch {
+    return null;
+  }
+}
+
+campaignsRouter.get('/escaramuzas/predefinidas/:presetId/figuras', requireInstallationAdmin, (req, res) => {
+  const figuras = serializeSkirmishFigures(req.params.presetId);
+  if (!figuras) return res.status(404).json({ error: 'Ese escenario predefinido no existe' });
+  res.json({ figuras });
+});
+
+campaignsRouter.put(
+  '/escaramuzas/predefinidas/:presetId/figuras/:figureKey/imagen',
+  requireInstallationAdmin,
+  // Binario crudo, como el resto de subidas de la API
+  expressRaw({ type: () => true, limit: MAX_FIGURE_IMAGE_BYTES }),
+  (req, res) => {
+    const { presetId, figureKey } = req.params;
+    const result = saveSkirmishFigureImage({
+      presetId,
+      figureKey,
+      buffer: req.body,
+      mimeType: req.headers['content-type'],
+      originalName: originalFileName(req.headers['x-nombre-original']),
+      userId: req.user.id,
+    });
+    if (result.error) return res.status(result.status ?? 400).json({ error: result.error });
+    notifyPresetCampaigns(presetId);
+    res.json({ figuras: serializeSkirmishFigures(presetId) });
+  }
+);
+
+campaignsRouter.delete(
+  '/escaramuzas/predefinidas/:presetId/figuras/:figureKey/imagen',
+  requireInstallationAdmin,
+  (req, res) => {
+    const { presetId, figureKey } = req.params;
+    const result = clearSkirmishFigureImage({ presetId, figureKey });
+    if (result.error) return res.status(result.status ?? 400).json({ error: result.error });
+    notifyPresetCampaigns(presetId);
+    res.json({ figuras: serializeSkirmishFigures(presetId) });
+  }
+);
 
 // Guardar una escaramuza como plantilla propia reutilizable: se fotografía su
 // mapa activo entero (plantas, salas con todas sus capas, puertas y

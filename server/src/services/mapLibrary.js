@@ -4,6 +4,7 @@ import { rollInitiativeDetailed, ensureTurnStarted, activateTurnMode } from './t
 import { fluidTypeAtRoomPosition, normalizeFluidEffects } from './fluidRules.js';
 import { syncBossResources } from './bossActions.js';
 import { discoverCreatures } from './bestiary.js';
+import { applySkirmishFigureImages } from './skirmishImages.js';
 
 // Consultas y serialización de la biblioteca de mapas (Fase 7.5),
 // compartidas entre el editor del DM (routes/maps.js) y la vista de la mesa
@@ -85,10 +86,11 @@ export function serializeToken(row, { forPlayer = false } = {}) {
     hp: Number.isInteger(row.combatant_hp) ? row.combatant_hp : null,
     hpMax: Number.isInteger(row.combatant_hp_max) ? row.combatant_hp_max : null,
     // Jefe (personaje kind='boss') enlazado, si lo hay: se pinta con su
-    // avatar en vez del marcador genérico. Sin jefe, un monstruo del
-    // compendio usa la imagen personalizada que el DM le puso en el bestiario
+    // avatar en vez del marcador genérico. Sin jefe, la figura de un escenario
+    // de fábrica usa la imagen del administrador, y un monstruo del compendio
+    // la personalizada que el DM le puso en el bestiario
     characterId: forPlayer ? undefined : row.character_id ?? null,
-    avatarUrl: row.boss_avatar_path ?? row.monster_avatar_path ?? null,
+    avatarUrl: row.boss_avatar_path ?? row.figure_avatar_path ?? row.monster_avatar_path ?? null,
     // Igual que en la puerta: skill público (sabes qué tiras), dc secreto
     // hasta resolver el intento de interactuar (trampa/objeto).
     skill: row.skill ?? null,
@@ -438,6 +440,9 @@ function loadMapContents(map) {
        WHERE f.map_id = ? ORDER BY t.id`
     )
     .all(map.campaign_id, map.campaign_id, map.id);
+  // Un mapa montado desde un escenario de fábrica pinta sus figuras con la
+  // imagen que les haya puesto el administrador de la instalación
+  applySkirmishFigureImages(map.skirmish_preset_id, tokens);
   return { floors, rooms, doors, tokens };
 }
 

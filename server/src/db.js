@@ -1509,6 +1509,44 @@ export const migrations = [
   ALTER TABLE maps ADD COLUMN terrain_style TEXT NOT NULL DEFAULT 'construido'
     CHECK (terrain_style IN ('construido', 'natural'));
   `,
+
+  // v78 — Imágenes de las figuras de los escenarios de fábrica. El
+  // administrador de la instalación pone imagen a sus enemigos y objetos
+  // (una por figura: los cuatro «Bandido arquero» comparten la suya) y la ve
+  // cualquiera que juegue ese escenario, también en partidas ya montadas.
+  //
+  // Para eso el mapa recuerda de qué escenario salió. Las instancias
+  // anteriores se reconocen por el nombre estable de su mapa, igual que en la
+  // v65; las plantillas propias y los mapas del DM se quedan en NULL.
+  `
+  ALTER TABLE maps ADD COLUMN skirmish_preset_id TEXT;
+  UPDATE maps SET skirmish_preset_id = CASE name
+      WHEN 'Paso del Cuervo' THEN 'paso-del-cuervo'
+      WHEN 'Cripta de los Doce Silentes' THEN 'cripta-anegada'
+      WHEN 'Fundición de Escoria Roja' THEN 'puente-igneo'
+    END
+   WHERE name IN ('Paso del Cuervo', 'Cripta de los Doce Silentes', 'Fundición de Escoria Roja')
+     AND campaign_id IN (SELECT id FROM campaigns WHERE campaign_type = 'escaramuza');
+
+  CREATE TABLE skirmish_figure_images (
+    preset_id TEXT NOT NULL,
+    figure_key TEXT NOT NULL,
+    image_path TEXT NOT NULL,
+    original_name TEXT,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (preset_id, figure_key)
+  );
+  `,
+
+  // v79 — Cada marcador de un escenario de fábrica guarda la clave de su
+  // figura al montarse, para que la imagen no dependa de su nombre: ni un
+  // cambio de nombre en partida ni uno en el catálogo (fijando `figure`) le
+  // quitan la imagen. Los marcadores anteriores quedan en NULL y se
+  // reconocen por el nombre con el que se montaron (services/skirmishImages.js).
+  `
+  ALTER TABLE map_tokens ADD COLUMN figure_key TEXT;
+  `,
 ];
 
 export function runMigrations() {

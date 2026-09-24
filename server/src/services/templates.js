@@ -177,8 +177,9 @@ export function instantiateToken(userId, roomId, x, y, data) {
   const info = db
     .prepare(
       `INSERT INTO map_tokens (room_id, kind, name, monster_index, character_id, x, y, hidden, dc, skill,
-         success_consequence, failure_consequence, consequence_scope, perception_dc, vision_radius, overrides, loot)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         success_consequence, failure_consequence, consequence_scope, perception_dc, vision_radius, overrides, loot,
+         figure_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       roomId,
@@ -197,7 +198,10 @@ export function instantiateToken(userId, roomId, x, y, data) {
       data.perceptionDc ?? null,
       data.visionRadius ?? 6,
       JSON.stringify(data.overrides ?? {}),
-      JSON.stringify(data.loot ?? [])
+      JSON.stringify(data.loot ?? []),
+      // Solo lo traen los escenarios de fábrica (services/skirmishPresets.js):
+      // identifica la figura para pintarla con la imagen del administrador
+      typeof data.figureKey === 'string' ? data.figureKey.slice(0, 120) : null
     );
   return info.lastInsertRowid;
 }

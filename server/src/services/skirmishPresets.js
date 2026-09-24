@@ -511,7 +511,88 @@ function forgePreset() {
   };
 }
 
-const PRESETS = [ravinePreset(), cryptPreset(), forgePreset()];
+// ---- Figuras con imagen ----
+//
+// El administrador de la instalación puede poner imagen a los enemigos,
+// objetos y trampas de cada escenario (services/skirmishImages.js). La imagen
+// es de la FIGURA, no de cada marcador: los cuatro «Bandido arquero» del Paso
+// del Cuervo comparten la suya, y la de «Yerna la Tuerta» es solo de ella.
+//
+// La clave de figura sale por defecto del tipo y del nombre del marcador, y
+// se guarda en cada marcador al montar la partida (`map_tokens.figure_key`),
+// así que renombrarlo durante la partida no le quita la imagen. Si hace falta
+// renombrar una figura AQUÍ, en el catálogo, se fija su clave antigua con
+// `figure` para que conserve la imagen ya subida:
+//
+//   { kind: 'enemigo', name: 'Arquero del paso', figure: 'bandido-arquero', … }
+//
+// Las pruebas del catálogo avisan si una clave conocida desaparece.
+
+export const FIGURE_IMAGE_KINDS = ['enemigo', 'objeto', 'trampa'];
+
+export function skirmishFigureKey(kind, name) {
+  const slug = String(name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${kind}-${slug}`;
+}
+
+/** Clave de figura de un marcador del catálogo, o null si no admite imagen. */
+export function figureKeyOf(token) {
+  const kind = token.kind ?? 'enemigo';
+  if (!FIGURE_IMAGE_KINDS.includes(kind)) return null;
+  return skirmishFigureKey(kind, token.figure ?? token.name);
+}
+
+// Cada marcador lleva su clave en el snapshot: `instantiateToken` la copia a
+// `map_tokens.figure_key` al montar la partida.
+function withFigureKeys(preset) {
+  for (const floor of preset.map.floors) {
+    for (const room of floor.rooms) {
+      for (const token of room.tokens ?? []) {
+        const key = figureKeyOf(token);
+        if (key) token.figureKey = key;
+      }
+    }
+  }
+  return preset;
+}
+
+/**
+ * Figuras distintas de un escenario a las que se les puede poner imagen, en el
+ * orden en que aparecen. `null` si el escenario no existe.
+ */
+export function listSkirmishFigures(presetId) {
+  const preset = getSkirmishPreset(presetId);
+  if (!preset) return null;
+  const figures = new Map();
+  for (const floor of preset.map.floors) {
+    for (const room of floor.rooms) {
+      for (const token of room.tokens ?? []) {
+        if (!token.figureKey) continue;
+        if (!figures.has(token.figureKey)) {
+          figures.set(token.figureKey, {
+            key: token.figureKey,
+            kind: token.kind ?? 'enemigo',
+            name: token.name,
+            monsterIndex: token.monsterIndex ?? null,
+            count: 0,
+            rooms: [],
+          });
+        }
+        const figure = figures.get(token.figureKey);
+        figure.count += 1;
+        if (!figure.rooms.includes(room.name)) figure.rooms.push(room.name);
+      }
+    }
+  }
+  return [...figures.values()];
+}
+
+const PRESETS = [ravinePreset(), cryptPreset(), forgePreset()].map(withFigureKeys);
 
 /** Resumen de cada escenario para el listado del Hub (sin el snapshot). */
 export function listSkirmishPresets() {

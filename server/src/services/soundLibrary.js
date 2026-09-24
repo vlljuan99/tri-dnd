@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../db.js';
-import { ADMIN_USERNAMES, SOUND_UPLOADS_DIR } from '../config.js';
+import { SOUND_UPLOADS_DIR } from '../config.js';
+import { isInstallationAdmin, resolveInstallationAdmin } from './admin.js';
 
 // Sonidos personalizados de la mesa. El catálogo (qué sonidos existen, cómo se
 // llaman y cómo se sintetizan) vive en el cliente, que es quien los reproduce;
@@ -56,32 +57,12 @@ export function extensionForAudio(mimeType) {
   return EXTENSIONS[clean] ?? null;
 }
 
-/**
- * ¿Puede este usuario cambiar los sonidos por defecto de la instalación?
- *
- * Función pura para poder probarla: recibe la lista configurada, el usuario y
- * quién es el fundador. Si hay lista configurada, manda ella y el fundador no
- * tiene ningún privilegio implícito; si no la hay, manda el fundador.
- */
-export function resolveSoundAdmin({ configured = [], username = '', founderId = null, userId = null }) {
-  if (configured.length > 0) {
-    return configured.includes(String(username).trim().toLowerCase());
-  }
-  return founderId != null && Number(userId) === Number(founderId);
-}
-
-function founderId() {
-  return db.prepare('SELECT MIN(id) AS id FROM users').get()?.id ?? null;
-}
+// Los sonidos por defecto son de la instalación entera: los cambia su
+// administrador (services/admin.js). Se conserva el nombre para las pruebas.
+export const resolveSoundAdmin = resolveInstallationAdmin;
 
 export function canEditSounds(user) {
-  if (!user) return false;
-  return resolveSoundAdmin({
-    configured: ADMIN_USERNAMES,
-    username: user.username,
-    userId: user.id,
-    founderId: founderId(),
-  });
+  return isInstallationAdmin(user);
 }
 
 /**
